@@ -241,7 +241,7 @@ async function prepareWorkspaceTabsCommand(
   const cdpPort = Number(args["cdp-port"] || 9222);
   if (!["edge", "portable"].includes(browserMode)
     || (browserMode === "portable" && cdpPort !== 9222)) {
-    const error = new Error("工作区浏览器身份无效。底层 workspace-tabs 未传 --browser 时沿用“使用当前 Edge（高级，需要浏览器连接组件）”兼容路径；日常 Start.bat 默认使用“RoleFlow 专用 Edge（推荐）”，portable 只支持 9222。");
+    const error = new Error("工作区浏览器身份无效。底层 workspace-tabs 未传 --browser 时沿用“使用当前 Edge（高级，需要浏览器连接组件）”兼容路径；日常 Start.bat 默认使用“OfferGo 专用 Edge（推荐）”，portable 只支持 9222。");
     error.code = "WORKSPACE_PORTABLE_BROWSER_REQUIRED";
     throw error;
   }
@@ -278,7 +278,7 @@ async function prepareWorkspaceTabsCommand(
       }
     })
   });
-  console.log(`RoleFlow workspace tabs ready: ${result.status}`);
+  console.log(`OfferGo workspace tabs ready: ${result.status}`);
   return result;
 }
 
@@ -2742,7 +2742,7 @@ function startDashboard(db, args) {
   if (args.browser === "portable" && args["no-browser"] !== true && args["force-mock"] !== true) {
     const profilePath = String(args["browser-profile"] || "").trim();
     if (!profilePath || !path.isAbsolute(profilePath)) {
-      throw new Error("RoleFlow 专用 Edge 需要绝对浏览器配置目录。");
+      throw new Error("OfferGo 专用 Edge 需要绝对浏览器配置目录。");
     }
     const browserRuntime = createPortableEdgeRuntime({
       projectRoot: ROOT,

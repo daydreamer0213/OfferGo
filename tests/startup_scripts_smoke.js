@@ -183,7 +183,7 @@ async function testWorkspaceStartupFromSpacePath() {
     timeout: 30000
   });
   assert.strictEqual(result.status, 0, combinedOutput(result));
-  assert.match(combinedOutput(result), /浏览器：RoleFlow 专用 Edge（推荐）/);
+  assert.match(combinedOutput(result), /浏览器：OfferGo 专用 Edge（推荐）/);
   const records = readJsonLines(recordPath);
   const dashboard = records.find((item) => item.command === "dashboard");
   assert(dashboard, "dashboard command did not reach the fixture project CLI");
@@ -371,7 +371,7 @@ async function testInstalledLauncherPreservesUtf8Output() {
     assert(dashboard, "launcher unicode probe did not start the fixture Dashboard");
     assert.match(
       fs.readFileSync(launcherLog, "utf8"),
-      /浏览器：RoleFlow 专用 Edge（推荐）/,
+      /浏览器：OfferGo 专用 Edge（推荐）/,
       "installed launcher must preserve UTF-8 output from the workspace child process"
     );
     assert.strictEqual(fs.existsSync(installRootLauncherLog), false, "installed launch must not recreate logs under the program directory");

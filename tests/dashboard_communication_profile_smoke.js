@@ -118,7 +118,7 @@ async function main() {
 
   let profilePage = await getText(base, `/communication-profile?profileId=${fixture.profileId}`);
   assert.strictEqual(profilePage.status, 200);
-  for (const visible of ["我目前使用的沟通资料", "当前所在城市", "广州", "我改过并让 RoleFlow 记住的回答", "我目前在广州，可以一周内到岗。", "历史修改"]) {
+  for (const visible of ["我目前使用的沟通资料", "当前所在城市", "广州", "我改过并让 OfferGo 记住的回答", "我目前在广州，可以一周内到岗。", "历史修改"]) {
     assert(profilePage.body.includes(visible), `missing communication profile content: ${visible}`);
   }
   for (const hidden of ["current_city", "finalDigest", "confidence", "scope_json", "evidenceText"]) {

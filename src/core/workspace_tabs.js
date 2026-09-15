@@ -63,7 +63,7 @@ function assertBossOperatorTabs(tabs = [], {
   if (!searchTab || !communicationTab) {
     throw workspaceError(
       "BOSS_TAB_REQUIRED",
-      "浏览器中缺少 RoleFlow 已绑定的 BOSS 搜索页或沟通页。"
+      "浏览器中缺少 OfferGo 已绑定的 BOSS 搜索页或沟通页。"
     );
   }
   if (!Number.isInteger(searchTab.windowId)
@@ -272,7 +272,7 @@ async function prepareWorkspaceTabs({
     const readiness = await inspectReadiness({ guidanceTab, fixedTabs });
     const dashboardTabs = tabs.filter((tab) => isDashboardTab(tab, dashboardUrl));
     if (dashboardTabs.length > 1) {
-      throw workspaceError("WORKSPACE_DASHBOARD_TAB_AMBIGUOUS", "RoleFlow Dashboard 标签页不止一个。");
+      throw workspaceError("WORKSPACE_DASHBOARD_TAB_AMBIGUOUS", "OfferGo Dashboard 标签页不止一个。");
     }
     return workspaceResult({
       guidanceTab,
@@ -294,13 +294,13 @@ async function prepareWorkspaceTabs({
   if (initialVisibleIds.length > 1) {
     return ambiguousWorkspaceResult(workingTabs, dashboardUrl, workspaceError(
       "BROWSER_COMMAND_FAILED",
-      "RoleFlow 专用 Edge（推荐）同时出现多个前台标签页，无法安全继续。"
+      "OfferGo 专用 Edge（推荐）同时出现多个前台标签页，无法安全继续。"
     ));
   }
   if (!current.guidanceTab && initialVisibleIds.length > 1) {
     return ambiguousWorkspaceResult(workingTabs, dashboardUrl, workspaceError(
       "BROWSER_COMMAND_FAILED",
-      "请恢复 RoleFlow 专用 Edge（推荐）窗口后重试；创建标签页前必须能确认唯一前台页。"
+      "请恢复 OfferGo 专用 Edge（推荐）窗口后重试；创建标签页前必须能确认唯一前台页。"
     ));
   }
   const createdIds = [];
@@ -362,7 +362,7 @@ async function prepareWorkspaceTabs({
       refreshed.dashboardTab
     ].filter(Boolean);
     if (refreshedWorkspaceTabs.some((tab) => tab.windowId !== initialWindowId)) {
-      throw workspaceError("WORKSPACE_WINDOW_MISMATCH", "RoleFlow 专用 Edge 工作区在就绪检查后更换了窗口。");
+      throw workspaceError("WORKSPACE_WINDOW_MISMATCH", "OfferGo 专用 Edge 工作区在就绪检查后更换了窗口。");
     }
     if (!sameBrowserTabId(refreshed.guidanceTab?.id, expectedGuidanceTabId)) {
       throw workspaceError("BOSS_SEARCH_TAB_CHANGED", "BOSS 搜索页在就绪检查后发生了变化。");
@@ -373,7 +373,7 @@ async function prepareWorkspaceTabs({
     }
     if (expectedDashboardTabId !== null
       && !sameBrowserTabId(refreshed.dashboardTab?.id, expectedDashboardTabId)) {
-      throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "RoleFlow Dashboard 在就绪检查后发生了变化。");
+      throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "OfferGo Dashboard 在就绪检查后发生了变化。");
     }
     requireVisibleBaseline(afterReadiness, initialWindowId, baseline.visibleIds);
     current = refreshed;
@@ -448,7 +448,7 @@ async function listStableWorkspaceTabs(browser, {
     if (nowFn() - startedAt >= timeoutMs) {
       throw workspaceError(
         "WORKSPACE_TABS_UNSTABLE",
-        "RoleFlow 专用 Edge（推荐）仍在恢复标签页，请稍后重试。",
+        "OfferGo 专用 Edge（推荐）仍在恢复标签页，请稍后重试。",
         { observedTabs: tabs }
       );
     }
@@ -481,7 +481,7 @@ function wait(delayMs) {
 
 function assertDedicatedTopology(tabs, dashboardUrl) {
   if (tabs.some((tab) => !Number.isInteger(tab.windowId))) {
-    throw workspaceError("BROWSER_COMMAND_FAILED", "RoleFlow 专用 Edge（推荐）标签页缺少可靠的窗口身份。");
+    throw workspaceError("BROWSER_COMMAND_FAILED", "OfferGo 专用 Edge（推荐）标签页缺少可靠的窗口身份。");
   }
   const bossTabs = tabs.filter(isBossTab);
   const searchTabs = bossTabs.filter((tab) => bossPath(tab) === "/web/geek/jobs");
@@ -491,16 +491,16 @@ function assertDedicatedTopology(tabs, dashboardUrl) {
   const singleGuidance = bossTabs.length === 1 && communicationTabs.length === 0;
   const dashboardOnly = bossTabs.length === 0 && dashboardTabs.length === 1 && tabs.length === 1;
   if (!exactPair && !singleGuidance && !dashboardOnly) {
-    throw workspaceError("BOSS_TAB_REQUIRED", "RoleFlow 专用 Edge（推荐）只能保留一个 BOSS 引导页或固定的搜索页与沟通页。");
+    throw workspaceError("BOSS_TAB_REQUIRED", "OfferGo 专用 Edge（推荐）只能保留一个 BOSS 引导页或固定的搜索页与沟通页。");
   }
   const guidanceTab = searchTabs[0] || bossTabs[0] || null;
   const anchorTab = guidanceTab || dashboardTabs[0];
   if (tabs.some((tab) => tab.windowId !== anchorTab.windowId)) {
-    throw workspaceError("WORKSPACE_WINDOW_MISMATCH", "RoleFlow 专用 Edge（推荐）必须只保留一个可靠窗口。");
+    throw workspaceError("WORKSPACE_WINDOW_MISMATCH", "OfferGo 专用 Edge（推荐）必须只保留一个可靠窗口。");
   }
   const fixedTabs = exactPair ? assertBossOperatorTabs(bossTabs) : null;
   if (dashboardTabs.length > 1) {
-    throw workspaceError("WORKSPACE_DASHBOARD_TAB_AMBIGUOUS", "RoleFlow Dashboard 标签页不止一个。");
+    throw workspaceError("WORKSPACE_DASHBOARD_TAB_AMBIGUOUS", "OfferGo Dashboard 标签页不止一个。");
   }
   return { guidanceTab, fixedTabs, dashboardTab: dashboardTabs[0] || null };
 }
@@ -543,7 +543,7 @@ function requireAtMostOneVisibleTab(tabs, windowId) {
   if (visibleIds.length > 1) {
     throw workspaceError(
       "BROWSER_COMMAND_FAILED",
-      "请恢复 RoleFlow 专用 Edge（推荐）窗口后重试；创建标签页前必须能确认唯一前台页。"
+      "请恢复 OfferGo 专用 Edge（推荐）窗口后重试；创建标签页前必须能确认唯一前台页。"
     );
   }
   return visibleIds;
@@ -552,7 +552,7 @@ function requireAtMostOneVisibleTab(tabs, windowId) {
 function requireVisibleBaseline(tabs, windowId, expectedIds) {
   const actualIds = visibleIdsInWindow(tabs, windowId);
   if (!sameTabIdLists(actualIds, expectedIds)) {
-    throw workspaceError("BROWSER_COMMAND_FAILED", "后台标签页操作改变了 RoleFlow 专用 Edge（推荐）的前台页。");
+    throw workspaceError("BROWSER_COMMAND_FAILED", "后台标签页操作改变了 OfferGo 专用 Edge（推荐）的前台页。");
   }
 }
 
@@ -627,7 +627,7 @@ function ambiguousWorkspaceResult(tabs, dashboardUrl, error) {
       : null,
     status: "ambiguous",
     errorCode: String(error?.code || "WORKSPACE_AMBIGUOUS"),
-    message: String(error?.message || "RoleFlow 专用 Edge 工作区存在无法安全判断的页面。")
+    message: String(error?.message || "OfferGo 专用 Edge 工作区存在无法安全判断的页面。")
   };
 }
 

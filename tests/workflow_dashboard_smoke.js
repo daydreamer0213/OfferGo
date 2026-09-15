@@ -1368,7 +1368,7 @@ let server;
   const generatedInterruptedPage = await getText(baseUrl, `/workflow?runId=${generatedWorkflow.id}`);
   assert.match(generatedInterruptedPage.body, /<select name="browserMode">/);
   assert.match(generatedInterruptedPage.body, /<option value="edge">使用当前 Edge（高级，需要浏览器连接组件）<\/option>/);
-  assert.match(generatedInterruptedPage.body, /<option value="portable" selected>RoleFlow 专用 Edge（推荐）<\/option>/);
+  assert.match(generatedInterruptedPage.body, /<option value="portable" selected>OfferGo 专用 Edge（推荐）<\/option>/);
   assert.doesNotMatch(generatedInterruptedPage.body, /<input type="hidden" name="browserMode" value="edge">/);
 
   const generatedBeforeInvalidMode = getWorkflowRun(db, generatedWorkflow.id);
@@ -2011,7 +2011,7 @@ async function testPortableDashboardBinding({ database, acquisitionContextResolv
   const portableBaseUrl = await listen(portableServer);
   try {
     const page = await getText(portableBaseUrl, `/plan?planId=${saved.planId}`);
-    assert.match(page.body, /当前浏览器：RoleFlow 专用 Edge（推荐）/);
+    assert.match(page.body, /当前浏览器：OfferGo 专用 Edge（推荐）/);
     assert.match(page.body, /name="browserMode" value="portable"/);
     assert.match(page.body, /name="cdpPort" value="9222"/);
     const readiness = await getJson(portableBaseUrl, "/api/browser-readiness");

@@ -12,30 +12,30 @@
 
 [Setup]
 AppId={{D44A88E4-76A8-46C1-A83D-C25BF218412C}
-AppName=RoleFlow
+AppName=OfferGo
 AppVersion={#AppVersion}
-AppPublisher=RoleFlow contributors
-AppPublisherURL=https://github.com/daydreamer0213/roleflow
-AppSupportURL=https://github.com/daydreamer0213/roleflow/issues
-AppUpdatesURL=https://github.com/daydreamer0213/roleflow/releases
-DefaultDirName={localappdata}\Programs\RoleFlow
+AppPublisher=OfferGo contributors
+AppPublisherURL=https://github.com/daydreamer0213/OfferGo
+AppSupportURL=https://github.com/daydreamer0213/OfferGo/issues
+AppUpdatesURL=https://github.com/daydreamer0213/OfferGo/releases
+DefaultDirName={localappdata}\Programs\OfferGo
 DisableDirPage=no
 UsePreviousAppDir=yes
-DefaultGroupName=RoleFlow
+DefaultGroupName=OfferGo
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile={#StageDir}\LICENSE
-SetupIconFile={#StageDir}\assets\RoleFlow.ico
+SetupIconFile={#StageDir}\assets\OfferGo.ico
 OutputDir={#OutputDir}
-OutputBaseFilename=RoleFlow-Setup-{#AppVersion}
+OutputBaseFilename=OfferGo-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 SetupLogging=yes
-UninstallDisplayName=RoleFlow
-UninstallDisplayIcon={app}\assets\RoleFlow.ico
+UninstallDisplayName=OfferGo
+UninstallDisplayIcon={app}\assets\OfferGo.ico
 CloseApplications=no
 RestartApplications=no
 
@@ -50,14 +50,14 @@ Type: files; Name: "{app}\src\core\llm.js"
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\RoleFlow"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\RoleFlow.ico"
-Name: "{group}\RoleFlow 使用说明"; Filename: "{app}\README.md"; WorkingDir: "{app}"
-Name: "{group}\卸载 RoleFlow"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\RoleFlow"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\RoleFlow.ico"; Tasks: desktopicon
+Name: "{group}\OfferGo"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"
+Name: "{group}\OfferGo 使用说明"; Filename: "{app}\README.md"; WorkingDir: "{app}"
+Name: "{group}\卸载 OfferGo"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\OfferGo"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; Description: "启动 RoleFlow"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runhidden
-Filename: "{app}\README.md"; Description: "查看 RoleFlow 使用说明"; Flags: postinstall shellexec skipifsilent unchecked
+Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; Description: "启动 OfferGo"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runhidden
+Filename: "{app}\README.md"; Description: "查看 OfferGo 使用说明"; Flags: postinstall shellexec skipifsilent unchecked
 
 [Code]
 function RunPowerShellScript(const ScriptName, Arguments: String; var ResultCode: Integer): Boolean;
@@ -89,7 +89,7 @@ begin
       '-InstallRoot "' + ExpandConstant('{app}') + '" -SkipDeletePrompt',
       ResultCode
     )) or (ResultCode <> 0) then
-      Result := 'RoleFlow 正在运行，且无法安全停止。请关闭 RoleFlow 后重试安装。';
+      Result := 'OfferGo 正在运行，且无法安全停止。请关闭 OfferGo 后重试安装。';
   end;
 end;
 
@@ -99,23 +99,23 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    WizardForm.StatusLabel.Caption := '正在准备 RoleFlow 用户数据…';
+    WizardForm.StatusLabel.Caption := '正在准备 OfferGo 用户数据…';
     if (not RunPowerShellScript(
       'prepare-user-data.ps1',
       '-InstallRoot "' + ExpandConstant('{app}') + '"',
       ResultCode
     )) or (ResultCode <> 0) then
       RaiseException(
-        'RoleFlow 无法安全准备用户数据。安装文件没有被当作用户数据使用，请查看安装日志。'
+        'OfferGo 无法安全准备用户数据。安装文件没有被当作用户数据使用，请查看安装日志。'
       );
-    WizardForm.StatusLabel.Caption := '正在检查 RoleFlow 本地运行环境…';
+    WizardForm.StatusLabel.Caption := '正在检查 OfferGo 本地运行环境…';
     if (not RunPowerShellScript(
       'installed-self-check.ps1',
       '-ProjectRoot "' + ExpandConstant('{app}') + '"',
       ResultCode
     )) or (ResultCode <> 0) then
       RaiseException(
-        'RoleFlow 环境自检未通过。请确认已安装 Microsoft Edge；详细信息位于当前用户的 RoleFlow 数据目录：.runtime\logs\install-self-check.log。'
+        'OfferGo 环境自检未通过。请确认已安装 Microsoft Edge；详细信息位于当前用户的 RoleFlow 数据目录：.runtime\logs\install-self-check.log。'
       );
   end;
 end;
@@ -137,7 +137,7 @@ begin
   ) and (ResultCode = 0);
   if not Result then
     MsgBox(
-      'RoleFlow 无法确认运行进程已经安全停止，因此没有开始卸载。',
+      'OfferGo 无法确认运行进程已经安全停止，因此没有开始卸载。',
       mbError,
       MB_OK
     );

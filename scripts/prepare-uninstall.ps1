@@ -56,7 +56,7 @@ function Stop-InstalledDashboard {
     Wait-Process -Id ([int]$Health.pid) -Timeout 10 -ErrorAction Stop
   } catch {
     if (Get-Process -Id ([int]$Health.pid) -ErrorAction SilentlyContinue) {
-      throw "RoleFlow dashboard did not stop in time."
+      throw "OfferGo dashboard did not stop in time."
     }
   }
 }
@@ -127,8 +127,8 @@ if ($PromptDeleteUserData -and -not $SkipDeletePrompt) {
   $PromptUserDataPath = Join-Path (Get-RoleFlowUserDataParent) "Data"
   Add-Type -AssemblyName System.Windows.Forms
   $Choice = [System.Windows.Forms.MessageBox]::Show(
-    "是否同时删除本机 RoleFlow 数据？`r`n`r`n将删除：岗位数据库、简历、模型设置、日志、报告和本地候选人资料。`r`n默认选择否会保留这些内容在：`r`n$PromptUserDataPath",
-    "卸载 RoleFlow",
+    "是否同时删除本机 OfferGo 数据？`r`n`r`n将删除：岗位数据库、简历、模型设置、日志、报告和本地候选人资料。`r`n默认选择否会保留这些内容在：`r`n$PromptUserDataPath",
+    "卸载 OfferGo",
     [System.Windows.Forms.MessageBoxButtons]::YesNo,
     [System.Windows.Forms.MessageBoxIcon]::Warning,
     [System.Windows.Forms.MessageBoxDefaultButton]::Button2
@@ -143,8 +143,8 @@ if ($PromptDeleteBrowserProfile -and -not $SkipDeletePrompt) {
   $PromptBrowserProfilePath = Resolve-RoleFlowBrowserProfilePath -ProjectRoot $InstallRoot
   Add-Type -AssemblyName System.Windows.Forms
   $Choice = [System.Windows.Forms.MessageBox]::Show(
-    "是否同时删除 RoleFlow 专用浏览器登录资料？`r`n`r`n路径：$PromptBrowserProfilePath`r`n`r`n删除后需要重新登录 BOSS。",
-    "卸载 RoleFlow",
+    "是否同时删除 OfferGo 专用浏览器登录资料？`r`n`r`n路径：$PromptBrowserProfilePath`r`n`r`n删除后需要重新登录 BOSS。",
+    "卸载 OfferGo",
     [System.Windows.Forms.MessageBoxButtons]::YesNo,
     [System.Windows.Forms.MessageBoxIcon]::Warning,
     [System.Windows.Forms.MessageBoxDefaultButton]::Button2
@@ -189,9 +189,9 @@ if ($DeleteApprovedBrowserProfile) {
   if (Test-Path -LiteralPath $BrowserProfileTarget) {
     Remove-Item -LiteralPath $BrowserProfileTarget -Recurse -Force
   }
-  Write-Output "RoleFlow browser login data deleted."
+  Write-Output "OfferGo browser login data deleted."
 } elseif (-not $SkipDeletePrompt) {
-  Write-Output "RoleFlow browser login data preserved."
+  Write-Output "OfferGo browser login data preserved."
 }
 
 if ($DeleteApprovedUserData) {
@@ -201,8 +201,8 @@ if ($DeleteApprovedUserData) {
       Remove-Item -LiteralPath $Target -Recurse -Force
     }
   }
-  Write-Output "RoleFlow local user data deleted."
+  Write-Output "OfferGo local user data deleted."
 } elseif (-not $SkipDeletePrompt) {
   $PreservedDataPath = Join-Path (Get-RoleFlowUserDataParent) "Data"
-  Write-Output "RoleFlow local user data preserved at: $PreservedDataPath"
+  Write-Output "OfferGo local user data preserved at: $PreservedDataPath"
 }

@@ -29,17 +29,17 @@ function communicationStatusLabel(value) {
 
 function communicationErrorLabel(code) {
   return {
-    COMMUNICATION_ACTION_NOT_TRIGGERED: "未能确认本次沟通结果，不代表发送失败；RoleFlow 已停止且不会自动重试。",
-    COMMUNICATION_USER_ACTION_REQUIRED: "平台出现需要人工处理的提示，RoleFlow 已停止。",
-    COMMUNICATION_RESULT_AMBIGUOUS: "平台请求与页面状态不一致，结果无法确认，RoleFlow 已停止。",
+    COMMUNICATION_ACTION_NOT_TRIGGERED: "未能确认本次沟通结果，不代表发送失败；OfferGo 已停止且不会自动重试。",
+    COMMUNICATION_USER_ACTION_REQUIRED: "平台出现需要人工处理的提示，OfferGo 已停止。",
+    COMMUNICATION_RESULT_AMBIGUOUS: "平台请求与页面状态不一致，结果无法确认，OfferGo 已停止。",
     COMMUNICATION_SINGLE_ITEM_CHECKPOINT: "本次单岗位验收已完成并自动暂停。",
-    BOSS_COMMUNICATION_TAB_NOT_ACTIVE: "无法确认目标 BOSS 标签已激活，RoleFlow 未继续点击。",
-    ZHAOPIN_RISK_CONTROL: "智联搜索页要求安全验证，RoleFlow 已停止且不会自动重试。",
-    ZHAOPIN_MESSAGE_RISK_CONTROL: "智联沟通页要求安全验证，RoleFlow 已停止且不会自动重试。",
-    ZHAOPIN_LOGIN_REQUIRED: "智联登录已经失效，RoleFlow 已停止。",
-    ZHAOPIN_MESSAGE_LOGIN_REQUIRED: "智联沟通登录已经失效，RoleFlow 已停止。",
-    ZHAOPIN_SEARCH_PAGE_LOST: "智联固定搜索页已离开允许范围，RoleFlow 未继续操作。",
-    ZHAOPIN_ACTIVE_TAB_CHANGED: "智联窗口的活动页面发生变化，RoleFlow 未继续操作。"
+    BOSS_COMMUNICATION_TAB_NOT_ACTIVE: "无法确认目标 BOSS 标签已激活，OfferGo 未继续点击。",
+    ZHAOPIN_RISK_CONTROL: "智联搜索页要求安全验证，OfferGo 已停止且不会自动重试。",
+    ZHAOPIN_MESSAGE_RISK_CONTROL: "智联沟通页要求安全验证，OfferGo 已停止且不会自动重试。",
+    ZHAOPIN_LOGIN_REQUIRED: "智联登录已经失效，OfferGo 已停止。",
+    ZHAOPIN_MESSAGE_LOGIN_REQUIRED: "智联沟通登录已经失效，OfferGo 已停止。",
+    ZHAOPIN_SEARCH_PAGE_LOST: "智联固定搜索页已离开允许范围，OfferGo 未继续操作。",
+    ZHAOPIN_ACTIVE_TAB_CHANGED: "智联窗口的活动页面发生变化，OfferGo 未继续操作。"
   }[String(code || "")] || "沟通执行已安全停止，请查看处理信息。";
 }
 

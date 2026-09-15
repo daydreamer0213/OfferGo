@@ -846,7 +846,7 @@ async function assertCommunicationClient() {
   assert.match(ambiguousReview.body, /name="evidenceNote"[^>]*required/);
   assert.doesNotMatch(ambiguousReview.body, /name="action" value="resume"/);
   assert.match(ambiguousReview.body, /等待人工确认沟通结果/);
-  assert.match(ambiguousReview.body, /未能确认本次沟通结果，不代表发送失败；RoleFlow 已停止且不会自动重试。/);
+  assert.match(ambiguousReview.body, /未能确认本次沟通结果，不代表发送失败；OfferGo 已停止且不会自动重试。/);
   assert.match(ambiguousReview.body, /COMMUNICATION_ACTION_NOT_TRIGGERED/);
   assert.doesNotMatch(ambiguousReview.body, /重新检查浏览器页面/);
   assert.match(ambiguousReview.body, new RegExp(`href="/communication\\?batchId=${batchId}#communication-item-${ambiguousItem.id}"`));
@@ -989,7 +989,7 @@ async function portableDashboardAuthoritySmoke() {
     });
     const portableBaseUrl = await listen(portableServer);
     const builder = await getText(portableBaseUrl, `/communication/new?planId=${fixture.planId}`);
-    assert.match(builder.body, /浏览器：RoleFlow 专用 Edge（推荐）（Dashboard 已固定）/);
+    assert.match(builder.body, /浏览器：OfferGo 专用 Edge（推荐）（Dashboard 已固定）/);
     assert.match(builder.body, /<input type="hidden" name="browserMode" value="portable">/);
     assert.doesNotMatch(builder.body, /<select name="browserMode">/);
 

@@ -3,7 +3,7 @@
 const ERROR_GUIDANCE = Object.freeze({
   INTERNAL_ERROR: {
     title: "操作没有完成",
-    impact: "当前进度已保留，RoleFlow 不会自动执行下一步。",
+    impact: "当前进度已保留，OfferGo 不会自动执行下一步。",
     nextAction: "返回当前页面查看状态；若再次发生，请复制技术信息到运行诊断。"
   },
   SCAN_CHECKPOINT_FAILED: {
@@ -18,7 +18,7 @@ const ERROR_GUIDANCE = Object.freeze({
   },
   BROWSER_TIMEOUT: {
     title: "BOSS 页面响应较慢",
-    impact: "本次检查已经停止，RoleFlow 不会在后台自动重试。",
+    impact: "本次检查已经停止，OfferGo 不会在后台自动重试。",
     nextAction: "等 BOSS 页面加载完成后，回到这里重新检查。"
   },
   BOSS_WORKSPACE_NOT_READY: {
@@ -33,42 +33,42 @@ const ERROR_GUIDANCE = Object.freeze({
   },
   BOSS_LOGIN_REQUIRED: {
     title: "BOSS 登录已经失效",
-    impact: "RoleFlow 已停止访问页面，当前进度仍然保留。",
+    impact: "OfferGo 已停止访问页面，当前进度仍然保留。",
     nextAction: "在固定 BOSS 页面重新登录，然后回到这里继续。"
   },
   BOSS_RISK_CONTROL: {
     title: "BOSS 要求安全验证",
-    impact: "RoleFlow 已立即停止页面访问，不会自动重试。",
+    impact: "OfferGo 已立即停止页面访问，不会自动重试。",
     nextAction: "请先人工完成安全验证，再重新检查工作区。"
   },
   ZHAOPIN_LOGIN_REQUIRED: {
     title: "智联登录已经失效",
-    impact: "RoleFlow 已停止访问页面，当前进度仍然保留。",
+    impact: "OfferGo 已停止访问页面，当前进度仍然保留。",
     nextAction: "在固定智联搜索页重新登录，然后回到这里继续。"
   },
   ZHAOPIN_MESSAGE_LOGIN_REQUIRED: {
     title: "智联沟通登录已经失效",
-    impact: "RoleFlow 已停止沟通检查，当前进度仍然保留。",
+    impact: "OfferGo 已停止沟通检查，当前进度仍然保留。",
     nextAction: "在智联重新登录，恢复固定搜索页后再继续。"
   },
   ZHAOPIN_RISK_CONTROL: {
     title: "智联搜索页要求安全验证",
-    impact: "RoleFlow 已立即停止页面访问，不会自动重试。",
+    impact: "OfferGo 已立即停止页面访问，不会自动重试。",
     nextAction: "请先人工完成安全验证，再重新检查智联搜索页。"
   },
   ZHAOPIN_MESSAGE_RISK_CONTROL: {
     title: "智联沟通页要求安全验证",
-    impact: "RoleFlow 已立即停止本次沟通，不会自动重试。",
+    impact: "OfferGo 已立即停止本次沟通，不会自动重试。",
     nextAction: "请先人工完成安全验证，再恢复固定搜索页继续。"
   },
   ZHAOPIN_SEARCH_PAGE_LOST: {
     title: "智联搜索页已离开固定范围",
-    impact: "RoleFlow 已停止本次沟通，确认清单和结果仍然保留。",
+    impact: "OfferGo 已停止本次沟通，确认清单和结果仍然保留。",
     nextAction: "恢复固定智联搜索页后，重新检查浏览器页面。"
   },
   ZHAOPIN_ACTIVE_TAB_CHANGED: {
     title: "智联窗口的活动页面发生变化",
-    impact: "RoleFlow 已停止本次沟通，没有继续操作后续岗位。",
+    impact: "OfferGo 已停止本次沟通，没有继续操作后续岗位。",
     nextAction: "恢复原来的活动页面，再重新检查浏览器页面。"
   },
   BOSS_COMMUNICATION_SCOPE_MISMATCH: {
@@ -101,7 +101,7 @@ const ERROR_GUIDANCE = Object.freeze({
 const ZHAOPIN_ERROR_GUIDANCE = Object.freeze({
   BROWSER_TIMEOUT: {
     title: "智联页面响应较慢",
-    impact: "本次检查已经停止，RoleFlow 不会在后台自动重试。",
+    impact: "本次检查已经停止，OfferGo 不会在后台自动重试。",
     nextAction: "等智联页面加载完成后，回到这里重新检查。"
   },
   COMMUNICATION_ACTION_NOT_TRIGGERED: {
@@ -128,7 +128,7 @@ function userFacingError(code, technicalMessage = "", { site = "boss" } = {}) {
     title: "操作没有完成",
     impact: /[\u3400-\u9fff]/.test(readable)
       ? readable
-      : "当前进度已保留，RoleFlow 不会自动执行下一步。",
+      : "当前进度已保留，OfferGo 不会自动执行下一步。",
     nextAction: "返回本轮查看状态；若再次发生，请复制技术信息到运行诊断。",
     technicalMessage: readable
   };

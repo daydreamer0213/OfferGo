@@ -1,18 +1,20 @@
-# RoleFlow
+# OfferGo
 
-[![Release: v1.3.2](https://img.shields.io/badge/release-v1.3.2-2563eb)](https://github.com/daydreamer0213/roleflow/releases/tag/v1.3.2)
-[![CI](https://github.com/daydreamer0213/roleflow/actions/workflows/ci.yml/badge.svg)](https://github.com/daydreamer0213/roleflow/actions/workflows/ci.yml)
+[![Release: v1.3.2](https://img.shields.io/badge/release-v1.3.2-2563eb)](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2)
+[![CI](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml/badge.svg)](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-0f766e)](LICENSE)
 
-RoleFlow 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。它负责解析简历、生成候选人画像和搜索方案、只读采集 BOSS 岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单。
+OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。它负责解析简历、生成候选人画像和搜索方案、只读采集 BOSS 岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单。
 
-RoleFlow 的筛选规则由搜索关键词、城市、薪资和经验范围驱动，同一套采集、分析、去重和排序流程可以用于不同求职方向。
+OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动，同一套采集、分析、去重和排序流程可以用于不同求职方向。
 
 [查看作品集中的流程与成果展示](https://daydreamer0213.github.io/ai-application-portfolio/#roleflow)
 
 ## 发布状态
 
-`v1.3.2` 是本次发布版本；普通用户以 [v1.3.2 下载页](https://github.com/daydreamer0213/roleflow/releases/tag/v1.3.2) 的公开安装器为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
+目前公开的 `v1.3.2` 安装器仍使用旧名称 RoleFlow 和猴子图标。本仓库已更名为 OfferGo，新的小狗图标会随下一次安装包发布。已有用户资料仍保存在 `%LOCALAPPDATA%\RoleFlow`，升级会沿用这个目录。
+
+普通用户目前以 [v1.3.2 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2) 的公开安装器为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
 
 v1.3.2 默认使用“RoleFlow 专用 Edge（推荐）”。本版修复后台焦点模拟的连接生命周期与异常清理，补齐点击和请求状态的脱敏诊断，沟通未确认时不再断言平台没有响应。此前首次页面准备、安装目录选择、结束本轮、兼职/空薪资、消息学习、跟进、岗位归档/导出与简历优化能力保留。
 
@@ -28,13 +30,13 @@ v1.3.2 默认使用“RoleFlow 专用 Edge（推荐）”。本版修复后台�
 - 沟通前必须由用户确认清单；登录失效、页面漂移或结果不明确时停止操作。
 - v1.3.2 发布线注册 144 项离线检查，含两个本地标签页的实际 Edge 焦点生命周期回归；标签发布会在精确版本提交上重新执行全部检查。测试不访问真实 BOSS，也不会创建假的 `msedge.exe`。
 
-RoleFlow 每天最多由用户手动启动三轮任务，前两轮是主要工作轮次，第三轮只在候选库存明显不足时追加。每轮都要经过清单确认才会串行点击沟通；不会后台定时运行，也不会绕过用户确认直接执行。
+OfferGo 每天最多由用户手动启动三轮任务，前两轮是主要工作轮次，第三轮只在候选库存明显不足时追加。每轮都要经过清单确认才会串行点击沟通；不会后台定时运行，也不会绕过用户确认直接执行。
 
 ## 快速开始
 
 Windows 普通用户：
 
-> **请前往 [v1.3.2 下载页](https://github.com/daydreamer0213/roleflow/releases/tag/v1.3.2)，下载 `RoleFlow-Setup-1.3.2.exe`。**
+> **请前往 [v1.3.2 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2)，下载 `RoleFlow-Setup-1.3.2.exe`。**
 >
 > 同页的 `RoleFlow-Setup-1.3.2.exe.sha256` 用于核对文件完整性；GitHub 自动生成的 Source code 压缩包不是安装程序。
 
@@ -53,16 +55,16 @@ Windows 普通用户：
    Start.bat -BrowserMode edge
    ```
 
-   “使用当前 Edge（高级，需要浏览器连接组件）”要求现有 Edge Control 扩展与桥接健康；“RoleFlow 专用 Edge（推荐）”失败时绝不会自动回退到该模式。
+   “使用当前 Edge（高级，需要浏览器连接组件）”要求现有 Edge Control 扩展与桥接健康；公开 v1.3.2 的“RoleFlow 专用 Edge（推荐）”失败时绝不会自动回退到该模式。
 8. 登录成功不会自动扫描；扫描完成后仍需用户确认清单并明确点击“开始沟通”。回复消息则由用户修改或确认草稿后点击“确认发送”；程序不会在未经当前目标授权的情况下沟通、发送或投递，也不会放宽首次校准和批次确认要求。
 
 模型不可用时，历史岗位和投递记录仍可查看；简历解析和语义匹配会明确显示为待处理，不会伪装成模型结论。
 
 ### 浏览器连接
 
-当前版本默认使用“RoleFlow 专用 Edge（推荐）”，不依赖 Edge Control。Edge Control 扩展和桥接只服务于“使用当前 Edge（高级，需要浏览器连接组件）”，不进入普通安装包，也不会自动下载；高级模式缺少组件时会停止，不会切换浏览器 authority（浏览器控制权）。
+当前开发代码默认使用“OfferGo 专用 Edge（推荐）”，不依赖 Edge Control。Edge Control 扩展和桥接只服务于“使用当前 Edge（高级，需要浏览器连接组件）”，不进入普通安装包，也不会自动下载；高级模式缺少组件时会停止，不会切换浏览器 authority（浏览器控制权）。
 
-卸载时 RoleFlow 会先核对 8787 端口、`/health` 返回的安装目录和监听进程，只停止属于当前安装目录的工作台。普通卸载和静默卸载都保留 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`；交互卸载只有在独立确认“删除专用浏览器登录资料”后才删除它。安装版的岗位数据库、简历、模型设置、日志和报告保存在 `%LOCALAPPDATA%\RoleFlow\Data`，独立于程序目录；同一 Windows 用户覆盖升级继续复用。
+卸载时 OfferGo 会先核对 8787 端口、`/health` 返回的安装目录和监听进程，只停止属于当前安装目录的工作台。普通卸载和静默卸载都保留 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`；交互卸载只有在独立确认“删除专用浏览器登录资料”后才删除它。安装版的岗位数据库、简历、模型设置、日志和报告保存在 `%LOCALAPPDATA%\RoleFlow\Data`，独立于程序目录；同一 Windows 用户覆盖升级继续复用。
 
 仓库源码和便携 ZIP 仍保留 `Install.bat` / `Start.bat`，用于开发、便携使用和故障恢复。`Install.bat` 不是标准 Windows 安装器，也不再把完整开发回归测试作为用户安装步骤。
 
@@ -150,11 +152,11 @@ Windows 普通用户：
 
 ## 便携交付
 
-双击 `BuildRelease.bat` 生成 `dist\RoleFlow-portable.zip`。发布包可以包含便携 Node，另一台 Windows 电脑解压后运行 `Install.bat` / `Start.bat`；当前版本默认使用“RoleFlow 专用 Edge（推荐）”，不依赖 Codex 或 Edge Control。Edge Control 不内置在发布 zip 中，只用于显式高级模式。
+双击 `BuildRelease.bat` 生成 `dist\OfferGo-portable.zip`。发布包可以包含便携 Node，另一台 Windows 电脑解压后运行 `Install.bat` / `Start.bat`；当前版本默认使用“OfferGo 专用 Edge（推荐）”，不依赖 Codex 或 Edge Control。Edge Control 不内置在发布 zip 中，只用于显式高级模式。
 
-维护者双击 `BuildInstaller.bat` 可生成标准安装器和同名 `.sha256` 校验文件。构建会先运行一次完整离线回归，再在 `D:\DevData\RoleFlow-installer` 创建不含数据库、简历、密钥、日志、报告、浏览器 profile、测试源码或 Edge Control 的干净暂存目录，然后调用固定的 Inno Setup 6 编译器。构建机需要把编译器放在 `D:\DevData\InnoSetup`，或设置 `ROLEFLOW_ISCC`。
+维护者双击 `BuildInstaller.bat` 可生成标准安装器和同名 `.sha256` 校验文件。构建会先运行一次完整离线回归，再在 `D:\DevData\OfferGo-installer` 创建不含数据库、简历、密钥、日志、报告、浏览器 profile、测试源码或 Edge Control 的干净暂存目录，然后调用固定的 Inno Setup 6 编译器。构建机需要把编译器放在 `D:\DevData\InnoSetup`，或设置 `ROLEFLOW_ISCC`。
 
-“RoleFlow 专用 Edge（推荐）”的默认登录资料位于 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，不属于安装目录。它会跨覆盖升级和安装目录变化保留；更换电脑时不要直接复制浏览器登录资料，应在新电脑重新登录 BOSS。
+“OfferGo 专用 Edge（推荐）”的默认登录资料位于 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，不属于安装目录。它会跨覆盖升级和安装目录变化保留；更换电脑时不要直接复制浏览器登录资料，应在新电脑重新登录 BOSS。
 
 从旧版安装目录内的 `.runtime\edge-profile` 迁移时，先关闭使用源目录或目标目录的 Edge，再明确执行只复制迁移：
 
@@ -170,7 +172,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate-browser-pr
 Start.bat -BrowserMode portable
 ```
 
-命令中的内部模式名仍为 `portable`，但普通产品名称统一为“RoleFlow 专用 Edge（推荐）”。端口 `9222` 和 CDP 属于开发诊断细节，不需要普通用户配置。
+命令中的内部模式名仍为 `portable`，但普通产品名称统一为“OfferGo 专用 Edge（推荐）”。端口 `9222` 和 CDP 属于开发诊断细节，不需要普通用户配置。
 
 “使用当前 Edge（高级，需要浏览器连接组件）”的显式扫描命令：
 
@@ -178,7 +180,7 @@ Start.bat -BrowserMode portable
 powershell -ExecutionPolicy Bypass -File .\scripts\scan-boss.ps1 -PlanId 1 -BridgeSource plugin
 ```
 
-“RoleFlow 专用 Edge（推荐）”的源码扫描命令仍沿用内部脚本名：
+“OfferGo 专用 Edge（推荐）”的源码扫描命令仍沿用内部脚本名：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\scan-portable.ps1 -PlanId 1
@@ -240,7 +242,7 @@ data/                   本地 SQLite（真实文件不进 Git）
 消息发现是独立的一轮手动操作，不是持续监控，也不会自动回复。
 
 - 打开页面：队列右上角“消息发现”，或 `/messages?profileId=候选人ID`。
-- 前置条件：RoleFlow 专用 Edge（推荐）正在运行，并且固定基线中存在唯一一个已登录的 `BOSS-COMMUNICATION` 消息页。
+- 前置条件：OfferGo 专用 Edge（推荐）正在运行，并且固定基线中存在唯一一个已登录的 `BOSS-COMMUNICATION` 消息页。
 - 点击“开始只读发现”后，系统只读取未读会话和预览变化；不会填写输入框、不会点击发送。
 - HR 连续发送的纯文字会作为一组处理（最多 5 条）；含语音、图片、普通附件、未知卡片或超长文本时会停止并提示人工粘贴。
 - 已验证的附件简历请求卡片会显示为 BOSS 人工待办，不会自动点击“同意”或“拒绝”。同一轮既有文字问题又有简历请求时，页面会同时显示人工待办和本地回复草稿。
@@ -251,10 +253,10 @@ data/                   本地 SQLite（真实文件不进 Git）
 
 ## 开源许可
 
-RoleFlow 的自有代码与文档采用 [GNU Affero General Public License v3.0 only](LICENSE)（`AGPL-3.0-only`）。
+OfferGo 的自有代码与文档采用 [GNU Affero General Public License v3.0 only](LICENSE)（`AGPL-3.0-only`）。
 
 AGPL 不是“禁止商用”许可证。你可以学习、修改和商业使用，但分发修改版，或通过网络向用户提供修改后的程序服务时，需要按许可证向对应用户提供完整源代码，并保留相同许可证。第三方组件继续适用其各自许可证，详见 [NOTICE](NOTICE)。
 
-AGPL 不授予 RoleFlow 名称、标识或其他商标权。真实简历、账号凭据、岗位数据库、运行日志和模型密钥不属于本仓库发布内容。
+AGPL 不授予 OfferGo 名称、标识或其他商标权。真实简历、账号凭据、岗位数据库、运行日志和模型密钥不属于本仓库发布内容。
 
 提交改动前请阅读 [贡献指南](CONTRIBUTING.md)。安全问题请按 [安全策略](SECURITY.md) 私下报告。

@@ -58,9 +58,9 @@ try {
   const portableEdge = fs.readFileSync(path.join(root, "scripts", "start-portable-edge.ps1"), "utf8");
   assert.match(portableEdge, /LOCALAPPDATA[^\r\n]*Microsoft\\Edge\\Application\\msedge\.exe/i);
 
-  const installer = fs.readFileSync(path.join(root, "installer", "RoleFlow.iss"), "utf8");
+  const installer = fs.readFileSync(path.join(root, "installer", "OfferGo.iss"), "utf8");
   assert.match(installer, /Flags:\s*checkedonce/i);
-  assert.match(installer, /Name:\s*"\{autodesktop\}\\RoleFlow"/i);
+  assert.match(installer, /Name:\s*"\{autodesktop\}\\OfferGo"/i);
   assert.match(installer, /WorkingDir:\s*"\{app\}"/i);
   assert.match(installer, /Flags:\s*nowait\s+postinstall/i);
 

@@ -30,7 +30,7 @@ function normalizeWorkspacePlatforms(value, { allowEmpty = true } = {}) {
   const normalized = [...new Set(input.map((item) => String(item || "").trim().toLowerCase()))]
     .filter(Boolean);
   if (normalized.some((site) => !SUPPORTED_WORKSPACE_PLATFORMS.includes(site))) {
-    throw storageError("WORKSPACE_PLATFORM_INVALID", "请选择 RoleFlow 当前支持的招聘平台。");
+    throw storageError("WORKSPACE_PLATFORM_INVALID", "请选择 OfferGo 当前支持的招聘平台。");
   }
   const ordered = SUPPORTED_WORKSPACE_PLATFORMS.filter((site) => normalized.includes(site));
   if (!allowEmpty && !ordered.length) {

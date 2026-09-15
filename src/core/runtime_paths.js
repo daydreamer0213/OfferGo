@@ -17,7 +17,7 @@ function resolveRuntimePaths({ appRoot, dataRoot } = {}) {
   if (explicitDataRoot && pathsOverlap(resolvedAppRoot, resolvedDataRoot)) {
     throw runtimePathError(
       "ROLEFLOW_APP_DATA_ROOT_OVERLAP",
-      "RoleFlow 程序目录和用户数据目录必须彼此独立。"
+      "OfferGo 程序目录和用户数据目录必须彼此独立。"
     );
   }
 
@@ -52,15 +52,15 @@ function explicitDataRootForChild({ appRoot, dataRoot } = {}) {
 
 function resolveLocalAbsolutePath(value, { missingCode, absoluteCode }) {
   const raw = typeof value === "string" ? value.trim() : "";
-  if (!raw) throw runtimePathError(missingCode, "RoleFlow 运行目录未配置。");
+  if (!raw) throw runtimePathError(missingCode, "OfferGo 运行目录未配置。");
   if (isUncPath(raw)) {
     throw runtimePathError(
       "ROLEFLOW_RUNTIME_UNC_PATH_REJECTED",
-      "RoleFlow 运行目录必须位于本机磁盘，不能使用网络路径。"
+      "OfferGo 运行目录必须位于本机磁盘，不能使用网络路径。"
     );
   }
   if (!path.isAbsolute(raw)) {
-    throw runtimePathError(absoluteCode, "RoleFlow 运行目录必须使用绝对路径。");
+    throw runtimePathError(absoluteCode, "OfferGo 运行目录必须使用绝对路径。");
   }
   return path.resolve(raw);
 }
@@ -95,14 +95,14 @@ function assertNoReparsePoint(targetPath) {
     } catch (cause) {
       throw runtimePathError(
         "ROLEFLOW_RUNTIME_PATH_INSPECTION_FAILED",
-        "RoleFlow 无法确认运行目录是否安全。",
+        "OfferGo 无法确认运行目录是否安全。",
         cause
       );
     }
     if (stat.isSymbolicLink()) {
       throw runtimePathError(
         "ROLEFLOW_RUNTIME_REPARSE_POINT_BLOCKED",
-        "RoleFlow 运行目录不能经过目录链接或重解析点。"
+        "OfferGo 运行目录不能经过目录链接或重解析点。"
       );
     }
   }

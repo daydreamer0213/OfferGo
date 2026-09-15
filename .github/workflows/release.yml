@@ -46,12 +46,12 @@ jobs:
             -Force
       - name: Test and build release package
         shell: pwsh
-        run: ./scripts/package-release.ps1 -IncludePortableNode -OutputName "RoleFlow-${{ github.ref_name }}-portable.zip"
+        run: ./scripts/package-release.ps1 -IncludePortableNode -OutputName "OfferGo-${{ github.ref_name }}-portable.zip"
       - name: Verify portable package
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = "dist/RoleFlow-$env:GITHUB_REF_NAME-portable.zip"
+          $zipPath = "dist/OfferGo-$env:GITHUB_REF_NAME-portable.zip"
           $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
           try {
             $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace("/", "\") })
@@ -112,7 +112,7 @@ jobs:
           $notes = Get-Content -LiteralPath "docs/releases/$env:GITHUB_REF_NAME.md" -Raw -Encoding utf8
           $payload = @{
             tag_name = $env:GITHUB_REF_NAME
-            name = "RoleFlow $env:GITHUB_REF_NAME"
+            name = "OfferGo $env:GITHUB_REF_NAME"
             body = $notes
             draft = $true
             prerelease = $isPrerelease
@@ -149,9 +149,9 @@ jobs:
               -Body $payload
           }
           $assetPaths = @(
-            "dist/RoleFlow-$env:GITHUB_REF_NAME-portable.zip",
-            "dist/RoleFlow-Setup-$($package.version).exe",
-            "dist/RoleFlow-Setup-$($package.version).exe.sha256"
+            "dist/OfferGo-$env:GITHUB_REF_NAME-portable.zip",
+            "dist/OfferGo-Setup-$($package.version).exe",
+            "dist/OfferGo-Setup-$($package.version).exe.sha256"
           )
           foreach ($assetPath in $assetPaths) {
             $assetName = [System.IO.Path]::GetFileName($assetPath)

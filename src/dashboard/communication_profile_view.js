@@ -26,7 +26,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
     ORDER BY is_active DESC, updated_at DESC, id DESC LIMIT 1`).get(profileId);
   const data = service.listCommunicationProfile({ profileId });
   const facts = data.facts.map((fact) => renderFact(fact, { profileId, escapeHtml, escapeAttr })).join("")
-    || '<p class="line">目前还没有额外记录。你改写回复后，RoleFlow 会把明确的新信息补到这里。</p>';
+    || '<p class="line">目前还没有额外记录。你改写回复后，OfferGo 会把明确的新信息补到这里。</p>';
   const answers = data.answers.map((answer) => renderAnswer(answer, { profileId, escapeHtml, escapeAttr })).join("")
     || '<p class="line">目前还没有你改过并采用的回答。</p>';
   const history = data.revisions.map((revision) => {
@@ -42,7 +42,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
     planId: plan?.id || "",
     stage: "消息",
     brandHref: plan?.id ? `/plan?planId=${plan.id}` : "/onboarding",
-    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。以后遇到同类问题，RoleFlow 会优先参考你确认过的说法。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel"><h2>我改过并让 RoleFlow 记住的回答</h2>${answers}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
+    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。以后遇到同类问题，OfferGo 会优先参考你确认过的说法。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel"><h2>我改过并让 OfferGo 记住的回答</h2>${answers}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
   });
 }
 

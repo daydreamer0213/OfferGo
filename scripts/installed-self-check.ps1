@@ -79,7 +79,7 @@ function Assert-DirectoryCreatable {
   [void](Assert-RoleFlowPathHasNoReparsePoint -Path $Directory -IncludeDescendants)
   $Probe = Join-Path $Directory (".roleflow-write-{0}.tmp" -f ([guid]::NewGuid().ToString("N")))
   try {
-    [System.IO.File]::WriteAllText($Probe, "RoleFlow self-check")
+    [System.IO.File]::WriteAllText($Probe, "OfferGo self-check")
   } finally {
     if (Test-Path -LiteralPath $Probe -PathType Leaf) {
       Remove-Item -LiteralPath $Probe -Force
@@ -103,7 +103,7 @@ function Get-FreeLoopbackPort {
       $Listener.Stop()
     }
   }
-  throw "RoleFlow could not reserve a temporary local Dashboard port."
+  throw "OfferGo could not reserve a temporary local Dashboard port."
 }
 
 function Remove-SelfCheckDirectory {
@@ -149,7 +149,7 @@ try {
   }
   $VersionText = (& $Node -v | Out-String).Trim()
   if ($LASTEXITCODE -ne 0 -or $VersionText -notmatch "^v(\d+)\." -or [int]$Matches[1] -lt 22) {
-    throw "RoleFlow requires Node.js 22 or newer."
+    throw "OfferGo requires Node.js 22 or newer."
   }
 
   Assert-DirectoryCreatable -Directory $DataRoot
@@ -159,7 +159,7 @@ try {
   if (-not $SkipEdgeCheck) {
     $Edge = Resolve-EdgePath
     if (-not $Edge) {
-      throw "Microsoft Edge is not installed. Please install Microsoft Edge and run RoleFlow again."
+      throw "Microsoft Edge is not installed. Please install Microsoft Edge and run OfferGo again."
     }
     Write-CheckLog "Microsoft Edge detected."
   }

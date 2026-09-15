@@ -1,17 +1,21 @@
 const assert = require("node:assert");
 const { preparePlatformWorkspaceTabs } = require("../src/core/platform_workspace");
 
-function browserFixture(initialTabs, created = []) {
+function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   const state = {
     tabs: initialTabs.map((tab) => ({ ...tab })),
     createCalls: [],
     frontCalls: [],
     closeCalls: [],
-    created: created.map((tab) => ({ ...tab }))
+    created: created.map((tab) => ({ ...tab })),
+    settlePasses: 0
   };
   return {
     state,
-    async listTabs() { return state.tabs.map((tab) => ({ ...tab })); },
+    async listTabs() {
+      onListTabs?.(state);
+      return state.tabs.map((tab) => ({ ...tab }));
+    },
     async createTab(openerTabId, url) {
       state.createCalls.push({ openerTabId, url });
       const next = state.created.shift();
@@ -98,6 +102,26 @@ function browserFixture(initialTabs, created = []) {
   });
   assert.strictEqual(repeated.status, "login_required");
   assert.strictEqual(redirected.state.createCalls.length, 2, "login monitoring must not create duplicate tabs");
+
+  const delayedRedirect = browserFixture([dashboard], [
+    { id: "delayed-boss-search", windowId: 7, active: false },
+    { id: "delayed-boss-chat", windowId: 7, active: false }
+  ], {
+    onListTabs(state) {
+      if (state.settlePasses < 1) return;
+      state.tabs = state.tabs.map((tab) => tab.id.startsWith("delayed-boss")
+        ? { ...tab, url: "https://www.zhipin.com/web/user/" }
+        : tab);
+    }
+  });
+  const delayedRedirectResult = await preparePlatformWorkspaceTabs({
+    browser: delayedRedirect,
+    dashboardUrl: dashboard.url,
+    enabledPlatforms: ["boss"],
+    settleDelay: async () => { delayedRedirect.state.settlePasses += 1; }
+  });
+  assert.strictEqual(delayedRedirectResult.status, "login_required", "a delayed login redirect must not be reported as ready");
+  assert.strictEqual(delayedRedirect.state.createCalls.length, 2, "settlement must not create duplicate tabs");
 
   const roleDrift = browserFixture([
     dashboard,

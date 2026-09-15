@@ -693,7 +693,7 @@ function isZhaopinWorkspaceTab(tab) {
 function assertZhaopinWorkspaceWindow(tabs, search) {
   if (!String(search?.windowId ?? '').trim()
     || !tabs.some(tab => isZhaopinWorkspaceTab(tab) && tab.windowId === search.windowId)) {
-    throw zhaopinError('ZHAOPIN_WINDOW_MISMATCH', '无法确认智联搜索页与 RoleFlow 在同一窗口，请回到同窗今日任务页并检查浏览器窗口信息后重试。');
+    throw zhaopinError('ZHAOPIN_WINDOW_MISMATCH', '无法确认智联搜索页与 OfferGo 在同一窗口，请回到同窗今日任务页并检查浏览器窗口信息后重试。');
   }
 }
 

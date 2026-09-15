@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [switch]$IncludePortableNode,
-  [string]$OutputName = "RoleFlow-portable.zip"
+  [string]$OutputName = "OfferGo-portable.zip"
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,6 +44,10 @@ foreach ($name in @("sample_jobs.json", "sample_resume.txt")) {
 }
 foreach ($name in @("README.md", "LICENSE", "NOTICE", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "package.json", "package-lock.json", "run.ps1", "Install.bat", "Start.bat", "BuildRelease.bat", "ScanPortable.bat", "StartPortableEdge.bat", ".gitignore")) {
   Copy-Item -LiteralPath (Join-Path $ProjectRoot $name) -Destination (Join-Path $StageDir $name) -Force
+}
+New-Item -ItemType Directory -Force -Path (Join-Path $StageDir "assets") | Out-Null
+foreach ($name in @("OfferGo.ico", "OfferGo-icon.png")) {
+  Copy-Item -LiteralPath (Join-Path $ProjectRoot "assets\$name") -Destination (Join-Path $StageDir "assets\$name") -Force
 }
 $StageDocsDir = Join-Path $StageDir "docs"
 New-Item -ItemType Directory -Force -Path $StageDocsDir | Out-Null

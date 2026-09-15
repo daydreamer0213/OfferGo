@@ -35,17 +35,17 @@ function Show-RoleFlowError {
   param([string]$Reason)
   Add-Type -AssemblyName System.Windows.Forms
   $DisplayReason = if ($Reason -match '^PORTABLE_EDGE_LISTENER_ENUMERATION_FAILED') {
-    '无法检查 RoleFlow 专用 Edge 使用的本地端口。请重启电脑后重试；若仍失败，请提供下方诊断日志。'
+    '无法检查 OfferGo 专用 Edge 使用的本地端口。请重启电脑后重试；若仍失败，请提供下方诊断日志。'
   } else {
     $Reason
   }
   $CanOpenLogs = Test-Path -LiteralPath $LogDir -PathType Container
   $Message = @"
-RoleFlow 启动失败。
+OfferGo 启动失败。
 
 $DisplayReason
 
-RoleFlow 工作台未能启动，已有用户数据不会被删除或覆盖。请按提示处理后重试。
+OfferGo 工作台未能启动，已有用户数据不会被删除或覆盖。请按提示处理后重试。
 诊断日志：$LogPath
 $(if ($CanOpenLogs) { "`r`n是否打开诊断日志文件夹？" } else { "" })
 "@
@@ -56,7 +56,7 @@ $(if ($CanOpenLogs) { "`r`n是否打开诊断日志文件夹？" } else { "" })
   }
   $Result = [System.Windows.Forms.MessageBox]::Show(
     $Message,
-    "RoleFlow",
+    "OfferGo",
     $Buttons,
     [System.Windows.Forms.MessageBoxIcon]::Error
   )
@@ -79,7 +79,7 @@ try {
     $StartupMutexAcquired = $true
   }
   if (-not $StartupMutexAcquired) {
-    throw "ROLEFLOW_STARTUP_ALREADY_IN_PROGRESS: 另一个 RoleFlow 启动过程仍在运行。"
+    throw "ROLEFLOW_STARTUP_ALREADY_IN_PROGRESS: 另一个 OfferGo 启动过程仍在运行。"
   }
   $Output = & powershell.exe `
     -NoProfile `

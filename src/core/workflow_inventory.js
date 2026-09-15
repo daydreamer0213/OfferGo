@@ -179,7 +179,7 @@ function reconcileCommunicationOutcome(db, {
     status: mapping.candidateStatus,
     reasonCode: mapping.reasonCode,
     reviewAt,
-    note: String(note || `RoleFlow communication batch #${batch.id}: ${outcome}`)
+    note: String(note || `OfferGo communication batch #${batch.id}: ${outcome}`)
   });
   return { reconciled: true, status: mapping.candidateStatus, reviewAt };
 }

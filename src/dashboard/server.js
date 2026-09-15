@@ -1,4 +1,4 @@
-﻿const http = require("node:http");
+const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
@@ -212,6 +212,10 @@ const { createMockInterviewService } = require("../application/mock_interview");
 const { renderMockInterviewPage, MOCK_INTERVIEW_SCRIPT } = require("./pages/mock_interview");
 
 const DASHBOARD_ASSETS = Object.freeze({
+  "/assets/offergo-icon.png": {
+    contentType: "image/png",
+    file: path.join(__dirname, "..", "..", "assets", "OfferGo-icon.png")
+  },
   "/assets/roleflow.css": {
     contentType: "text/css; charset=utf-8",
     file: path.join(__dirname, "assets", "roleflow.css")
@@ -357,14 +361,14 @@ function normalizeDashboardBrowserAuthority(input) {
   if (browserMode === "edge") {
     if ((input.cdpPort !== null && input.cdpPort !== undefined && String(input.cdpPort).trim() !== "")
       || String(input.profilePath || "").trim()) {
-      throw appError("DASHBOARD_BROWSER_AUTHORITY_INVALID", "使用当前 Edge（高级，需要浏览器连接组件）不能携带 RoleFlow 专用 Edge（推荐）的端口或配置目录。", { statusCode: 409 });
+      throw appError("DASHBOARD_BROWSER_AUTHORITY_INVALID", "使用当前 Edge（高级，需要浏览器连接组件）不能携带 OfferGo 专用 Edge（推荐）的端口或配置目录。", { statusCode: 409 });
     }
     return Object.freeze({ browserMode, cdpPort: null, profilePath: "" });
   }
   const cdpPort = Number(input.cdpPort);
   const profilePath = String(input.profilePath || "").trim();
   if (cdpPort !== PORTABLE_CDP_PORT || !path.isAbsolute(profilePath)) {
-    throw appError("DASHBOARD_BROWSER_AUTHORITY_INVALID", "RoleFlow 专用 Edge（推荐）启动身份无效。", { statusCode: 409 });
+    throw appError("DASHBOARD_BROWSER_AUTHORITY_INVALID", "OfferGo 专用 Edge（推荐）启动身份无效。", { statusCode: 409 });
   }
   return Object.freeze({ browserMode, cdpPort, profilePath: path.resolve(profilePath) });
 }
@@ -380,7 +384,7 @@ function normalizeCdpPort(value, fallback = PORTABLE_CDP_PORT) {
 function createDashboardBrowser({ browserMode, cdpPort }) {
   if (browserMode === "portable") return new CdpBrowserAdapter({ port: normalizeCdpPort(cdpPort) });
   if (browserMode === "edge") return new EdgeControlAdapter();
-  throw appError("WORKFLOW_BROWSER_MODE_INVALID", "浏览器模式必须是 RoleFlow 专用 Edge（推荐）或使用当前 Edge（高级，需要浏览器连接组件）。", { statusCode: 409 });
+  throw appError("WORKFLOW_BROWSER_MODE_INVALID", "浏览器模式必须是 OfferGo 专用 Edge（推荐）或使用当前 Edge（高级，需要浏览器连接组件）。", { statusCode: 409 });
 }
 
 function createDashboardBrowserReadinessProbe({ logger, browserSupervisor = null }) {
@@ -969,7 +973,7 @@ function createDashboardServer({
     if (browserSupervisor?.getSnapshot && !browserSupervisor.getSnapshot()?.ready && browserSupervisor?.ensure) {
       const address = dashboardServer.address();
       if (!address || typeof address === "string") {
-        throw appError("DASHBOARD_RUNTIME_ADDRESS_UNAVAILABLE", "RoleFlow 工作台地址尚未就绪。", { statusCode: 503 });
+        throw appError("DASHBOARD_RUNTIME_ADDRESS_UNAVAILABLE", "OfferGo 工作台地址尚未就绪。", { statusCode: 503 });
       }
       try {
         await browserSupervisor.ensure({
@@ -1211,7 +1215,7 @@ function createDashboardServer({
       }
       if (req.method === "POST" && url.pathname === "/api/runtime-diagnostics/open-logs") {
         if (String(req.headers["x-roleflow-action"] || "") !== diagnosticsActionToken) {
-          throw appError("RUNTIME_DIAGNOSTICS_ACTION_REQUIRED", "请从 RoleFlow 诊断页面打开日志。", { statusCode: 403 });
+          throw appError("RUNTIME_DIAGNOSTICS_ACTION_REQUIRED", "请从 OfferGo 诊断页面打开日志。", { statusCode: 403 });
         }
         const input = parseBody(await readBody(req), req.headers["content-type"] || "");
         if (Object.keys(input).length) {
@@ -1230,7 +1234,7 @@ function createDashboardServer({
         } catch (cause) {
           throw appError(
             "RUNTIME_LOG_FOLDER_OPEN_FAILED",
-            "RoleFlow 无法打开日志文件夹。",
+            "OfferGo 无法打开日志文件夹。",
             { statusCode: 500, cause }
           );
         }
@@ -1244,7 +1248,7 @@ function createDashboardServer({
         }
         const address = dashboardServer.address();
         if (!address || typeof address === "string") {
-          throw appError("DASHBOARD_RUNTIME_ADDRESS_UNAVAILABLE", "RoleFlow 工作台地址尚未就绪。", { statusCode: 503 });
+          throw appError("DASHBOARD_RUNTIME_ADDRESS_UNAVAILABLE", "OfferGo 工作台地址尚未就绪。", { statusCode: 503 });
         }
         const browser = await browserSupervisor.ensure({
           dashboardUrl: `http://127.0.0.1:${address.port}/`,
@@ -1265,7 +1269,7 @@ function createDashboardServer({
         }
         const browser = browserSupervisor?.getSnapshot?.() || null;
         if (!browser?.ready) {
-          throw appError("BROWSER_RUNTIME_NOT_READY", "RoleFlow 专用 Edge 尚未就绪，请先恢复浏览器。", { statusCode: 409 });
+          throw appError("BROWSER_RUNTIME_NOT_READY", "OfferGo 专用 Edge 尚未就绪，请先恢复浏览器。", { statusCode: 409 });
         }
         const workspace = await reconcileWorkspace({
           startupGuidance: false,
@@ -2401,7 +2405,7 @@ async function resolveLiveInheritedContext({
         "BOSS_SEARCH_PAGE_INVALID",
         browserMode === "edge"
           ? "使用当前 Edge（高级，需要浏览器连接组件）：请先在固定 BOSS 搜索页打开岗位搜索结果。"
-          : "请先在 RoleFlow 专用 Edge（推荐）打开 BOSS 岗位搜索结果页。",
+          : "请先在 OfferGo 专用 Edge（推荐）打开 BOSS 岗位搜索结果页。",
         { statusCode: 409 }
       );
     }
@@ -2470,7 +2474,7 @@ async function resolveLiveInheritedContext({
         browserMode === "edge" ? "BROWSER_UNAVAILABLE" : "PORTABLE_EDGE_REQUIRED",
         browserMode === "edge"
           ? "使用当前 Edge（高级，需要浏览器连接组件）：连接组件未就绪，请启动或刷新桥接并确认扩展已连接。"
-          : "RoleFlow 专用 Edge（推荐）未启动或已经断开。请重新运行 Start.bat。",
+          : "OfferGo 专用 Edge（推荐）未启动或已经断开。请重新运行 Start.bat。",
         { statusCode: 409, cause: error }
       );
     }
@@ -2479,7 +2483,7 @@ async function resolveLiveInheritedContext({
         "BOSS_LOGIN_REQUIRED",
         browserMode === "edge"
           ? "使用当前 Edge（高级，需要浏览器连接组件）：请先在固定 BOSS 页面登录。"
-          : "请先在 RoleFlow 专用 Edge（推荐）登录 BOSS。",
+          : "请先在 OfferGo 专用 Edge（推荐）登录 BOSS。",
         { statusCode: 409, cause: error }
       );
     }
@@ -2755,7 +2759,7 @@ async function resolveLiveGeneratedContext({
         "BOSS_SEARCH_PAGE_INVALID",
         browserMode === "edge"
           ? "使用当前 Edge（高级，需要浏览器连接组件）：请先在固定 BOSS 搜索页打开岗位搜索结果。"
-          : "请先在 RoleFlow 专用 Edge（推荐）的固定 BOSS 搜索页打开岗位搜索结果。",
+          : "请先在 OfferGo 专用 Edge（推荐）的固定 BOSS 搜索页打开岗位搜索结果。",
         { statusCode: 409 }
       );
     }
@@ -2895,7 +2899,7 @@ async function prepareZhaopinSearch({ db, plan, browser, signal = null }) {
     if (!currentUrl.searchParams.get('kw')?.trim()) {
       if (!currentUrl.searchParams.has('pageMode') || currentUrl.searchParams.get('pageMode') === 'recommend') currentUrl.searchParams.set('pageMode', 'search');
       const template = canonicalizeZhaopinSearchTemplate(currentUrl.toString());
-      if (search.active) throw appError('ZHAOPIN_BACKGROUND_OPEN_FAILED', '请回到同窗 RoleFlow 页面后再准备智联搜索。', { statusCode: 409 });
+      if (search.active) throw appError('ZHAOPIN_BACKGROUND_OPEN_FAILED', '请回到同窗 OfferGo 页面后再准备智联搜索。', { statusCode: 409 });
       const targetUrl = buildZhaopinSearchUrl({ searchTemplate: template, keyword: planKeywords(plan.plan)[0] });
       throwIfZhaopinOpenAborted(signal);
       await browser.navigate(search.id, targetUrl);
@@ -2911,7 +2915,7 @@ async function prepareZhaopinSearch({ db, plan, browser, signal = null }) {
     throwIfZhaopinOpenAborted(signal);
     return { site: 'zhaopin', message: '已找到智联搜索页。设置原生条件后，点击“保存智联条件”。' };
   }
-  if (dashboards.length !== 1) throw appError('ZHAOPIN_OPENER_REQUIRED', '请在当前浏览器保留一个 RoleFlow 今日任务页，再准备智联搜索页。', { statusCode: 409 });
+  if (dashboards.length !== 1) throw appError('ZHAOPIN_OPENER_REQUIRED', '请在当前浏览器保留一个 OfferGo 今日任务页，再准备智联搜索页。', { statusCode: 409 });
   const opener = dashboards[0];
   assertZhaopinWorkspaceWindow(before, opener);
   const template = getPlatformSearchContext(db, { planId: plan.id, site: 'zhaopin' })?.searchTemplate || { url: 'https://www.zhaopin.com/jobs/?pageMode=search' };
@@ -3294,7 +3298,7 @@ function resolveWorkflowResumeBrowserMode(workflow, requestedMode = "") {
   if (requested && !["edge", "portable"].includes(requested)) {
     throw appError(
       "WORKFLOW_BROWSER_MODE_INVALID",
-      "浏览器模式必须是 RoleFlow 专用 Edge（推荐）或使用当前 Edge（高级，需要浏览器连接组件）。",
+      "浏览器模式必须是 OfferGo 专用 Edge（推荐）或使用当前 Edge（高级，需要浏览器连接组件）。",
       { statusCode: 409 }
     );
   }
@@ -3637,7 +3641,7 @@ function resolveWorkflowControlBrowserAuthority(workflow, params = {}) {
   if (cdpPort !== PORTABLE_CDP_PORT) {
     throw appError(
       "INHERITED_PORTABLE_PORT_REQUIRED",
-      "继承模式必须使用 RoleFlow 专用 Edge（推荐）的固定浏览器身份。",
+      "继承模式必须使用 OfferGo 专用 Edge（推荐）的固定浏览器身份。",
       { statusCode: 409 }
     );
   }
@@ -4366,7 +4370,7 @@ function requireMessageReplyAction(req, expectedToken) {
   if (String(req.headers["x-roleflow-action"] || "") !== String(expectedToken || "")) {
     throw appError(
       "MESSAGE_REPLY_SEND_ACTION_REQUIRED",
-      "请从当前 RoleFlow 消息页面确认发送。",
+      "请从当前 OfferGo 消息页面确认发送。",
       { statusCode: 403 }
     );
   }
@@ -4466,7 +4470,7 @@ function sendMessageReplySendError(res, error) {
       : conflictCodes.has(code) ? 409
         : error instanceof TypeError || code.endsWith("_INVALID") || code.endsWith("_REQUIRED") ? 400
           : 500);
-  const message = statusCode === 403 ? "请从当前 RoleFlow 消息页面确认发送。"
+  const message = statusCode === 403 ? "请从当前 OfferGo 消息页面确认发送。"
     : statusCode === 404 ? "没有找到这次发送任务。"
       : statusCode === 409 ? "草稿或发送任务已经变化，请刷新页面后重试。"
         : statusCode === 400 ? "发送请求无效，请刷新页面后重试。"
@@ -5509,7 +5513,7 @@ function renderWorkspacePlatformSettingsPage({ preference, workspace, searchPara
   const body = `<style>
     .platform-settings{max-width:860px;padding-top:38px}.platform-settings header{max-width:660px;margin:24px 0 24px}.platform-settings h1{font-size:32px;margin:6px 0 10px}.platform-settings .eyebrow{color:#176b5b;font-size:13px;font-weight:750;margin:0}.platform-settings-form{padding:24px}.platform-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.platform-choice{display:block;position:relative;min-height:160px;border:1px solid #d6dde2;border-radius:12px;background:#fff;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}.platform-choice:hover{border-color:#8cbeb3;transform:translateY(-1px)}.platform-choice:has(input:checked){border-color:#176b5b;box-shadow:0 0 0 3px #cfe7e1}.platform-choice input{position:absolute;top:16px;right:16px;width:18px;height:18px;accent-color:#176b5b}.platform-choice span{display:flex;min-height:128px;padding:22px 20px 10px;flex-direction:column}.platform-choice strong{font-size:20px}.platform-choice small{display:block;margin-top:10px;color:#57606a;line-height:1.55}.platform-choice em{margin-top:auto;color:#176b5b;font-size:13px;font-style:normal;font-weight:700}.platform-settings-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:22px}.platform-settings-actions p{max-width:540px;margin:0;color:#57606a;font-size:13px;line-height:1.55}.platform-settings-actions button{min-width:150px}@media(max-width:780px){.platform-settings{padding-top:18px}.platform-choices{grid-template-columns:1fr}.platform-choice{min-height:120px}.platform-choice span{min-height:88px}.platform-settings-actions{align-items:stretch;flex-direction:column}.platform-settings-actions button{width:100%}}
   </style><main id="main-content" class="platform-settings">
-    <header><p class="eyebrow">${firstRun ? "首次使用 · 第 1 步" : "工作区设置"}</p><h1>你准备使用哪些招聘平台？</h1><p class="hint">RoleFlow 只会为你选择的平台准备搜索页和消息页。其他标签页可以照常保留，不会影响运行。</p></header>
+    <header><p class="eyebrow">${firstRun ? "首次使用 · 第 1 步" : "工作区设置"}</p><h1>你准备使用哪些招聘平台？</h1><p class="hint">OfferGo 只会为你选择的平台准备搜索页和消息页。其他标签页可以照常保留，不会影响运行。</p></header>
     ${saved}${pending}
     <form class="panel platform-settings-form" method="post" action="/api/settings/platforms">
       <input type="hidden" name="next" value="${escapeAttr(next)}">
@@ -5518,7 +5522,7 @@ function renderWorkspacePlatformSettingsPage({ preference, workspace, searchPara
         ${option("zhaopin", "只使用智联", "准备智联搜索页和消息页。", statusText("zhaopin"))}
         ${option("both", "BOSS + 智联", "两个平台都准备，找岗时再选择本轮使用哪一个。", preference ? "推荐给同时使用两个平台的用户" : "推荐")}
       </div>
-      <div class="platform-settings-actions"><p>以后可以随时修改。取消某个平台只代表 RoleFlow 不再使用它，不会关闭你的网页或删除历史数据。</p><button type="submit">${firstRun ? "保存并继续" : "保存设置"}</button></div>
+      <div class="platform-settings-actions"><p>以后可以随时修改。取消某个平台只代表 OfferGo 不再使用它，不会关闭你的网页或删除历史数据。</p><button type="submit">${firstRun ? "保存并继续" : "保存设置"}</button></div>
     </form>
   </main>`;
   return renderLegacyDashboardPage({ title: "招聘平台", currentPath: "/settings/platforms", stage: "招聘平台", body });
@@ -6052,10 +6056,10 @@ function resolveRuntimeLogDir({ dataRoot, logger }) {
   const expected = path.resolve(dataRoot, ".runtime", "logs");
   const actual = path.resolve(logger?.logDir || expected);
   if (actual.startsWith("\\\\") || !path.isAbsolute(actual)) {
-    throw appError("RUNTIME_LOG_DIRECTORY_INVALID", "RoleFlow 日志目录无效。", { statusCode: 500 });
+    throw appError("RUNTIME_LOG_DIRECTORY_INVALID", "OfferGo 日志目录无效。", { statusCode: 500 });
   }
   if (actual.toLowerCase() !== expected.toLowerCase()) {
-    throw appError("RUNTIME_LOG_DIRECTORY_INVALID", "RoleFlow 日志目录无效。", { statusCode: 500 });
+    throw appError("RUNTIME_LOG_DIRECTORY_INVALID", "OfferGo 日志目录无效。", { statusCode: 500 });
   }
   assertNoReparsePoint(dataRoot);
   assertNoReparsePoint(actual);
@@ -6542,7 +6546,7 @@ function renderCommunicationBuilderPage({ db, searchParams, browserAuthority }) 
   const blockNotice = runtimeBlock ? `<p class="communication-warning">${escapeHtml(runtimeBlock.reasonCode)}${runtimeBlock.blockedUntil ? ` · ${escapeHtml(runtimeBlock.blockedUntil)}` : ""}</p>` : "";
   const authority = normalizeDashboardBrowserAuthority(browserAuthority);
   const browserLabel = authority.browserMode === "portable"
-    ? "RoleFlow 专用 Edge（推荐）"
+    ? "OfferGo 专用 Edge（推荐）"
     : "使用当前 Edge（高级，需要浏览器连接组件）";
   const siteQuery = site === "zhaopin" ? "&site=zhaopin" : "";
   const quotaCopy = site === "zhaopin" ? "" : `<p>今日额度：已用 ${quota.used}，预留 ${quota.reserved}，剩余 ${quota.remaining}/${quota.limit}。</p>`;

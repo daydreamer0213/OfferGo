@@ -1897,7 +1897,7 @@ function openDb(dbPath) {
     if (fromVersion > SCHEMA_VERSION) {
       throw databaseMigrationError(
         "DB_SCHEMA_NEWER_THAN_APP",
-        `数据库版本 ${fromVersion} 高于当前程序支持的 ${SCHEMA_VERSION}，请升级 RoleFlow。`
+        `数据库版本 ${fromVersion} 高于当前程序支持的 ${SCHEMA_VERSION}，请升级 OfferGo。`
       );
     }
     if (fromVersion < SCHEMA_VERSION) {

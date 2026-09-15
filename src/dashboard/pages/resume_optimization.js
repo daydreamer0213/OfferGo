@@ -37,12 +37,12 @@ function renderResumeOptimizationPage({ dashboard = {}, modelReady = true } = {}
       <section class="page-heading" aria-labelledby="resume-opt-title">
         <p class="eyebrow">阶段三 · 本地材料优化</p>
         <h1 id="resume-opt-title">定向简历优化</h1>
-        <p class="lede">选择源简历和目标投递方向，RoleFlow 会从该方向自动选择代表岗位，直接生成一份可以继续修改的完整草稿。</p>
+        <p class="lede">选择源简历和目标投递方向，OfferGo 会从该方向自动选择代表岗位，直接生成一份可以继续修改的完整草稿。</p>
         <div class="heading-meta"><span>${escapeHtml(plan.name || "当前筛选方案")}</span><span>原简历永不覆盖</span></div>
       </section>
       ${selected ? `<details class="resume-new-draft"><summary>生成另一个定向版本</summary>${renderCreatePanel(dashboard, modelReady)}</details>` : renderCreatePanel(dashboard, modelReady)}
       ${selected ? renderSelectedDraft(dashboard, selected) : renderEmptyState()}
-    </main><p class="footer-note">本页只读写 RoleFlow 本地数据；不会访问 BOSS、不会投递、不会填写或发送任何外部内容。</p>`
+    </main><p class="footer-note">本页只读写 OfferGo 本地数据；不会访问 BOSS、不会投递、不会填写或发送任何外部内容。</p>`
   });
 }
 
@@ -68,7 +68,7 @@ function renderCreatePanel(dashboard, modelReady) {
 }
 
 function renderEmptyState() {
-  return `<section class="card pad resume-opt-empty"><p class="section-label">尚未生成草稿</p><h2>先选择简历和方向</h2><p>RoleFlow 会生成一份完整版本，你可以直接在全文上继续修改，不需要逐条确认建议。</p></section>`;
+  return `<section class="card pad resume-opt-empty"><p class="section-label">尚未生成草稿</p><h2>先选择简历和方向</h2><p>OfferGo 会生成一份完整版本，你可以直接在全文上继续修改，不需要逐条确认建议。</p></section>`;
 }
 
 function renderSelectedDraft(dashboard, draft) {
@@ -136,7 +136,7 @@ function renderLegacyDraft(draft, evidence) {
 }
 
 function renderActivatedNotice(dashboard, draft) {
-  return `<section id="resume-opt-activated" class="alert good"><strong>这份草稿已经启用</strong><p>新版本已进入 RoleFlow 的简历版本列表；重复提交同一全文不会再创建另一份。</p><a href="/resumes?profileId=${escapeAttr(dashboard.profile?.id || draft.profileId)}">查看全部简历版本</a></section>`;
+  return `<section id="resume-opt-activated" class="alert good"><strong>这份草稿已经启用</strong><p>新版本已进入 OfferGo 的简历版本列表；重复提交同一全文不会再创建另一份。</p><a href="/resumes?profileId=${escapeAttr(dashboard.profile?.id || draft.profileId)}">查看全部简历版本</a></section>`;
 }
 
 function renderHistory(dashboard, selected) {

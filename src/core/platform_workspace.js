@@ -12,12 +12,14 @@ const PLATFORM_WORKSPACE_DEFINITIONS = Object.freeze({
     messageUrl: "https://i.zhaopin.com/im"
   })
 });
+const WORKSPACE_SETTLEMENT_DELAYS_MS = Object.freeze([250, 500, 1000]);
 
 async function preparePlatformWorkspaceTabs({
   browser,
   dashboardUrl,
   enabledPlatforms = [],
-  previousWorkspace = null
+  previousWorkspace = null,
+  settleDelay = waitForPlatformWorkspaceSettlement
 } = {}) {
   if (!browser || typeof browser.listTabs !== "function" || typeof browser.createTab !== "function") {
     throw workspaceError("BROWSER_COMMAND_FAILED", "招聘平台工作区需要可用的专用 Edge。");
@@ -36,7 +38,8 @@ async function preparePlatformWorkspaceTabs({
     });
   }
 
-  const platforms = {};
+  const platformTabs = {};
+  const createdTabIds = new Set();
   for (const site of enabled) {
     const previous = previousWorkspace?.platforms?.[site] || null;
     const searchTab = await ensureRoleTab({
@@ -45,7 +48,8 @@ async function preparePlatformWorkspaceTabs({
       openerTab: dashboardTab,
       previousTabId: previous?.searchTabId,
       site,
-      role: "search"
+      role: "search",
+      createdTabIds
     });
     tabs = await browser.listTabs();
     const messageTab = await ensureRoleTab({
@@ -54,9 +58,25 @@ async function preparePlatformWorkspaceTabs({
       openerTab: dashboardTab,
       previousTabId: previous?.messageTabId,
       site,
-      role: "message"
+      role: "message",
+      createdTabIds
     });
     tabs = await browser.listTabs();
+    platformTabs[site] = { searchTab, messageTab };
+  }
+
+  if (createdTabIds.size) {
+    for (const delayMs of WORKSPACE_SETTLEMENT_DELAYS_MS) {
+      await settleDelay(delayMs);
+      tabs = await browser.listTabs();
+    }
+  }
+
+  const platforms = {};
+  for (const site of enabled) {
+    const prepared = platformTabs[site];
+    const searchTab = findById(tabs, prepared.searchTab.id) || prepared.searchTab;
+    const messageTab = findById(tabs, prepared.messageTab.id) || prepared.messageTab;
     platforms[site] = platformSnapshot({ site, searchTab, messageTab, windowId: dashboardTab.windowId });
   }
 
@@ -77,17 +97,17 @@ async function resolveDashboardTab({ browser, tabs, dashboardUrl, previousWorksp
   if (dashboardTab) return requireWindowIdentity(dashboardTab);
 
   const opener = chooseTab(tabs.filter((tab) => Number.isInteger(tab?.windowId)));
-  if (!opener) throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "专用 Edge 中没有可用的 RoleFlow 工作台页面。");
+  if (!opener) throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "专用 Edge 中没有可用的 OfferGo 工作台页面。");
   const tabId = await browser.createTab(opener.id, dashboardUrl);
   const refreshed = await browser.listTabs();
   dashboardTab = findById(refreshed, tabId);
   if (!isDashboardTab(dashboardTab, dashboardUrl) || dashboardTab.windowId !== opener.windowId) {
-    throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "RoleFlow 工作台页面未能在原窗口后台建立。");
+    throw workspaceError("WORKSPACE_DASHBOARD_TAB_REQUIRED", "OfferGo 工作台页面未能在原窗口后台建立。");
   }
   return requireWindowIdentity(dashboardTab);
 }
 
-async function ensureRoleTab({ browser, tabs, openerTab, previousTabId, site, role }) {
+async function ensureRoleTab({ browser, tabs, openerTab, previousTabId, site, role, createdTabIds = null }) {
   const previous = findById(tabs, previousTabId);
   const oppositeRole = role === "search" ? "message" : "search";
   const previousBelongsToRole = matchesRole(previous, site, role, { allowRuntimePath: role === "search" });
@@ -103,12 +123,17 @@ async function ensureRoleTab({ browser, tabs, openerTab, previousTabId, site, ro
   const definition = PLATFORM_WORKSPACE_DEFINITIONS[site];
   const url = role === "search" ? definition.searchUrl : definition.messageUrl;
   const tabId = await browser.createTab(openerTab.id, url);
+  createdTabIds?.add(tabId);
   const refreshed = await browser.listTabs();
   const created = findById(refreshed, tabId);
   if (!created || created.windowId !== openerTab.windowId || created.active === true) {
     throw workspaceError("BROWSER_COMMAND_FAILED", `${definition.label}页面未能在工作台后台建立。`);
   }
   return requireWindowIdentity(created);
+}
+
+function waitForPlatformWorkspaceSettlement(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function platformSnapshot({ site, searchTab, messageTab, windowId }) {
@@ -150,7 +175,7 @@ function normalizePlatforms(value) {
   const requested = new Set((Array.isArray(value) ? value : []).map((item) => String(item || "").trim().toLowerCase()));
   for (const site of requested) {
     if (!Object.hasOwn(PLATFORM_WORKSPACE_DEFINITIONS, site)) {
-      throw workspaceError("WORKSPACE_PLATFORM_INVALID", "请选择 RoleFlow 当前支持的招聘平台。");
+      throw workspaceError("WORKSPACE_PLATFORM_INVALID", "请选择 OfferGo 当前支持的招聘平台。");
     }
   }
   return Object.keys(PLATFORM_WORKSPACE_DEFINITIONS).filter((site) => requested.has(site));

@@ -10,7 +10,7 @@ function Resolve-RoleFlowBrowserProfilePath {
     $Candidate = if ([System.IO.Path]::IsPathRooted($ProfileDir)) { $ProfileDir } else { Join-Path $ProjectRoot $ProfileDir }
     return Resolve-RoleFlowNormalizedPath -Path $Candidate
   }
-  if ([string]::IsNullOrWhiteSpace($LocalAppDataPath)) { throw "RoleFlow browser profile requires LOCALAPPDATA or an explicit -ProfileDir." }
+  if ([string]::IsNullOrWhiteSpace($LocalAppDataPath)) { throw "OfferGo browser profile requires LOCALAPPDATA or an explicit -ProfileDir." }
   return Resolve-RoleFlowNormalizedPath -Path (Join-Path $LocalAppDataPath "RoleFlow\BrowserProfile")
 }
 
@@ -185,22 +185,22 @@ function Assert-RoleFlowPortableEdgeListenerIdentity {
 
 function Assert-RoleFlowBrowserProfileNotInUse {
   param([Parameter(Mandatory = $true)][string]$ProfilePath, [Parameter(Mandatory = $true)]$ProcessQuerySnapshot)
-  if (-not $ProcessQuerySnapshot.querySucceeded) { throw "RoleFlow browser profile check failed: Edge process enumeration failed." }
+  if (-not $ProcessQuerySnapshot.querySucceeded) { throw "OfferGo browser profile check failed: Edge process enumeration failed." }
   $expectedProfile = Resolve-RoleFlowNormalizedPath -Path $ProfilePath
   foreach ($process in @($ProcessQuerySnapshot.processes)) {
     $SnapshotProcessName = [string]$process.ProcessName
-    if ([string]::IsNullOrWhiteSpace($SnapshotProcessName)) { throw "RoleFlow browser profile check failed: an Edge process has incomplete identity." }
+    if ([string]::IsNullOrWhiteSpace($SnapshotProcessName)) { throw "OfferGo browser profile check failed: an Edge process has incomplete identity." }
     if (-not [string]::Equals([System.IO.Path]::GetFileName($SnapshotProcessName), "msedge.exe", [System.StringComparison]::OrdinalIgnoreCase)) { continue }
-    if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath) -or [string]::IsNullOrWhiteSpace([string]$process.CommandLine)) { throw "RoleFlow browser profile check failed: an Edge process has incomplete identity." }
+    if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath) -or [string]::IsNullOrWhiteSpace([string]$process.CommandLine)) { throw "OfferGo browser profile check failed: an Edge process has incomplete identity." }
     $profileArguments = @(Get-RoleFlowCommandLineArguments -CommandLine ([string]$process.CommandLine) | Where-Object { ([string]$_).StartsWith("--user-data-dir=", [System.StringComparison]::OrdinalIgnoreCase) })
-    if ($profileArguments.Count -gt 1) { throw "RoleFlow browser profile check failed: an Edge process has ambiguous profile authority." }
+    if ($profileArguments.Count -gt 1) { throw "OfferGo browser profile check failed: an Edge process has ambiguous profile authority." }
     if ($profileArguments.Count -eq 1) {
       $actualProfile = Resolve-RoleFlowNormalizedPath -Path (([string]$profileArguments[0]).Substring("--user-data-dir=".Length))
     } else {
-      if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw "RoleFlow browser profile check failed: the default Edge profile authority is unavailable." }
+      if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw "OfferGo browser profile check failed: the default Edge profile authority is unavailable." }
       $actualProfile = Resolve-RoleFlowNormalizedPath -Path (Join-Path $env:LOCALAPPDATA "Microsoft\Edge\User Data")
     }
-    if (Test-RoleFlowPathOverlap -FirstPath $actualProfile -SecondPath $expectedProfile) { throw "RoleFlow browser profile is already in use by Edge." }
+    if (Test-RoleFlowPathOverlap -FirstPath $actualProfile -SecondPath $expectedProfile) { throw "OfferGo browser profile is already in use by Edge." }
   }
   return $true
 }
@@ -250,7 +250,7 @@ function Wait-RoleFlowStartupMutex {
       $Acquired = $true
     }
     if (-not $Acquired) {
-      throw "ROLEFLOW_STARTUP_STILL_RUNNING: another RoleFlow startup is still running."
+      throw "ROLEFLOW_STARTUP_STILL_RUNNING: another OfferGo startup is still running."
     }
   } finally {
     if ($Acquired) { try { $Mutex.ReleaseMutex() } catch {} }

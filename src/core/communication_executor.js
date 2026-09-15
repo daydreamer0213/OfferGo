@@ -204,7 +204,7 @@ async function runCommunicationBatch({
         evidence: communicationInspectionEvidence(inspection, finalState)
       });
       reconcileCommunicationOutcome(db, {
-        batch: getCommunicationBatch(db, batchId), item, status: finalState, note: `RoleFlow batch #${batchId}`
+        batch: getCommunicationBatch(db, batchId), item, status: finalState, note: `OfferGo batch #${batchId}`
       });
       recordAudit(db, item, "communication_result", finalState);
       if (finalState === "target_mismatch") {
@@ -615,7 +615,7 @@ function transitionToUnavailable(db, batchId, item, error) {
     errorCode: errorCode(error)
   });
   reconcileCommunicationOutcome(db, {
-    batch: getCommunicationBatch(db, batchId), item, status: "action_unavailable", note: `RoleFlow batch #${batchId}`
+    batch: getCommunicationBatch(db, batchId), item, status: "action_unavailable", note: `OfferGo batch #${batchId}`
   });
   recordAudit(db, item, "communication_result", "action_unavailable");
 }

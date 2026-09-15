@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
   [string]$OutputDir = "",
-  [string]$BuildRoot = "D:\DevData\RoleFlow-installer",
+  [string]$BuildRoot = "D:\DevData\OfferGo-installer",
   [string]$PortableNodeRoot = "",
   [string]$InnoCompiler = "",
   [switch]$SkipTests,
@@ -115,7 +115,8 @@ foreach ($RelativePath in @(
   "CODE_OF_CONDUCT.md",
   "package.json",
   "package-lock.json",
-  "assets\RoleFlow.ico",
+  "assets\OfferGo.ico",
+  "assets\OfferGo-icon.png",
   "run.ps1"
 )) {
   Copy-ProjectItem -RelativePath $RelativePath
@@ -178,14 +179,14 @@ $Arguments = @(
   "/DStageDir=$StageDir",
   "/DAppVersion=$Version",
   "/DOutputDir=$OutputDir",
-  (Join-Path $ProjectRoot "installer\RoleFlow.iss")
+  (Join-Path $ProjectRoot "installer\OfferGo.iss")
 )
 & $Compiler @Arguments
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-$InstallerPath = Join-Path $OutputDir ("RoleFlow-Setup-{0}.exe" -f $Version)
+$InstallerPath = Join-Path $OutputDir ("OfferGo-Setup-{0}.exe" -f $Version)
 if (-not (Test-Path -LiteralPath $InstallerPath)) {
   throw "Inno Setup completed without the expected installer: $InstallerPath"
 }

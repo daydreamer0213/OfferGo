@@ -49,7 +49,7 @@ function jobExportFileName({ planName, date = new Date() } = {}) {
     .replace(/[._-]+$/g, "")
     .slice(0, 60) || "岗位";
   const safeDate = exportDate(date);
-  return `RoleFlow-${safePlan}-${safeDate}.csv`;
+  return `OfferGo-${safePlan}-${safeDate}.csv`;
 }
 
 function exportDate(value) {

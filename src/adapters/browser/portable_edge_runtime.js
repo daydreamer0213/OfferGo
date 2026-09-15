@@ -85,7 +85,7 @@ async function waitForStableTransport({ cdpFactory, port, attempts, sleep, readi
     }
     if (attempt < attempts - 1) await sleep(readinessDelayMs);
   }
-  throw runtimeError("PORTABLE_EDGE_START_TIMEOUT", "RoleFlow 专用 Edge 的本地控制连接未能稳定就绪。", lastError);
+  throw runtimeError("PORTABLE_EDGE_START_TIMEOUT", "OfferGo 专用 Edge 的本地控制连接未能稳定就绪。", lastError);
 }
 
 function parseLaunchResult(stdout) {
@@ -94,7 +94,7 @@ function parseLaunchResult(stdout) {
     if (!parsed || parsed.schemaVersion !== 1) throw new Error("unsupported result schema");
     return parsed;
   } catch (error) {
-    throw runtimeError("PORTABLE_EDGE_RESULT_INVALID", "RoleFlow 专用 Edge 启动结果无法识别。", error);
+    throw runtimeError("PORTABLE_EDGE_RESULT_INVALID", "OfferGo 专用 Edge 启动结果无法识别。", error);
   }
 }
 
@@ -102,7 +102,7 @@ function assertLaunchAuthority(result, expected) {
   if (!Number.isInteger(result?.pid) || result.pid <= 0
     || !path.isAbsolute(String(result?.edgePath || ""))
     || path.basename(String(result.edgePath)).toLowerCase() !== "msedge.exe") {
-    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "RoleFlow 专用 Edge 的进程身份无法确认。");
+    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "OfferGo 专用 Edge 的进程身份无法确认。");
   }
   assertSessionAuthority(result, expected);
 }
@@ -112,13 +112,13 @@ function assertSessionAuthority(session, { profilePath, cdpPort }) {
   try {
     cdpUrl = new URL(String(session?.cdpUrl || ""));
   } catch {
-    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "RoleFlow 专用 Edge 的本地连接地址无法确认。");
+    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "OfferGo 专用 Edge 的本地连接地址无法确认。");
   }
   if (!samePath(session?.profilePath, profilePath)
     || cdpUrl.protocol !== "http:"
     || cdpUrl.hostname !== "127.0.0.1"
     || Number(cdpUrl.port) !== cdpPort) {
-    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "RoleFlow 专用 Edge 的浏览器身份与当前请求不一致。");
+    throw runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", "OfferGo 专用 Edge 的浏览器身份与当前请求不一致。");
   }
 }
 
@@ -129,7 +129,7 @@ function processFailure(result) {
   if (/Portable Edge identity check failed/i.test(detail)) {
     return runtimeError("PORTABLE_EDGE_IDENTITY_MISMATCH", detail);
   }
-  return runtimeError("PORTABLE_EDGE_START_FAILED", detail || "RoleFlow 专用 Edge 启动命令失败。");
+  return runtimeError("PORTABLE_EDGE_START_FAILED", detail || "OfferGo 专用 Edge 启动命令失败。");
 }
 
 function requireDashboardUrl(value) {
@@ -141,13 +141,13 @@ function requireDashboardUrl(value) {
   } catch {
     // Fall through to one public error.
   }
-  throw runtimeError("PORTABLE_EDGE_DASHBOARD_URL_INVALID", "专用 Edge 必须从本机 RoleFlow 工作台启动。");
+  throw runtimeError("PORTABLE_EDGE_DASHBOARD_URL_INVALID", "专用 Edge 必须从本机 OfferGo 工作台启动。");
 }
 
 function requireAbsolutePath(value, label) {
   const resolved = String(value || "");
   if (!resolved || !path.isAbsolute(resolved)) {
-    throw runtimeError("PORTABLE_EDGE_RUNTIME_PATH_INVALID", `RoleFlow ${label}必须是本机绝对路径。`);
+    throw runtimeError("PORTABLE_EDGE_RUNTIME_PATH_INVALID", `OfferGo ${label}必须是本机绝对路径。`);
   }
   return path.resolve(resolved);
 }
@@ -155,7 +155,7 @@ function requireAbsolutePath(value, label) {
 function requirePort(value) {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw runtimeError("PORTABLE_EDGE_RUNTIME_PORT_INVALID", "RoleFlow 专用 Edge 的本地端口无效。");
+    throw runtimeError("PORTABLE_EDGE_RUNTIME_PORT_INVALID", "OfferGo 专用 Edge 的本地端口无效。");
   }
   return port;
 }

@@ -22,7 +22,7 @@ function renderMockInterviewPage({ dashboard = {}, modelReady = true } = {}) {
       </section>
       ${selected ? `<details class="interview-new-session"><summary>开始另一轮训练</summary>${renderStartPanel(dashboard, modelReady)}</details>` : renderStartPanel(dashboard, modelReady)}
       ${selected ? renderSession(dashboard, selected) : renderEmptyState()}
-    </main><p class="footer-note">本页只读写 RoleFlow 本地训练记录；不会访问 BOSS、不会投递、不会发送消息，也不会把练习回答自动变成候选人事实。</p>`
+    </main><p class="footer-note">本页只读写 OfferGo 本地训练记录；不会访问 BOSS、不会投递、不会发送消息，也不会把练习回答自动变成候选人事实。</p>`
   });
 }
 

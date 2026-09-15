@@ -13,7 +13,7 @@ function snapshot(status, overrides = {}) {
   return {
     status,
     ready,
-    message: ready ? "RoleFlow 专用 Edge 已准备好。" : "正在准备 RoleFlow 专用 Edge……",
+    message: ready ? "OfferGo 专用 Edge 已准备好。" : "正在准备 OfferGo 专用 Edge……",
     action: "none",
     checkedAt: "2099-01-01T00:00:00.000Z",
     failureCount: 0,
@@ -204,7 +204,7 @@ function quietLogger() {
     failOpeningLogs = false;
 
     supervisor.setSnapshot(snapshot("unavailable", {
-      message: "RoleFlow 专用 Edge 暂时无法使用。",
+      message: "OfferGo 专用 Edge 暂时无法使用。",
       action: "install_edge",
       failureCount: 1
     }));
@@ -233,7 +233,7 @@ function quietLogger() {
 
     workspaceResponses.unshift({ status: "ready", bossTabId: "boss-search", communicationTabId: "boss-chat" });
     supervisor.setSnapshot(snapshot("unavailable", {
-      message: "RoleFlow 专用 Edge 暂时无法使用。",
+      message: "OfferGo 专用 Edge 暂时无法使用。",
       action: "install_edge",
       failureCount: 1
     }));
@@ -265,7 +265,7 @@ function quietLogger() {
     ]);
 
     supervisor.setSnapshot(snapshot("unavailable", {
-      message: "RoleFlow 专用 Edge 暂时无法使用。",
+      message: "OfferGo 专用 Edge 暂时无法使用。",
       action: "install_edge",
       failureCount: 1
     }));

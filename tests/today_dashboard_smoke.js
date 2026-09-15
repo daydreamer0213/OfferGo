@@ -218,7 +218,7 @@ async function assertPriorityPanelStaysCompactAtDesktopWidth() {
     await page.addStyleTag({ path: path.join(root, "src", "dashboard", "assets", "roleflow.css") });
     await page.waitForFunction(() => document.querySelector("[data-browser-readiness-button]")?.disabled === false);
     await page.locator("#browser-readiness-status").evaluate((node) => {
-      node.textContent = "请在RoleFlow 专用 Edge（推荐）的固定 BOSS 搜索标签打开职位搜索结果页并设置本轮筛选。";
+      node.textContent = "请在OfferGo 专用 Edge（推荐）的固定 BOSS 搜索标签打开职位搜索结果页并设置本轮筛选。";
     });
     const layout = await page.locator("#today-discovery").evaluate((panel) => {
       const copy = panel.firstElementChild;
@@ -332,11 +332,11 @@ function assertRendererIsPureAndEscapesHtml() {
   assert.match(html, /name="acquisitionMode" value="inherited" checked/);
   assert.match(html, /data-acquisition-panel="inherited"/);
   assert.match(html, /data-acquisition-panel="generated"/);
-  assert.match(html, /RoleFlow 本地精筛/);
+  assert.match(html, /OfferGo 本地精筛/);
   assert.doesNotMatch(html, /<strong>平台已继承<\/strong>/);
   assert.match(html, /name="browserMode" value="portable"/);
   assert.match(html, /name="cdpPort" value="9222"/);
-  assert.match(html, /当前浏览器：RoleFlow 专用 Edge（推荐）/);
+  assert.match(html, /当前浏览器：OfferGo 专用 Edge（推荐）/);
 }
 
 function assertEarlyScanConfirmationRendering() {
@@ -502,7 +502,7 @@ async function assertReadyTodayPage(baseUrl, saved, privateFileNameContacts) {
   assert.match(page.body, /<details[^>]*>\s*<summary[^>]*><strong>调整筛选条件<\/strong>/);
   assert.match(page.body, /本地筛选方案/);
   assert.match(page.body, /平台采集方式/);
-  assert.match(page.body, /RoleFlow 本地精筛/);
+  assert.match(page.body, /OfferGo 本地精筛/);
   assert.strictEqual((page.body.match(/class="metric"/g) || []).length, 3);
   assert.doesNotMatch(page.body, /当前数据安全/);
   assert.doesNotMatch(page.body, /现在卡在哪里/);

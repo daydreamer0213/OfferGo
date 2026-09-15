@@ -1,12 +1,12 @@
 # 安全策略
 
-RoleFlow 处理简历、模型密钥和已登录浏览器状态。请不要在公开 Issue、Pull Request、日志或截图中提交真实个人信息、Cookie、Token、API Key、聊天内容或可识别的账号数据。
+OfferGo 处理简历、模型密钥和已登录浏览器状态。请不要在公开 Issue、Pull Request、日志或截图中提交真实个人信息、Cookie、Token、API Key、聊天内容或可识别的账号数据。
 
 ## 报告安全问题
 
 优先使用 GitHub 的私有安全报告入口：
 
-https://github.com/daydreamer0213/roleflow/security/advisories/new
+https://github.com/daydreamer0213/OfferGo/security/advisories/new
 
 如果页面暂未显示“Report a vulnerability”，请只创建标题为“Security contact request”的公开 Issue，不要附带漏洞细节或敏感数据；维护者会再建立私下联系渠道。
 

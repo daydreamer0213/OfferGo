@@ -56,7 +56,7 @@ function buildTodayViewModel(input = {}) {
     heading: {
       eyebrow: "今日工作台",
       title: "今天先把高质量机会推进到人工确认。",
-      lede: "RoleFlow 会保留完整 JD 与匹配证据；只有你确认清单后才会进入沟通。",
+      lede: "OfferGo 会保留完整 JD 与匹配证据；只有你确认清单后才会进入沟通。",
       meta: [`本地筛选方案 #${planId}`, plan.name || "未命名方案"],
       status: dependency.stale || dependency.matchingCardRequired ? "方案待确认" : "方案可用"
     },
@@ -124,7 +124,7 @@ function buildTodayViewModel(input = {}) {
       browserMode,
       cdpPort,
       browserLabel: browserMode === "portable"
-        ? "RoleFlow 专用 Edge（推荐）"
+        ? "OfferGo 专用 Edge（推荐）"
         : "使用当前 Edge（高级，需要浏览器连接组件）"
     }
   };

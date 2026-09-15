@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [switch]$CheckOnly,
   [switch]$SkipNodeInstall,
@@ -175,7 +175,7 @@ function Install-ProjectDependencies {
   throw "Project dependencies could not be installed after 3 attempts."
 }
 
-Write-Host "RoleFlow installer"
+Write-Host "OfferGo installer"
 Write-Host "Project: $ProjectRoot"
 
 $Node = $null

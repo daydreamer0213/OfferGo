@@ -14,7 +14,7 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 $OutputEncoding = $Utf8NoBom
 if ($BrowserMode -eq "edge" -and ($PSBoundParameters.ContainsKey('CdpPort') -or $PSBoundParameters.ContainsKey('ProfileDir'))) {
-  throw "WORKSPACE_EDGE_BROWSER_AUTHORITY_INVALID: 使用当前 Edge（高级，需要浏览器连接组件）不能携带 RoleFlow 专用 Edge（推荐）的端口或配置目录。"
+  throw "WORKSPACE_EDGE_BROWSER_AUTHORITY_INVALID: 使用当前 Edge（高级，需要浏览器连接组件）不能携带 OfferGo 专用 Edge（推荐）的端口或配置目录。"
 }
 if ($BrowserMode -eq "portable" -and $CdpPort -ne 9222) {
   throw "WORKSPACE_PORTABLE_BROWSER_REQUIRED: portable 模式只支持 9222 端口。"
@@ -99,7 +99,7 @@ function Wait-DashboardRuntimeStatus {
   } while ((Get-Date) -lt $Deadline)
 
   if ($null -ne $Runtime) { return $Runtime }
-  throw "DASHBOARD_RUNTIME_STATUS_UNAVAILABLE: 无法读取 RoleFlow 的浏览器启动状态。$LastError"
+  throw "DASHBOARD_RUNTIME_STATUS_UNAVAILABLE: 无法读取 OfferGo 的浏览器启动状态。$LastError"
 }
 
 function Confirm-DashboardBrowserRuntime {
@@ -147,7 +147,7 @@ if (-not $DashboardWasRunning) {
   $DataPreparation = & (Join-Path $PSScriptRoot "prepare-user-data.ps1") `
     -InstallRoot $ProjectRoot `
     -DataRoot $DataRoot
-  Write-Verbose "RoleFlow user data: $DataPreparation"
+  Write-Verbose "OfferGo user data: $DataPreparation"
   $arguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -178,14 +178,14 @@ $RuntimeStatus = Confirm-DashboardBrowserRuntime `
   -AllowRecovery:$DashboardWasRunning
 
 $url = "http://127.0.0.1:$Port/"
-Write-Host "RoleFlow is ready: $url"
+Write-Host "OfferGo is ready: $url"
 if ($BrowserMode -eq "edge") {
   Write-Host "浏览器：使用当前 Edge（高级，需要浏览器连接组件）"
 } else {
-  Write-Host "浏览器：RoleFlow 专用 Edge（推荐）"
+  Write-Host "浏览器：OfferGo 专用 Edge（推荐）"
 }
 if ([string]$RuntimeStatus.workspace.status -eq "login_required") {
-  Write-Host "工作区状态：已选择的平台需要登录；登录后 RoleFlow 会在后台自动补齐页面。"
+  Write-Host "工作区状态：已选择的平台需要登录；登录后 OfferGo 会在后台自动补齐页面。"
 } elseif ($null -ne $RuntimeStatus -and [string]$RuntimeStatus.workspace.status -ne "ready") {
   Write-Host "工作区状态：$([string]$RuntimeStatus.workspace.message)"
 } else {

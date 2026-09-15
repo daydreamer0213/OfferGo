@@ -520,7 +520,7 @@ async function inspectZhaopinCommunicationTabs({ browser, adapter } = {}) {
   const searchTab = tabs.find((tab) => sameBrowserTabId(tab?.id, tabId));
   if (!searchTab || !Number.isInteger(searchTab.windowId) || searchTab.windowId <= 0
     || !tabs.some((tab) => tab.windowId === searchTab.windowId && isZhaopinWorkspaceTab(tab))) {
-    throw communicationError("ZHAOPIN_WINDOW_MISMATCH", "无法确认智联搜索页与 RoleFlow 在同一窗口。");
+    throw communicationError("ZHAOPIN_WINDOW_MISMATCH", "无法确认智联搜索页与 OfferGo 在同一窗口。");
   }
   await adapter.preflight({ tabId });
   return { windowId: searchTab.windowId, searchTab };

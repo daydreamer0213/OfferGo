@@ -4,17 +4,17 @@
 
 ## 标准安装器
 
-`BuildInstaller.bat` 生成 `dist\RoleFlow-Setup-<版本>.exe` 和 SHA-256 校验文件。安装器按当前用户安装，默认位置为 `%LOCALAPPDATA%\Programs\RoleFlow`，包含固定版 Node.js 与生产依赖，不在用户电脑运行 `npm ci` 或完整离线测试。
+`BuildInstaller.bat` 生成 `dist\OfferGo-Setup-<版本>.exe` 和 SHA-256 校验文件。安装器按当前用户安装，默认位置为 `%LOCALAPPDATA%\Programs\OfferGo`，包含固定版 Node.js 与生产依赖，不在用户电脑运行 `npm ci` 或完整离线测试。
 
-安装器提供 Windows 安装进度、猴子产品图标、开始菜单与可选桌面快捷方式、隐藏终端启动和标准卸载入口。新装与覆盖升级都显示原生目录选择页，升级默认沿用上次目录。安装版用户数据保存在 `%LOCALAPPDATA%\RoleFlow\Data`，与程序目录分离；卸载默认保留用户数据，浏览器登录资料删除需要独立确认。
+安装器提供 Windows 安装进度、小狗产品图标、开始菜单与可选桌面快捷方式、隐藏终端启动和标准卸载入口。新装与覆盖升级都显示原生目录选择页，升级默认沿用上次目录。安装版用户数据保存在 `%LOCALAPPDATA%\RoleFlow\Data`，与程序目录分离；卸载默认保留用户数据，浏览器登录资料删除需要独立确认。
 
-程序目录不应按每次版本改名，建议选择固定位置（例如 `D:\Apps\RoleFlow`）。如果此前手选了含旧版本号的目录，升级继续使用它，目录名不会自动更新；应以程序版本与 Windows 已安装应用的版本为准。更换安装目录不是新用户重置，已有数据库和浏览器登录资料仍会复用。
+程序目录不应按每次版本改名，建议选择固定位置（例如 `D:\Apps\OfferGo`）。如果此前手选了含旧版本号的目录，升级继续使用它，目录名不会自动更新；应以程序版本与 Windows 已安装应用的版本为准。更换安装目录不是新用户重置，已有数据库和浏览器登录资料仍会复用。
 
-当前正式版默认使用“RoleFlow 专用 Edge（推荐）”，不需要 Edge Control。Edge Control 不进入普通安装包，也不会由安装器自动下载；它只服务于显式的“使用当前 Edge（高级，需要浏览器连接组件）”。高级组件缺失或不健康时停止，不会自动切换浏览器。
+当前正式版默认使用“OfferGo 专用 Edge（推荐）”，不需要 Edge Control。Edge Control 不进入普通安装包，也不会由安装器自动下载；它只服务于显式的“使用当前 Edge（高级，需要浏览器连接组件）”。高级组件缺失或不健康时停止，不会自动切换浏览器。
 
 ## 便携绿色包
 
-`BuildRelease.bat` 生成 `dist\RoleFlow-portable.zip`。默认包含代码、依赖、匿名样例和便携 Node.js；另一台 Windows 电脑解压后可运行。默认入口启动“RoleFlow 专用 Edge（推荐）”，不依赖 Edge Control；内部脚本和字段仍可保留 `portable`、CDP 与 `9222` 诊断名称。
+`BuildRelease.bat` 生成 `dist\OfferGo-portable.zip`。默认包含代码、依赖、匿名样例和便携 Node.js；另一台 Windows 电脑解压后可运行。默认入口启动“OfferGo 专用 Edge（推荐）”，不依赖 Edge Control；内部脚本和字段仍可保留 `portable`、CDP 与 `9222` 诊断名称。
 
 运行条件：
 
@@ -22,11 +22,11 @@
 - Microsoft Edge。
 - 能访问用户选择的模型服务和 BOSS。
 
-默认 `Start.bat` 使用“RoleFlow 专用 Edge（推荐）”：同一窗口必须正好有一个 `BOSS-SEARCH` 和一个 `BOSS-COMMUNICATION` 固定标签页。就绪检查只读；标签不完整、跨窗口、登录失效或风控信号都会停止并给出处理建议，不会自动回退或静默切换浏览器 authority（浏览器控制权）。
+默认 `Start.bat` 使用“OfferGo 专用 Edge（推荐）”：同一窗口必须正好有一个 `BOSS-SEARCH` 和一个 `BOSS-COMMUNICATION` 固定标签页。就绪检查只读；标签不完整、跨窗口、登录失效或风控信号都会停止并给出处理建议，不会自动回退或静默切换浏览器 authority（浏览器控制权）。
 
-第一次在“RoleFlow 专用 Edge（推荐）”登录后，登录资料保存在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`。该目录独立于安装目录，可跨覆盖升级和安装目录变化复用。标准安装版另将数据库、简历、模型设置、日志和报告保存于 `%LOCALAPPDATA%\RoleFlow\Data`；便携或显式数据目录的运行方式以对应启动参数为准，不宣称跨机器自动迁移。
+第一次在“OfferGo 专用 Edge（推荐）”登录后，登录资料保存在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`。该目录独立于安装目录，可跨覆盖升级和安装目录变化复用。标准安装版另将数据库、简历、模型设置、日志和报告保存于 `%LOCALAPPDATA%\RoleFlow\Data`；便携或显式数据目录的运行方式以对应启动参数为准，不宣称跨机器自动迁移。
 
-复用日常 Edge 是高级显式路径：`Start.bat -BrowserMode edge`。该路径要求现有 Edge Control 扩展与桥接健康；“RoleFlow 专用 Edge（推荐）”失败时绝不自动回退到高级模式。
+复用日常 Edge 是高级显式路径：`Start.bat -BrowserMode edge`。该路径要求现有 Edge Control 扩展与桥接健康；“OfferGo 专用 Edge（推荐）”失败时绝不自动回退到高级模式。
 
 ## 不进入发布包
 
@@ -36,15 +36,15 @@
 - `.runtime\logs`：本机诊断日志。
 - `reports\`：历史报告。
 - 真实候选人画像和真实简历文件。
-- `vendor\edge-control-bridge`：“RoleFlow 专用 Edge（推荐）”不需要它，且 Edge Control 不进入普通交付包。
+- `vendor\edge-control-bridge`：“OfferGo 专用 Edge（推荐）”不需要它，且 Edge Control 不进入普通交付包。
 
 ## 新电脑首次运行
 
 1. 解压到用户可写目录。
 2. 双击 `Install.bat` 做 Node、生产依赖和 Edge 环境检查；完整离线回归只在发布构建前执行。
-3. 双击 `Start.bat`，在“RoleFlow 专用 Edge（推荐）”中登录 BOSS，并在同一窗口保留一个 BOSS 搜索页和一个 BOSS 沟通页。默认路径不需要 Edge Control。
+3. 双击 `Start.bat`，在“OfferGo 专用 Edge（推荐）”中登录 BOSS，并在同一窗口保留一个 BOSS 搜索页和一个 BOSS 沟通页。默认路径不需要 Edge Control。
 4. 重新填写模型 Key；DPAPI 密文不能跨 Windows 用户或电脑复用。
-5. 更换电脑时在新的“RoleFlow 专用 Edge（推荐）”中重新登录 BOSS，不复制旧电脑的浏览器 profile。只有显式需要复用日常 Edge 时，才准备连接组件并运行高级模式。
+5. 更换电脑时在新的“OfferGo 专用 Edge（推荐）”中重新登录 BOSS，不复制旧电脑的浏览器 profile。只有显式需要复用日常 Edge 时，才准备连接组件并运行高级模式。
 6. 上传简历、确认画像和 Search Plan 后再扫描。
 
 ## 安全边界
@@ -64,4 +64,4 @@
 
 旧 `.runtime\edge-profile` 不会自动迁移。关闭占用源或目标 profile 的 Edge 后，用户必须显式运行 `scripts\migrate-browser-profile.ps1 -SourceProfileDir <旧目录> -ConfirmMigration`。迁移只复制并核对内容，保留源目录；目标已存在、路径不安全或身份不清时停止。
 
-普通交互卸载和静默卸载都保留 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`。交互卸载只有在用户对“删除专用浏览器登录资料”单独确认后才删除它；删除安装目录内 RoleFlow 数据的确认不能替代这项授权。
+普通交互卸载和静默卸载都保留 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`。交互卸载只有在用户对“删除专用浏览器登录资料”单独确认后才删除它；删除安装目录内 OfferGo 数据的确认不能替代这项授权。

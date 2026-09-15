@@ -74,7 +74,7 @@ function readinessAction(status) {
 function readinessMessages(browserMode) {
   const label = browserMode === "edge"
     ? "使用当前 Edge（高级，需要浏览器连接组件）"
-    : "RoleFlow 专用 Edge（推荐）";
+    : "OfferGo 专用 Edge（推荐）";
   return {
     starting: `${label}正在启动，请稍候。`,
     unavailable: `${label}暂时无法启动。请确认这台电脑已安装 Microsoft Edge，然后点击恢复。`,

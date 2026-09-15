@@ -646,7 +646,7 @@ async function main() {
     const safeMessage = messageDiscoveryReasonText(code);
     assert(safeMessage && !safeMessage.includes("诊断"), `${code} must have a specific safe recovery message`);
     if (code === "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND") {
-      assert.doesNotMatch(safeMessage, /还原 RoleFlow 专用 Edge（推荐）窗口/,
+      assert.doesNotMatch(safeMessage, /还原 OfferGo 专用 Edge（推荐）窗口/,
         "a zero-visible dedicated Edge window must not be presented as a recovery prerequisite");
       assert.match(safeMessage, /会话已保留/,
         "a genuine background-proof failure must say the pending conversation is preserved");
@@ -1032,7 +1032,7 @@ async function inboundResolutionDashboardSmoke({ base, browserCreations, scenari
   assert.match(page.body, /15-25K/);
   assert.match(page.body, /关联现有岗位/);
   assert.match(page.body, /保存为 HR 主动机会/);
-  assert.match(page.body, /不纳入 RoleFlow/);
+  assert.match(page.body, /不纳入 OfferGo/);
   assert.doesNotMatch(page.body, /action="[^"]*communication|发送消息/);
   assertNoPrivateData(page.body);
   let response = await postForm(base, "/api/message-discovery-unresolved", {

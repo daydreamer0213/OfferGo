@@ -27,8 +27,9 @@ try {
 function runSuite() {
   const requiredFiles = [
     "BuildInstaller.bat",
-    "assets/RoleFlow.ico",
-    "installer/RoleFlow.iss",
+    "assets/OfferGo.ico",
+    "assets/OfferGo-icon.png",
+    "installer/OfferGo.iss",
     "scripts/build-installer.ps1",
     "scripts/installed-self-check.ps1",
     "scripts/launch-installed.ps1",
@@ -39,8 +40,8 @@ function runSuite() {
     assert(fs.existsSync(path.join(root, relativePath)), `missing installer file: ${relativePath}`);
   }
 
-  const inno = read("installer/RoleFlow.iss");
-  assertWindowsIcon(readBuffer("assets/RoleFlow.ico"));
+  const inno = read("installer/OfferGo.iss");
+  assertWindowsIcon(readBuffer("assets/OfferGo.ico"));
   const innoLines = inno.split(/\r?\n/);
   assert.strictEqual(
     innoLines.filter((line) => line.trim() === "[InstallDelete]").length,
@@ -60,15 +61,15 @@ function runSuite() {
     'Type: files; Name: "{app}\\src\\core\\llm.js"'
   ], "installer overlay cleanup must remain limited to the two proven obsolete code files");
   assert.match(inno, /PrivilegesRequired=lowest/);
-  assert.match(inno, /DefaultDirName=\{localappdata\}\\Programs\\RoleFlow/);
+  assert.match(inno, /DefaultDirName=\{localappdata\}\\Programs\\OfferGo/);
   assert.match(inno, /AppId=\{\{[0-9A-F-]+\}/i);
-  assert.match(inno, /SetupIconFile=\{#StageDir\}\\assets\\RoleFlow\.ico/i);
-  assert.match(inno, /UninstallDisplayIcon=\{app\}\\assets\\RoleFlow\.ico/i);
+  assert.match(inno, /SetupIconFile=\{#StageDir\}\\assets\\OfferGo\.ico/i);
+  assert.match(inno, /UninstallDisplayIcon=\{app\}\\assets\\OfferGo\.ico/i);
   assert.match(inno, /\[Icons\]/);
   assert.match(inno, /\{autodesktop\}/);
   assert.match(inno, /Name:\s*"desktopicon"[^\r\n]*Flags:\s*checkedonce/i);
-  assert.match(inno, /Name:\s*"\{autodesktop\}\\RoleFlow"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\RoleFlow\.ico"[^\r\n]*Tasks:\s*desktopicon/i);
-  assert.match(inno, /Name:\s*"\{group\}\\RoleFlow"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\RoleFlow\.ico"/i);
+  assert.match(inno, /Name:\s*"\{autodesktop\}\\OfferGo"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"[^\r\n]*Tasks:\s*desktopicon/i);
+  assert.match(inno, /Name:\s*"\{group\}\\OfferGo"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"/i);
   assert.match(inno, /Flags:\s*nowait\s+postinstall\s+skipifsilent\s+runhidden/i);
   assert.match(inno, /\{uninstallexe\}/);
   assert.match(inno, /launch-installed\.ps1/);
@@ -85,12 +86,12 @@ function runSuite() {
   assert.doesNotMatch(inno, /vendor\\edge-control-bridge/i);
 
   const build = read("scripts/build-installer.ps1");
-  assert.match(build, /D:\\DevData\\RoleFlow-installer/);
+  assert.match(build, /D:\\DevData\\OfferGo-installer/);
   assert.match(build, /tests\\run_all\.js/);
-  assert.match(build, /installer\\RoleFlow\.iss/);
+  assert.match(build, /installer\\OfferGo\.iss/);
   assert.match(build, /Get-FileHash/);
   assert.match(build, /runtime\\node/);
-  assert.match(build, /assets\\RoleFlow\.ico/);
+  assert.match(build, /assets\\OfferGo\.ico/);
   assert.match(build, /\[switch\]\$StageOnly/);
   assert.doesNotMatch(build, /vendor\\edge-control-bridge/i);
 
@@ -665,7 +666,7 @@ function assertStandardInstallerStageBoundary() {
     const stageDir = stageMatch[1].trim();
     assert(fs.existsSync(path.join(stageDir, "scripts", "migrate-browser-profile.ps1")), "installer stage must include explicit profile migration");
     assert(fs.existsSync(path.join(stageDir, "scripts", "prepare-user-data.ps1")), "installer stage must include stable user-data preparation");
-    assertWindowsIcon(fs.readFileSync(path.join(stageDir, "assets", "RoleFlow.ico")));
+    assertWindowsIcon(fs.readFileSync(path.join(stageDir, "assets", "OfferGo.ico")));
     for (const relativePath of [
       "Install.bat",
       "Start.bat",

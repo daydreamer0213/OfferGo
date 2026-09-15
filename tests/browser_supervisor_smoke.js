@@ -55,13 +55,13 @@ function session(id = "session-1") {
 
 function expectedSnapshot(status, overrides = {}) {
   const states = {
-    unknown: [false, "尚未检查 RoleFlow 专用 Edge。", "none"],
-    starting: [false, "正在准备 RoleFlow 专用 Edge……", "none"],
-    ready: [true, "RoleFlow 专用 Edge 已准备好。", "none"],
-    unavailable: [false, "RoleFlow 专用 Edge 暂时无法使用。", "install_edge"],
-    conflict: [false, "RoleFlow 专用 Edge 存在本地冲突，未改动任何浏览器。", "view_help"],
-    stopped: [false, "RoleFlow 专用 Edge 已关闭，已保留当前进度。", "recover"],
-    needs_attention: [false, "RoleFlow 专用 Edge 需要处理后才能继续。", "view_diagnostics"]
+    unknown: [false, "尚未检查 OfferGo 专用 Edge。", "none"],
+    starting: [false, "正在准备 OfferGo 专用 Edge……", "none"],
+    ready: [true, "OfferGo 专用 Edge 已准备好。", "none"],
+    unavailable: [false, "OfferGo 专用 Edge 暂时无法使用。", "install_edge"],
+    conflict: [false, "OfferGo 专用 Edge 存在本地冲突，未改动任何浏览器。", "view_help"],
+    stopped: [false, "OfferGo 专用 Edge 已关闭，已保留当前进度。", "recover"],
+    needs_attention: [false, "OfferGo 专用 Edge 需要处理后才能继续。", "view_diagnostics"]
   };
   const [ready, message, action] = states[status];
   return {

@@ -1,11 +1,11 @@
 const STATE_DETAILS = Object.freeze({
-  unknown: Object.freeze({ ready: false, message: "尚未检查 RoleFlow 专用 Edge。", action: "none" }),
-  starting: Object.freeze({ ready: false, message: "正在准备 RoleFlow 专用 Edge……", action: "none" }),
-  ready: Object.freeze({ ready: true, message: "RoleFlow 专用 Edge 已准备好。", action: "none" }),
-  unavailable: Object.freeze({ ready: false, message: "RoleFlow 专用 Edge 暂时无法使用。", action: "install_edge" }),
-  conflict: Object.freeze({ ready: false, message: "RoleFlow 专用 Edge 存在本地冲突，未改动任何浏览器。", action: "view_help" }),
-  stopped: Object.freeze({ ready: false, message: "RoleFlow 专用 Edge 已关闭，已保留当前进度。", action: "recover" }),
-  needs_attention: Object.freeze({ ready: false, message: "RoleFlow 专用 Edge 需要处理后才能继续。", action: "view_diagnostics" })
+  unknown: Object.freeze({ ready: false, message: "尚未检查 OfferGo 专用 Edge。", action: "none" }),
+  starting: Object.freeze({ ready: false, message: "正在准备 OfferGo 专用 Edge……", action: "none" }),
+  ready: Object.freeze({ ready: true, message: "OfferGo 专用 Edge 已准备好。", action: "none" }),
+  unavailable: Object.freeze({ ready: false, message: "OfferGo 专用 Edge 暂时无法使用。", action: "install_edge" }),
+  conflict: Object.freeze({ ready: false, message: "OfferGo 专用 Edge 存在本地冲突，未改动任何浏览器。", action: "view_help" }),
+  stopped: Object.freeze({ ready: false, message: "OfferGo 专用 Edge 已关闭，已保留当前进度。", action: "recover" }),
+  needs_attention: Object.freeze({ ready: false, message: "OfferGo 专用 Edge 需要处理后才能继续。", action: "view_diagnostics" })
 });
 
 const UNAVAILABLE_CODES = new Set([

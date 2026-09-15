@@ -1,16 +1,16 @@
 {
-  "name": "roleflow",
+  "name": "offergo",
   "version": "1.3.2",
   "private": true,
   "description": "简历驱动的本地岗位筛选与投递工作流。",
   "license": "AGPL-3.0-only",
-  "homepage": "https://github.com/daydreamer0213/roleflow#readme",
+  "homepage": "https://github.com/daydreamer0213/OfferGo#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/daydreamer0213/roleflow.git"
+    "url": "git+https://github.com/daydreamer0213/OfferGo.git"
   },
   "bugs": {
-    "url": "https://github.com/daydreamer0213/roleflow/issues"
+    "url": "https://github.com/daydreamer0213/OfferGo/issues"
   },
   "type": "commonjs",
   "scripts": {

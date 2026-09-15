@@ -101,7 +101,7 @@ async function inspect(result, browserMode = "edge") {
     now: () => "2099-01-01T00:00:00.000Z"
   });
   assert.strictEqual(portableUnavailable.status, "browser_unavailable");
-  assert.match(portableUnavailable.message, /RoleFlow 专用 Edge/);
+  assert.match(portableUnavailable.message, /OfferGo 专用 Edge/);
   assert.doesNotMatch(portableUnavailable.message, /普通 Edge/);
 
   const topology = await inspectBossBrowserReadiness({
