@@ -525,7 +525,7 @@ node tests/dashboard_runtime_smoke.js
 
 Expected: all pass; API UI remains available, Agent mode needs no Key, duplicate tests coalesce, and other local pages remain responsive.
 
-- [ ] **Step 6: Commit the Agent settings UI**
+- [x] **Step 6: Commit the Agent settings UI**
 
 ```powershell
 git add src/dashboard/server.js src/dashboard/assets/runtime.js tests/model_settings_ui_smoke.js tests/onboarding_progress_ui_smoke.js
@@ -548,7 +548,7 @@ git commit -m "feat: add local Agent setup flow"
 - Consumes: generic `agent_command` runtime from Task 4.
 - Produces: regression evidence that all product model entry points use the same Agent transport and retain current workflow recovery semantics.
 
-- [ ] **Step 1: Add a contract fixture for every public model method**
+- [x] **Step 1: Add a contract fixture for every public model method**
 
 Build a map keyed by the full public adapter surface:
 
@@ -571,17 +571,17 @@ const CASES = {
 
 For split matching, assert both evidence stages travel through the same transport and local combination/validation still runs.
 
-- [ ] **Step 2: Run the expanded test and identify uncovered task behavior**
+- [x] **Step 2: Run the expanded test and identify uncovered task behavior**
 
 Run: `node tests/structured_model_adapter_smoke.js`
 
 Expected before fixture completion: FAIL on the first missing/invalid task response.
 
-- [ ] **Step 3: Complete generic transport routing without per-feature Agent branches**
+- [x] **Step 3: Complete generic transport routing without per-feature Agent branches**
 
 Fix only shared adapter/transport boundaries. Do not add Agent checks to resume optimization, interviews, message learning, job analysis, or workflow services. Those callers must keep using `createModelAdapter(modelConfig)`.
 
-- [ ] **Step 4: Verify recovery, cancellation, and no API-Key dependency**
+- [x] **Step 4: Verify recovery, cancellation, and no API-Key dependency**
 
 Run:
 
