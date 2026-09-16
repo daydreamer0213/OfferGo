@@ -73,7 +73,7 @@ async function probeAgentRunner({ runnerId, env = process.env, dataRoot, connect
     ...spec,
     runnerId: runner.id,
     dataRoot,
-    timeoutMs: 60000,
+    timeoutMs: 300000,
     maxOutputBytes: 65536
   });
   try {

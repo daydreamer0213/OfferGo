@@ -59,6 +59,8 @@ const agentVerified = async ({ runnerId }) => ({
     assert.strictEqual(runtime.modelConfig.providers.agent_command.runnerId, "codex");
     assert.strictEqual(runtime.modelConfig.providers.agent_command.dataRoot, root);
     assert.strictEqual(runtime.modelConfig.providers.agent_command.model, "account-default");
+    assert.strictEqual(runtime.modelConfig.providers.agent_command.timeoutMs, 300000,
+      "Agent runtime must allow for real Codex cold-start latency");
     assert.strictEqual(runtime.keyConfigured, false, "Agent runtime must not load an API credential");
     const adapter = createModelAdapter(runtime.modelConfig);
     assert.ok(adapter instanceof StructuredModelAdapter);

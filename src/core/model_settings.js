@@ -13,6 +13,7 @@ const REASONING_EFFORTS = new Set(["high", "max"]);
 const CREDENTIAL_REFS = new Set(["shared", "independent"]);
 const INFERENCE_MODES = new Set(["api", "agent"]);
 const AGENT_RUNNER_IDS = new Set(["codex"]);
+const AGENT_MIN_TIMEOUT_MS = 300000;
 const MODEL_TASK_PROFILE_IDS = ["deep_analysis", "batch_screening"];
 
 const RECOMMENDED_TASK_PROFILES = Object.freeze({
@@ -1341,7 +1342,7 @@ function modelConfigFromAgentSettings(settings, profileId, dataRoot) {
         model: profile.model,
         runnerVersion: normalized.agent.identity.runnerVersion,
         capabilityFingerprint: normalized.agent.capabilityFingerprint,
-        timeoutMs: profile.timeoutMs,
+        timeoutMs: Math.max(profile.timeoutMs, AGENT_MIN_TIMEOUT_MS),
         maxRetries: 0,
         thinkingMode: profile.thinkingMode,
         reasoningEffort: profile.reasoningEffort

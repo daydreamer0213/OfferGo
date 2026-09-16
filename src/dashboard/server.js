@@ -5711,6 +5711,7 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
         <span><strong>模型：</strong>${escapeHtml(agentIdentity.model || "账号默认模型")}</span>
         <span><strong>连接状态：</strong>${escapeHtml(agentStatus)}</span>
       </div>
+      <p class="hint">首次连接测试通常需要 1–3 分钟；测试期间可以继续打开 OfferGo 的其他本地页面，请不要重复点击。</p>
       <form class="settings-agent-form" method="post" action="/api/settings/model">
         <input type="hidden" name="taskProfile" value="agent_models">
         <input type="hidden" name="action" value="verify_agent">

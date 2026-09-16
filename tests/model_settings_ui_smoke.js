@@ -120,6 +120,7 @@ async function main() {
     "使用 API Key",
     "使用本机 Agent",
     "免填 API Key 不等于免费，会消耗本机 Agent 账号的套餐额度",
+    "首次连接测试通常需要 1–3 分钟",
     'name="taskProfile" value="agent_models"',
     'name="action" value="verify_agent"',
     'name="runnerId" value="codex"',
