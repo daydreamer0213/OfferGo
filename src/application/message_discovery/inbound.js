@@ -1,12 +1,10 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const {
-  immediateTransaction,
-  getActiveSearchPlan,
-  getCandidateProfile,
-  upsertJob
-} = require("../../core/storage");
+const { immediateTransaction } = require("../../storage/storage_shared");
+const { getActiveSearchPlan, getCandidateProfile } = require("../../storage/candidate_store");
+const { upsertJob, getJob, findLinkableInboundJob } = require("../../storage/job_store");
+const { recordIgnoredInboundEvent } = require("../../storage/message_discovery_store");
 const {
   ensureProgressCard,
   transitionProgressCard,
@@ -48,9 +46,7 @@ function resolveInboundOpportunity({ db, input = {}, now = () => new Date().toIS
     }
     if (action === "ignore") {
       settleInbound(db, { profileId, current, conversationKey, previewDigest, observedAt });
-      db.prepare(`INSERT INTO events(job_id, event_type, payload_json, created_at)
-        VALUES (NULL, 'message_inbound_ignored', ?, ?)`)
-        .run(JSON.stringify({ profileId, conversationKey, previewDigest }), observedAt);
+      recordIgnoredInboundEvent(db, { profileId, conversationKey, previewDigest, observedAt });
       return { profileId, action, unresolved: current, settled: true };
     }
 
@@ -122,44 +118,22 @@ function createInboundJob(db, unresolved, conversationKey) {
     qualityTags: ["inbound_unassessed"],
     analysis: {}
   }, null);
-  return mapJob(db.prepare("SELECT * FROM jobs WHERE id = ?").get(id));
+  return getJob(db, id);
 }
 
 function loadLinkableJob(db, { profileId, planId, jobId, unresolved }) {
   const id = positiveInteger(jobId, "jobId");
-  const row = db.prepare(`SELECT jobs.*
-    FROM jobs
-    WHERE jobs.id = ?
-      AND jobs.source = 'boss'
-      AND (
-        EXISTS (
-          SELECT 1 FROM candidate_progress_cards cards
-          WHERE cards.profile_id = ? AND cards.job_id = jobs.id
-        )
-        OR EXISTS (
-          SELECT 1 FROM job_observations observations
-          JOIN batches ON batches.id = observations.batch_id
-          WHERE observations.job_id = jobs.id
-            AND batches.profile_id = ?
-            AND batches.search_plan_id = ?
-        )
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM candidate_progress_cards cards
-        WHERE cards.profile_id = ? AND cards.job_id = jobs.id
-          AND cards.stage IN ('rejected', 'closed')
-      )`)
-    .get(id, profileId, profileId, planId, profileId);
-  if (!row) throw inboundError("INBOUND_JOB_NOT_LINKABLE", "selected job is not linkable to this profile");
-  if (normalized(row.title) !== normalized(unresolved.positionTitle)
-    || normalized(row.company) !== normalized(unresolved.company)) {
+  const job = findLinkableInboundJob(db, { profileId, planId, jobId: id });
+  if (!job) throw inboundError("INBOUND_JOB_NOT_LINKABLE", "selected job is not linkable to this profile");
+  if (normalized(job.title) !== normalized(unresolved.positionTitle)
+    || normalized(job.company) !== normalized(unresolved.company)) {
     throw inboundError("INBOUND_JOB_IDENTITY_MISMATCH", "selected job does not match the inbound title and company");
   }
   const existing = getProgressCardForJob(db, { profileId, jobId: id });
   if (existing && ["rejected", "closed"].includes(existing.stage)) {
     throw inboundError("INBOUND_JOB_NOT_LINKABLE", "closed or rejected job cannot be linked");
   }
-  return mapJob(row);
+  return job;
 }
 
 function settleInbound(db, { profileId, current, conversationKey, previewDigest, observedAt }) {
@@ -177,20 +151,6 @@ function settleInbound(db, { profileId, current, conversationKey, previewDigest,
     conversationKey
   });
   if (!cleared) throw inboundError("INBOUND_ITEM_NOT_FOUND", "unresolved inbound item changed before completion");
-}
-
-function mapJob(row) {
-  return {
-    id: Number(row.id),
-    source: row.source,
-    sourceId: row.source_id,
-    title: row.title,
-    company: row.company || "",
-    salary: row.salary || "",
-    location: row.location || "",
-    url: row.url || "",
-    batchId: Number(row.batch_id || 0) || null
-  };
 }
 
 function positiveInteger(value, name) {

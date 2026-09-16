@@ -539,6 +539,70 @@ function workflowHasAnalysisTasks(db, workflowRunId) {
   ).get(String(workflowRunId || "")));
 }
 
+function listWorkflowLinkIssues(db, workflowIds = []) {
+  const ids = [...new Set(workflowIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return [];
+  const rows = db.prepare(`SELECT w.id AS workflow_id, w.plan_id AS workflow_plan_id,
+    w.profile_id AS workflow_profile_id, w.scan_run_id, sr.plan_id AS scan_plan_id,
+    w.scan_batch_id, sb.search_plan_id AS scan_batch_plan_id,
+    sb.profile_id AS scan_batch_profile_id, w.communication_batch_id,
+    cb.plan_id AS communication_plan_id, cb.profile_id AS communication_profile_id
+    FROM workflow_runs w
+    LEFT JOIN scan_runs sr ON sr.id = w.scan_run_id
+    LEFT JOIN batches sb ON sb.id = w.scan_batch_id
+    LEFT JOIN communication_batches cb ON cb.id = w.communication_batch_id
+    WHERE w.id IN (${ids.map(() => "?").join(",")})`).all(...ids);
+  return rows.flatMap((row) => {
+    const issues = [];
+    if (row.scan_run_id && Number(row.scan_plan_id || 0) !== Number(row.workflow_plan_id)) {
+      issues.push({ workflowId: row.workflow_id, reason: "scan_plan_mismatch" });
+    }
+    if (row.scan_batch_id && (Number(row.scan_batch_plan_id || 0) !== Number(row.workflow_plan_id)
+      || Number(row.scan_batch_profile_id || 0) !== Number(row.workflow_profile_id))) {
+      issues.push({ workflowId: row.workflow_id, reason: "scan_batch_owner_mismatch" });
+    }
+    if (row.communication_batch_id && (Number(row.communication_plan_id || 0) !== Number(row.workflow_plan_id)
+      || Number(row.communication_profile_id || 0) !== Number(row.workflow_profile_id))) {
+      issues.push({ workflowId: row.workflow_id, reason: "communication_batch_owner_mismatch" });
+    }
+    return issues;
+  });
+}
+
+function listWorkflowStateInvariantViolations(db, workflowIds = []) {
+  const ids = [...new Set(workflowIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const violations = [];
+  for (const row of db.prepare(`SELECT tasks.id AS child_id, tasks.workflow_run_id AS workflow_id,
+      runs.status AS parent_status
+    FROM workflow_job_tasks tasks
+    LEFT JOIN workflow_runs runs ON runs.id = tasks.workflow_run_id
+    WHERE tasks.workflow_run_id IN (${placeholders}) AND tasks.status = 'running'
+      AND (runs.id IS NULL OR runs.status IN ('completed','failed','stopped'))`).all(...ids)) {
+    violations.push({ workflowId: row.workflow_id, childId: Number(row.child_id), reason: "running_task_without_active_parent" });
+  }
+  for (const row of db.prepare(`SELECT runs.id AS workflow_id, runs.status AS parent_status,
+      scans.id AS child_id, scans.status AS child_status
+    FROM workflow_runs runs JOIN scan_runs scans ON scans.id = runs.scan_run_id
+    WHERE runs.id IN (${placeholders}) AND (
+      (runs.status IN ('completed','failed','stopped') AND scans.status = 'running')
+      OR (runs.status = 'scanning' AND scans.status IN ('completed','failed','interrupted'))
+    )`).all(...ids)) {
+    violations.push({ workflowId: row.workflow_id, childId: row.child_id, reason: "scan_parent_child_status_mismatch" });
+  }
+  for (const row of db.prepare(`SELECT runs.id AS workflow_id, runs.status AS parent_status,
+      batches.id AS child_id, batches.status AS child_status
+    FROM workflow_runs runs JOIN communication_batches batches ON batches.id = runs.communication_batch_id
+    WHERE runs.id IN (${placeholders}) AND (
+      (runs.status IN ('completed','failed','stopped') AND batches.status IN ('confirmed','running','stopping'))
+      OR (runs.status = 'communicating' AND batches.status IN ('completed','stopped','interrupted','failed'))
+    )`).all(...ids)) {
+    violations.push({ workflowId: row.workflow_id, childId: Number(row.child_id), reason: "communication_parent_child_status_mismatch" });
+  }
+  return violations;
+}
+
 function insertWorkflowJobTaskRow(db, {
   workflowRunId,
   batchId,
@@ -1291,6 +1355,8 @@ module.exports = {
   jobAnalysisAttemptRow,
   countWorkflowJobTasks,
   workflowHasAnalysisTasks,
+  listWorkflowLinkIssues,
+  listWorkflowStateInvariantViolations,
   insertWorkflowJobTaskRow,
   reactivateWorkflowDetailRequiredTaskRow,
   selectReadyWorkflowJobEntries,

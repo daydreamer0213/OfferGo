@@ -307,6 +307,10 @@ const { renderCommunicationProfilePage } = require("./communication_profile_view
 const { createMessageReplyLearningService } = require("../application/message_learning");
 const { createMessageFollowUpService } = require("../application/message_follow_up");
 const { prepareInitialSearchPage } = require("../application/onboarding/initial_search_page");
+const { getMatchingCardOnboardingGate } = require("../application/onboarding/queries");
+const { getJobIdentity } = require("../application/job_queries");
+const { listCommunicationBatchIds } = require("../application/communication/queries");
+const { hasOpenMessageReplyDraft: queryOpenMessageReplyDraft } = require("../application/message_discovery/queries");
 const { createModelAdapter } = require("../adapters/models");
 const boss = require("../adapters/sites/boss");
 const { createSiteAdapter } = require("../adapters/sites");
@@ -2570,21 +2574,7 @@ async function resolveLiveInheritedContext({
 }
 
 function matchingCardOnboardingGate(db, profileId, cardId) {
-  const row = db.prepare(`
-    SELECT id FROM onboarding_runs
-    WHERE profile_id = ? AND matching_card_id = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(Number(profileId || 0), Number(cardId || 0));
-  if (!row) return null;
-  const run = getOnboardingRun(db, row.id);
-  return {
-    run,
-    ready: run?.status === "completed"
-      && run.stage === "ready"
-      && run.matchingCardId === Number(cardId)
-      && Boolean(run.searchPlanId)
-  };
+  return getMatchingCardOnboardingGate(db, { profileId, matchingCardId: cardId });
 }
 
 async function saveModelSettingsRequest(params, { root, fallbackModelConfig, connectionTester }) {
@@ -3567,7 +3557,7 @@ function handleMarkApi(db, rawBody, contentType = "application/json") {
   if (rawReasonCode && !reasonCode) return { statusCode: 400, body: { error: "invalid feedback reason" } };
   if (reviewAt && !/^\d{4}-\d{2}-\d{2}$/.test(reviewAt)) return { statusCode: 400, body: { error: "invalid reviewAt" } };
   if (status === "later" && !reviewAt) reviewAt = dateInputAfterDays(7);
-  const exists = db.prepare("SELECT id, source FROM jobs WHERE id = ?").get(jobId);
+  const exists = getJobIdentity(db, jobId);
   if (!exists) return { statusCode: 404, body: { error: "job not found" } };
   if (!profileId && exists.source !== "boss" && status === "applied") return { statusCode: 400, body: { error: "智联只读岗位不能记录为已投递。", errorCode: "READONLY_SITE_FUNNEL_FORBIDDEN" } };
 
@@ -4139,7 +4129,7 @@ async function handleProgress(req, res, db, messageDiscovery = null, replyLearni
     }
     const action = String(params.action || "").trim();
     if (action === "reply_confirmed_sent" && (card.source !== "boss"
-      || db.prepare("SELECT source FROM jobs WHERE id = ?").get(card.jobId)?.source !== "boss")) {
+      || getJobIdentity(db, card.jobId)?.source !== "boss")) {
       throw appError("MESSAGE_REPLY_PLATFORM_UNSUPPORTED", "这个平台的消息请在原始会话中自行处理。", { statusCode: 409 });
     }
     if (action === "correct_stage") {
@@ -6077,11 +6067,8 @@ function renderCommunicationCenterPage({ db, searchParams }) {
     : listWorkflowRuns(db, { profileId: profile.id, planId: plan.id, limit: 20 });
   if (site === "zhaopin") {
     const runByBatchId = new Map(runs.filter((run) => run.communicationBatchId).map((run) => [Number(run.communicationBatchId), run]));
-    const rows = db.prepare(`SELECT id FROM communication_batches
-      WHERE plan_id = ? AND profile_id = ? AND site = ?
-      ORDER BY CASE WHEN status IN ('completed', 'stopped', 'failed') THEN 1 ELSE 0 END, updated_at DESC, id DESC
-      LIMIT 20`).all(plan.id, profile.id, site);
-    const batches = rows.map(({ id }) => communicationApiResult(() => communicationStatus(db, id)));
+    const batchIds = listCommunicationBatchIds(db, { planId: plan.id, profileId: profile.id, site, limit: 20 });
+    const batches = batchIds.map((id) => communicationApiResult(() => communicationStatus(db, id)));
     if (batches.some((result) => !result.ok)) return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan, site }, integrityIssue: "communication_batch_unreadable", discoveredWorkflowRuns: runs })));
     const scoped = batches.map((result) => result.body);
     if (scoped.some(({ batch }) => batch.planId !== plan.id || batch.profileId !== profile.id || batch.site !== site)) {
@@ -6330,8 +6317,7 @@ function renderProgressPanel(card) {
 }
 
 function hasOpenMessageReplyDraft(db, profileId, cardId) {
-  return Boolean(db.prepare(`SELECT 1 FROM message_reply_drafts
-    WHERE profile_id = ? AND card_id = ? AND closed_at IS NULL LIMIT 1`).get(profileId, cardId));
+  return queryOpenMessageReplyDraft(db, { profileId, cardId });
 }
 
 function newProgressRequestKey() {

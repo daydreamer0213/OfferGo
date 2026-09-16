@@ -11,6 +11,11 @@ const HISTORY_EVENT_TYPES = new Set([
   'message_group_classified'
 ]);
 const EXPLICIT_RESUME_REQUEST = /^(?:请|麻烦|方便|劳烦)(?:你|您)?(?:发|发送|提供|传)(?:一份|一|份|下|个)?(?:详细|完整)?的?简历(?:给我|过来|一下)?吗?[。！？?!]*$|^(?:请|麻烦|方便|劳烦)(?:你|您)?(?:把)?(?:一份|一|份|下|个)?(?:详细|完整)?的?简历(?:发|发送|提供|传)(?:给我|过来|一下)?吗?[。！？?!]*$/;
+const {
+  listIncomingLinkedContexts,
+  listClassifiedMessageHistory,
+  listRawUnresolvedMessageItems
+} = require("../../storage/message_discovery_store");
 
 function listIncomingContacts(db, { profileId } = {}) {
   const profile = positiveInteger(profileId, 'profileId');
@@ -99,36 +104,15 @@ function listIncomingContacts(db, { profileId } = {}) {
 }
 
 function linkedContexts(db, profileId) {
-  return db.prepare(`SELECT contexts.*, cards.source AS platform, cards.job_id, jobs.title, jobs.company
-    FROM message_inbound_contexts contexts
-    JOIN candidate_progress_cards cards ON cards.id = contexts.card_id
-      AND cards.profile_id = contexts.profile_id
-    JOIN jobs ON jobs.id = cards.job_id
-    WHERE contexts.profile_id = ?
-      AND cards.source = jobs.source
-    ORDER BY contexts.updated_at DESC, contexts.id DESC`).all(profileId)
-    .filter(row => PLATFORMS.has(row.platform));
+  return listIncomingLinkedContexts(db, profileId);
 }
 
 function classifiedHistory(db, profileId) {
-  const placeholders = [...HISTORY_EVENT_TYPES].map(() => '?').join(',');
-  return db.prepare(`SELECT events.*, cards.source AS platform, cards.thread_key, cards.job_id, jobs.title, jobs.company
-    FROM candidate_progress_events events
-    JOIN candidate_progress_cards cards ON cards.id = events.card_id
-    JOIN jobs ON jobs.id = cards.job_id
-    WHERE cards.profile_id = ?
-      AND cards.thread_key <> ''
-      AND cards.source = jobs.source
-      AND events.type IN (${placeholders})
-    ORDER BY events.occurred_at DESC, events.id DESC`).all(profileId, ...HISTORY_EVENT_TYPES)
-    .filter(row => PLATFORMS.has(row.platform));
+  return listClassifiedMessageHistory(db, { profileId, eventTypes: [...HISTORY_EVENT_TYPES] });
 }
 
 function unresolvedItems(db, profileId) {
-  return db.prepare(`SELECT * FROM message_discovery_unresolved_items
-    WHERE profile_id = ?
-    ORDER BY last_observed_at DESC, conversation_key ASC`).all(profileId)
-    .filter(row => PLATFORMS.has(row.platform));
+  return listRawUnresolvedMessageItems(db, profileId);
 }
 
 function addContact(contacts, input) {

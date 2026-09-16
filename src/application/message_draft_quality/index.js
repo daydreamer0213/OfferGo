@@ -1,7 +1,8 @@
 "use strict";
 
 const { assessMessageDraftQuality } = require("../../core/message_draft_quality");
-const { listCandidateFacts, listCandidateAnswerMemories } = require("../../core/storage");
+const { listCandidateFacts, getActiveResumeText } = require("../../storage/candidate_store");
+const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
 
 async function generateQualityCheckedDraft({
   generate,
@@ -27,7 +28,7 @@ async function generateQualityCheckedDraft({
 }
 
 function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts = [] } = {}) {
-  if (!db || typeof db.prepare !== "function") throw new TypeError("db is required");
+  if (!db) throw new TypeError("db is required");
   const profile = positiveInteger(profileId, "profileId");
   const memories = listCandidateAnswerMemories(db, { profileId: profile, activeOnly: false, limit: 500 });
   const recentTexts = memories
@@ -35,11 +36,7 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     .slice(0, 20)
     .map((memory) => String(memory.finalText || "").trim())
     .filter(Boolean);
-  const activeResume = db.prepare(`SELECT documents.resume_text
-    FROM candidate_resume_versions versions
-    JOIN resume_documents documents ON documents.id = versions.resume_document_id
-    WHERE versions.profile_id = ? AND versions.is_active = 1
-    ORDER BY versions.updated_at DESC, versions.id DESC LIMIT 1`).get(profile);
+  const activeResumeText = getActiveResumeText(db, profile);
   const facts = listCandidateFacts(db, profile);
   const activeMemories = listCandidateAnswerMemories(db, {
     profileId: profile,
@@ -47,7 +44,7 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     source: "user_edited_reply",
     limit: 100
   });
-  const evidenceTexts = [String(activeResume?.resume_text || "").trim()]
+  const evidenceTexts = [activeResumeText.trim()]
     .concat(facts.map(factEvidenceText))
     .concat(activeMemories
       .filter((memory) => memoryMatchesQualityContext(memory, job, messageTexts))

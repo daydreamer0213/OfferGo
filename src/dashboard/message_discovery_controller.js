@@ -26,6 +26,15 @@ const {
   getActiveSearchPlan,
   closeMessageReplyDrafts
 } = require("../core/storage");
+const { getCandidateProfile } = require("../application/candidate_queries");
+const {
+  getPersistedCardJobIdentity,
+  getLatestInboundContextIdentity,
+  getDurableMessageDraftContext,
+  messageReplyDraftExists,
+  messageReplyDraftGroupExists,
+  hasBlockingReplySendItemForCard
+} = require("../application/message_discovery/queries");
 
 const DEFAULT_CLEANUP_MS = 30 * 60 * 1000;
 const ALLOWED_RUN_STATUSES = new Set(["running", "completed", "needs_user_action", "stopped"]);
@@ -94,7 +103,7 @@ function createMessageDiscoveryController(deps = {}) {
   function start(profileIdValue) {
     const profileId = messageDiscoveryProfileId(profileIdValue);
     if (!db) throw messageDiscoveryError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "message discovery controller requires db", 500);
-    const profile = db.prepare("SELECT id FROM candidate_profiles WHERE id = ?").get(profileId);
+    const profile = getCandidateProfile(db, profileId);
     if (!profile) throw messageDiscoveryError("MESSAGE_DISCOVERY_PROFILE_NOT_FOUND", "candidate profile was not found", 404);
     const previousRun = runs.get(profileId);
     if (previousRun?.status === "running") {
@@ -366,10 +375,7 @@ function createMessageDiscoveryController(deps = {}) {
   function clearProcessedCards(profileId, cardIds) {
     const targets = [...new Set(cardIds.map(Number).filter(id => id > 0))];
     for (const cardId of targets) {
-      if (db.prepare(`SELECT 1 FROM message_reply_send_items items
-        JOIN message_reply_drafts drafts ON drafts.id = items.draft_id
-        WHERE drafts.profile_id = ? AND drafts.card_id = ?
-        AND items.status IN ('pending','selecting','verified','filled','click_dispatched','ambiguous') LIMIT 1`).get(profileId, cardId)) {
+      if (hasBlockingReplySendItemForCard(db, { profileId, cardId })) {
         throw messageDiscoveryError("MESSAGE_REPLY_SEND_DRAFT_BUSY", "正在发送或结果待核对的草稿不能清除。", 409);
       }
     }
@@ -442,11 +448,11 @@ function createMessageDiscoveryController(deps = {}) {
   function sanitizeResults(results) {
     if (!Array.isArray(results)) return [];
     return results.map((item) => {
-      const persisted = db.prepare(`SELECT j.source, j.source_id FROM candidate_progress_cards c
-        JOIN jobs j ON j.id = c.job_id WHERE c.id = ? AND c.job_id = ? AND c.source = j.source`).get(Number(item?.cardId) || 0, Number(item?.jobId) || 0);
-      const context = db.prepare(`SELECT message_group_key, conversation_key
-        FROM message_inbound_contexts WHERE card_id = ?
-        ORDER BY updated_at DESC, id DESC LIMIT 1`).get(Number(item?.cardId) || 0) || {};
+      const persisted = getPersistedCardJobIdentity(db, {
+        cardId: Number(item?.cardId) || 0,
+        jobId: Number(item?.jobId) || 0
+      });
+      const context = getLatestInboundContextIdentity(db, Number(item?.cardId) || 0) || {};
       const platform = ["boss", "zhaopin"].includes(persisted?.source) ? persisted.source : "";
       const messages = Array.isArray(item?.messages)
         ? item.messages.slice(0, 2).map((message) => safeText(message, 4000)).filter(Boolean)
@@ -462,9 +468,9 @@ function createMessageDiscoveryController(deps = {}) {
         cardId: Math.max(0, Number(item?.cardId) || 0),
         jobId: Math.max(0, Number(item?.jobId) || 0),
         platform,
-        sourceJobId: safeText(persisted?.source_id, 180),
-        messageGroupKey: safeDigest(item?.messageGroupKey) || safeDigest(context.message_group_key),
-        conversationKey: safeDigest(item?.conversationKey) || safeDigest(context.conversation_key),
+        sourceJobId: safeText(persisted?.sourceId, 180),
+        messageGroupKey: safeDigest(item?.messageGroupKey) || safeDigest(context.messageGroupKey),
+        conversationKey: safeDigest(item?.conversationKey) || safeDigest(context.conversationKey),
         stage: String(item?.stage || "").slice(0, 80),
         messageIntent: MESSAGE_INTENTS.has(item?.messageIntent) ? item.messageIntent : "manual_review",
         messageCategory: String(item?.messageCategory || "").slice(0, 80),
@@ -572,7 +578,6 @@ function createMessageDiscoveryController(deps = {}) {
 
   function overlayOpenDrafts(profileId, results) {
     const byCard = new Map();
-    const persistedDraft = db.prepare("SELECT 1 AS found FROM message_reply_drafts WHERE id = ? AND profile_id = ?");
     for (const draft of listOpenMessageReplyDrafts(db, { profileId, limit: 500 })) {
       if (draft.messageIntent === "follow_up") continue;
       const values = byCard.get(draft.cardId) || [];
@@ -582,7 +587,7 @@ function createMessageDiscoveryController(deps = {}) {
     return results.map((result) => {
       if (!result.drafts.length) return result;
       const openDrafts = byCard.get(result.cardId) || [];
-      if (!openDrafts.length && !result.drafts.some((draft) => persistedDraft.get(draft.id, profileId))) return result;
+      if (!openDrafts.length && !result.drafts.some((draft) => messageReplyDraftExists(db, { draftId: draft.id, profileId }))) return result;
       if (!openDrafts.length) return null;
       const drafts = openDrafts
         .sort((left, right) => left.draftIndex - right.draftIndex)
@@ -628,7 +633,7 @@ function createMessageDiscoveryController(deps = {}) {
       .filter((draft) => draft.messageIntent !== "follow_up");
     const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 }).filter(context =>
       drafts.some(draft => draft.cardId === context.cardId && draft.messageGroupKey === context.messageGroupKey)
-      || !db.prepare("SELECT 1 FROM message_reply_drafts WHERE profile_id = ? AND card_id = ? AND message_group_key = ?").get(profileId, context.cardId, context.messageGroupKey));
+      || !messageReplyDraftGroupExists(db, { profileId, cardId: context.cardId, messageGroupKey: context.messageGroupKey }));
     const unresolved = listUnresolvedMessageDiscoveryItems(db, { profileId, platform: null });
     if (!drafts.length && !inboundContexts.length && unresolved.length === 0) return emptyStatus(profileId);
     const byCard = new Map();
@@ -677,18 +682,13 @@ function createMessageDiscoveryController(deps = {}) {
   }
 
   function durableDraftResult(profileId, cardId, drafts, contexts = []) {
-    const row = db.prepare(`SELECT c.id AS card_id, c.job_id, c.plan_id, c.stage,
-      j.title, j.company, j.salary, j.description, j.analysis_json, j.quality_tags_json, j.risks_json,
-      j.source, j.source_id, c.source AS card_source
-      FROM candidate_progress_cards c
-      JOIN jobs j ON j.id = c.job_id
-      WHERE c.id = ? AND c.profile_id = ?`).get(cardId, profileId);
+    const row = getDurableMessageDraftContext(db, { profileId, cardId });
     if (!row) throw messageDiscoveryError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "durable draft context is missing", 500);
     const platform = row.source === row.card_source && ["boss", "zhaopin"].includes(row.source) ? row.source : "";
     const first = drafts[0] || contexts[0] || {};
     const openGroupKeys = new Set(drafts.map((draft) => draft.messageGroupKey));
     const activeContexts = contexts.filter((context) => openGroupKeys.has(context.messageGroupKey)
-      || !db.prepare("SELECT 1 FROM message_reply_drafts WHERE profile_id = ? AND card_id = ? AND message_group_key = ?").get(profileId, cardId, context.messageGroupKey));
+      || !messageReplyDraftGroupExists(db, { profileId, cardId, messageGroupKey: context.messageGroupKey }));
     const inboundMessages = sanitizeInboundMessages(activeContexts.flatMap((context) => context.inboundMessages));
     const safeDrafts = drafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
       id: draft.id,

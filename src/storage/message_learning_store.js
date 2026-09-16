@@ -63,6 +63,23 @@ function listOpenMessageReplyDrafts(db, { profileId, cardId = null, limit = 100 
   return rows.map(mapDraft);
 }
 
+function messageReplyDraftExists(db, { profileId, draftId } = {}) {
+  return Boolean(db.prepare("SELECT 1 FROM message_reply_drafts WHERE id = ? AND profile_id = ?")
+    .get(Number(draftId), Number(profileId)));
+}
+
+function messageReplyDraftGroupExists(db, { profileId, cardId, messageGroupKey } = {}) {
+  return Boolean(db.prepare(`SELECT 1 FROM message_reply_drafts
+    WHERE profile_id = ? AND card_id = ? AND message_group_key = ? LIMIT 1`)
+    .get(Number(profileId), Number(cardId), String(messageGroupKey || "")));
+}
+
+function hasOpenMessageReplyDraft(db, { profileId, cardId } = {}) {
+  return Boolean(db.prepare(`SELECT 1 FROM message_reply_drafts
+    WHERE profile_id = ? AND card_id = ? AND closed_at IS NULL LIMIT 1`)
+    .get(Number(profileId), Number(cardId)));
+}
+
 function saveMessageReplyDraftEdit(db, {
   profileId,
   draftId,
@@ -582,6 +599,9 @@ module.exports = {
   recordMessageReplyDrafts,
   getMessageReplyDraft,
   listOpenMessageReplyDrafts,
+  messageReplyDraftExists,
+  messageReplyDraftGroupExists,
+  hasOpenMessageReplyDraft,
   saveMessageReplyDraftEdit,
   completeMessageReplyDraft,
   listCandidateAnswerMemories,

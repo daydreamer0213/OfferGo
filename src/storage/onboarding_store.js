@@ -164,6 +164,19 @@ function getOnboardingRunContext(db, id) {
   };
 }
 
+function getMatchingCardOnboardingGate(db, { profileId, matchingCardId } = {}) {
+  const row = db.prepare(`SELECT id FROM onboarding_runs
+    WHERE profile_id = ? AND matching_card_id = ?
+    ORDER BY created_at DESC LIMIT 1`).get(Number(profileId), Number(matchingCardId));
+  if (!row) return null;
+  const run = getOnboardingRun(db, row.id);
+  return {
+    run,
+    ready: run?.status === "completed" && run.stage === "ready"
+      && run.matchingCardId === Number(matchingCardId) && Boolean(run.searchPlanId)
+  };
+}
+
 function claimOnboardingRun(db, id) {
   const now = nowIso();
   const result = db.prepare(`
@@ -404,6 +417,7 @@ module.exports = {
   getOnboardingRun,
   getLatestReusableOnboardingRunByContentHash,
   getOnboardingRunContext,
+  getMatchingCardOnboardingGate,
   claimOnboardingRun,
   checkpointOnboardingRun,
   heartbeatOnboardingRun,

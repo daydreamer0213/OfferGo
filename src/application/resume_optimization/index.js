@@ -1,16 +1,9 @@
-const {
-  getCandidateProfile,
-  getSearchPlan,
-  listCandidateResumeVersions,
-  listCandidateFacts,
-  listCandidateAnswerMemories,
-  listDecisionPool,
-  createResumeOptimization,
-  getResumeOptimization,
-  listResumeOptimizations,
-  saveResumeOptimizationDraft,
-  activateResumeOptimization
-} = require("../../core/storage");
+const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, listCandidateFacts,
+  getCandidateResumeDocument } = require("../../storage/candidate_store");
+const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
+const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
+const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
+  saveResumeOptimizationDraft, activateResumeOptimization } = require("../../storage/resume_optimization_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   buildResumeEvidenceCatalog,
@@ -214,10 +207,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
   }
 
   function integrityJobs(ids) {
-    if (!Array.isArray(ids) || !ids.length) return [];
-    const placeholders = ids.map(() => "?").join(",");
-    return db.prepare(`SELECT id, source_id, company FROM jobs WHERE id IN (${placeholders})`)
-      .all(...ids).map((row) => ({ id: Number(row.id), sourceId: row.source_id || "", company: row.company || "" }));
+    return Array.isArray(ids) ? listJobIdentities(db, ids) : [];
   }
 
   function ownedPlan(profileId, planId) {
@@ -230,19 +220,15 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
 
   function ownedSource(profileId, versionId) {
     const id = requiredId(versionId, "sourceResumeVersionId");
-    const row = db.prepare(`SELECT rv.id, rv.resume_document_id, rv.name,
-      rd.original_file_name, rd.content_hash, rd.resume_text
-      FROM candidate_resume_versions rv
-      JOIN resume_documents rd ON rd.id = rv.resume_document_id
-      WHERE rv.id = ? AND rv.profile_id = ?`).get(id, profileId);
+    const row = getCandidateResumeDocument(db, { profileId, resumeVersionId: id });
     if (!row) throw serviceError("RESUME_OPTIMIZATION_SOURCE_NOT_OWNED", "源简历不存在或不属于当前候选人");
     return {
       id: Number(row.id),
-      documentId: Number(row.resume_document_id),
+      documentId: row.documentId,
       name: row.name,
-      fileName: row.original_file_name,
-      contentHash: row.content_hash,
-      text: row.resume_text
+      fileName: row.fileName,
+      contentHash: row.contentHash,
+      text: row.text
     };
   }
 
@@ -258,10 +244,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
   }
 
   function rowsForJobIds(ids) {
-    if (!ids.length) return [];
-    const placeholders = ids.map(() => "?").join(",");
-    const rows = new Map(db.prepare(`SELECT id, title, company FROM jobs WHERE id IN (${placeholders})`)
-      .all(...ids).map((row) => [Number(row.id), { ...row, id: Number(row.id) }]));
+    const rows = new Map(listJobSummaries(db, ids).map((row) => [row.id, row]));
     return ids.map((id) => rows.get(Number(id))).filter(Boolean);
   }
 }

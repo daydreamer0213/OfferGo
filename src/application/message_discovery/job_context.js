@@ -1,10 +1,8 @@
 "use strict";
 
-const {
-  createBatch,
-  upsertJob,
-  getActiveSearchPlan
-} = require("../../core/storage");
+const { createBatch } = require("../../storage/scan_store");
+const { upsertJob } = require("../../storage/job_store");
+const { getActiveSearchPlan } = require("../../storage/candidate_store");
 const {
   ensureProgressCard,
   bindProgressCardThread,

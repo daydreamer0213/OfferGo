@@ -176,6 +176,14 @@ function getCommunicationBatch(db, batchId) {
   return row ? batchRow(row) : null;
 }
 
+function listCommunicationBatchIds(db, { profileId, planId, site, limit = 20 } = {}) {
+  return db.prepare(`SELECT id FROM communication_batches
+    WHERE plan_id = ? AND profile_id = ? AND site = ?
+    ORDER BY CASE WHEN status IN ('completed', 'stopped', 'failed') THEN 1 ELSE 0 END, updated_at DESC, id DESC
+    LIMIT ?`).all(Number(planId), Number(profileId), String(site || ""), Math.max(1, Math.min(100, Number(limit) || 20)))
+    .map((row) => Number(row.id));
+}
+
 function bindCommunicationBatchRuntime(db, input = {}) {
   const batchId = positiveInteger(input.batchId, "COMMUNICATION_BATCH_INVALID", "batchId is required");
   const rebind = input.rebind === true;
@@ -849,6 +857,7 @@ module.exports = {
   isCommunicationJobEligible,
   createCommunicationBatch,
   getCommunicationBatch,
+  listCommunicationBatchIds,
   bindCommunicationBatchRuntime,
   touchCommunicationBatch,
   listCommunicationBatchItems,

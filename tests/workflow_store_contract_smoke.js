@@ -18,10 +18,15 @@ const WORKFLOW_EXPORTS = [
   "incrementWorkflowTimeoutCounters", "countWorkflowJobTaskStatuses", "selectEarliestRetryAvailableAt",
   "markWorkflowJobTasksStopped", "selectExpiredLeaseWorkflowJobTaskRows", "completeWorkflowJobTaskRow",
   "workflowHasAnalysisTasks",
+  "listWorkflowLinkIssues", "listWorkflowStateInvariantViolations",
   "WORKFLOW_RUN_STATUSES", "WORKFLOW_TIMEOUT_CIRCUIT_OPEN_CODE"
 ].sort();
 const MOVED_DEFINITIONS = [
-  ...WORKFLOW_EXPORTS.filter((name) => !["replaceWorkflowScanContext", "createWorkflowRun", "listWorkflowRuns", "transitionWorkflowRun", "getWorkflowObservationJob", "workflowHasAnalysisTasks"].includes(name)),
+  ...WORKFLOW_EXPORTS.filter((name) => ![
+    "replaceWorkflowScanContext", "createWorkflowRun", "listWorkflowRuns", "transitionWorkflowRun",
+    "getWorkflowObservationJob", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
+    "listWorkflowStateInvariantViolations"
+  ].includes(name)),
   "nonNegativeInteger", "workflowRunError",
   "ACTIVE_WORKFLOW_RUN_STATUSES", "TERMINAL_WORKFLOW_RUN_STATUSES", "WORKFLOW_CONTROL_STATES",
   "WORKFLOW_DETAIL_REQUIRED_CODE", "WORKFLOW_DETAIL_REQUIRED_KIND", "WORKFLOW_OBSERVATION_QUALITY_JSON_SQL",
@@ -58,13 +63,17 @@ console.log("workflow_store_contract_smoke ok (5 owner contracts)");
 
 function contract01ExportsAndFacadeIdentity() {
   assert.deepEqual(Object.keys(workflowStore).sort(), WORKFLOW_EXPORTS);
-  assert.equal(Object.keys(storage).length, 194);
-  assert.equal(Object.keys(candidateStore).length, 29);
-  assert.equal(Object.keys(jobStore).length, 29);
+  assert.equal(Object.keys(storage).length, 193);
+  assert.equal(Object.keys(candidateStore).length, 32);
+  assert.equal(Object.keys(jobStore).length, 35);
   assert.equal(Object.keys(scanStore).length, 39);
-  assert.equal(Object.keys(communicationStore).length, 16);
+  assert.equal(Object.keys(communicationStore).length, 17);
   assert.equal(Object.keys(sharedStore).length, 9);
-  for (const name of WORKFLOW_EXPORTS) assert.strictEqual(storage[name], workflowStore[name], `${name} must retain its owner reference`);
+  for (const name of WORKFLOW_EXPORTS.filter((name) => ![
+    "workflowHasAnalysisTasks", "listWorkflowLinkIssues", "listWorkflowStateInvariantViolations"
+  ].includes(name))) {
+    assert.strictEqual(storage[name], workflowStore[name], `${name} must retain its owner reference`);
+  }
   assert.strictEqual(storage.immediateTransaction, sharedStore.immediateTransaction);
   assert.strictEqual(communicationFacade, communicationStore);
   assert.equal(warnings.filter((warning) => /circular dependency/i.test(warning.message)).length, 0);

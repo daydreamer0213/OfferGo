@@ -145,6 +145,49 @@ function getMessageReplySendBatch(db, { profileId, batchId } = {}) {
   return row ? mapBatch(row) : null;
 }
 
+function getActiveMessageReplySendBatch(db, profileId) {
+  const row = db.prepare(`SELECT id FROM message_reply_send_batches
+    WHERE profile_id = ? AND status IN ('confirmed','running')
+    ORDER BY id DESC LIMIT 1`).get(Number(profileId));
+  return row ? { id: Number(row.id) } : null;
+}
+
+function getLatestMessageReplySendBatch(db, profileId) {
+  const row = db.prepare(`SELECT id FROM message_reply_send_batches
+    WHERE profile_id = ? ORDER BY id DESC LIMIT 1`).get(Number(profileId));
+  return row ? { id: Number(row.id) } : null;
+}
+
+function listActiveMessageReplySendBatches(db) {
+  return db.prepare(`SELECT id, profile_id FROM message_reply_send_batches
+    WHERE status IN ('confirmed','running') ORDER BY id`).all()
+    .map((row) => ({ id: Number(row.id), profileId: Number(row.profile_id) }));
+}
+
+function getMessageReplySendBatchOwner(db, batchId) {
+  const row = db.prepare("SELECT profile_id, status FROM message_reply_send_batches WHERE id = ?").get(Number(batchId));
+  return row ? { profileId: Number(row.profile_id), status: row.status } : null;
+}
+
+function hasBlockingReplySendItemForCard(db, { profileId, cardId } = {}) {
+  return Boolean(db.prepare(`SELECT 1 FROM message_reply_send_items items
+    JOIN message_reply_drafts drafts ON drafts.id = items.draft_id
+    WHERE drafts.profile_id = ? AND drafts.card_id = ?
+      AND items.status IN ('pending','selecting','verified','filled','click_dispatched','ambiguous') LIMIT 1`)
+    .get(Number(profileId), Number(cardId)));
+}
+
+function listActiveFollowUpCardIds(db, profileId) {
+  return db.prepare(`SELECT DISTINCT drafts.card_id AS id
+    FROM message_reply_drafts drafts
+    JOIN message_reply_send_items items ON items.draft_id = drafts.id
+    JOIN message_reply_send_batches batches ON batches.id = items.batch_id
+    WHERE drafts.profile_id = ? AND batches.profile_id = ?
+      AND drafts.message_intent = 'follow_up'
+      AND items.status IN ('pending','selecting','verified','filled','click_dispatched','ambiguous')`)
+    .all(Number(profileId), Number(profileId)).map((row) => Number(row.id));
+}
+
 function listMessageReplySendItems(db, { profileId, batchId } = {}) {
   return db.prepare(`SELECT items.* FROM message_reply_send_items items
     JOIN message_reply_send_batches batches ON batches.id = items.batch_id
@@ -526,6 +569,12 @@ module.exports = {
   deleteMessageInboundContext,
   createMessageReplySendBatch,
   getMessageReplySendBatch,
+  getActiveMessageReplySendBatch,
+  getLatestMessageReplySendBatch,
+  listActiveMessageReplySendBatches,
+  getMessageReplySendBatchOwner,
+  hasBlockingReplySendItemForCard,
+  listActiveFollowUpCardIds,
   listMessageReplySendItems,
   transitionMessageReplySendBatch,
   transitionMessageReplySendItem,

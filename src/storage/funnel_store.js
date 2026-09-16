@@ -370,6 +370,14 @@ function listFunnelProgressEvents(db, { profileId, entryIds = [] } = {}) {
       || left.eventId.localeCompare(right.eventId));
 }
 
+function listFollowUpSentCardIds(db, profileId) {
+  return db.prepare(`SELECT DISTINCT cards.id
+    FROM candidate_progress_cards cards
+    JOIN candidate_progress_events events ON events.card_id = cards.id
+    WHERE cards.profile_id = ? AND events.type = 'follow_up_sent'`)
+    .all(Number(profileId)).map((row) => Number(row.id));
+}
+
 function verifiedZhaopinStarts(db, { profileId, planId, jobId = null }) {
   return db.prepare(`SELECT e.id, c.id AS card_id, c.job_id, c.plan_id, e.occurred_at
     FROM candidate_progress_events e
@@ -670,6 +678,7 @@ module.exports = {
   listFunnelCohorts,
   getFunnelCohort,
   listFunnelProgressEvents,
+  listFollowUpSentCardIds,
   syncVerifiedCommunicationFunnelEntries,
   listUntrackedMessageFeedback
 };

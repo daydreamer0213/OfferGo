@@ -1,7 +1,8 @@
 const assert = require("node:assert");
 
 const JOB_EXPORTS = [
-  "upsertKeywordSource", "upsertJob", "listReportJobs", "markApplication", "bindBatchToPlan",
+  "upsertKeywordSource", "upsertJob", "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries",
+  "findLinkableInboundJob", "setZhaopinJobAvailability", "listReportJobs", "markApplication", "bindBatchToPlan",
   "rescorePlanObservations", "reassessBatchObservations", "addFollowUpNote", "recordCandidateJobEvent",
   "listCandidateJobEvents", "recordRecommendationFeedback", "markCandidateJob", "buildFeedbackSummary",
   "buildBatchSummary", "getLatestBatchId", "getLatestMainScanBatchId", "listDecisionPool",
@@ -13,6 +14,7 @@ const JOB_EXPORTS = [
 const CANDIDATE_EXPORTS = [
   "saveProfileAnalysis", "attachResumeDocumentFile", "getResumeDocument", "saveSearchPlan", "getCandidateProfile",
   "listCandidateProfiles", "saveCandidateResumeVersion", "listCandidateResumeVersions", "listMatchingResumeVersions",
+  "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels",
   "recordResumeParseAttempt", "listResumeParseAttempts", "updateCandidateProfile", "getSearchPlan",
   "getActiveSearchPlan", "listSearchPlans", "listProfileVersions", "getLatestProfileVersionId",
   "getSearchPlanDependency", "getMatchingCard", "getActiveMatchingCard", "listMatchingCards",
@@ -28,13 +30,17 @@ const candidateStore = require("../src/storage/candidate_store");
 const storage = require("../src/core/storage");
 process.removeListener("warning", onWarning);
 
-assert.strictEqual(JOB_EXPORTS.length, 29);
-assert.strictEqual(CANDIDATE_EXPORTS.length, 29);
-assert.strictEqual(Object.keys(storage).length, 194);
+assert.strictEqual(JOB_EXPORTS.length, 35);
+assert.strictEqual(CANDIDATE_EXPORTS.length, 32);
+assert.strictEqual(Object.keys(storage).length, 193);
 assert.deepStrictEqual(Object.keys(jobStore).sort(), JOB_EXPORTS);
 assert.deepStrictEqual(Object.keys(candidateStore).sort(), CANDIDATE_EXPORTS);
-for (const name of JOB_EXPORTS) assert.strictEqual(storage[name], jobStore[name], `${name} must be a direct facade reference`);
-for (const name of CANDIDATE_EXPORTS) assert.strictEqual(storage[name], candidateStore[name], `${name} must remain a direct facade reference`);
+for (const name of JOB_EXPORTS.filter((name) => ![
+  "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
+].includes(name))) assert.strictEqual(storage[name], jobStore[name], `${name} must be a direct facade reference`);
+for (const name of CANDIDATE_EXPORTS.filter((name) => ![
+  "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"
+].includes(name))) assert.strictEqual(storage[name], candidateStore[name], `${name} must remain a direct facade reference`);
 assert.strictEqual(warnings.filter((warning) => /circular/i.test(warning.message)).length, 0, "facade and direct stores must load without circular warnings");
 
 async function main() {

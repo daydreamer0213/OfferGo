@@ -1,17 +1,11 @@
 "use strict";
 
 const { createHash } = require("node:crypto");
-const {
-  getSearchPlan,
-  listFunnelEntries,
-  listFunnelProgressEvents,
-  listDecisionPool,
-  listOpenMessageReplyDrafts,
-  listMessageInboundContexts,
-  closeOpenMessageReplyDraftsByIntent,
-  saveMessageInboundContext,
-  recordMessageReplyDrafts
-} = require("../../core/storage");
+const { getSearchPlan } = require("../../storage/candidate_store");
+const { listFunnelEntries, listFunnelProgressEvents, listFollowUpSentCardIds } = require("../../storage/funnel_store");
+const { listDecisionPool } = require("../../storage/job_store");
+const { listOpenMessageReplyDrafts, closeOpenMessageReplyDraftsByIntent, recordMessageReplyDrafts } = require("../../storage/message_learning_store");
+const { listMessageInboundContexts, saveMessageInboundContext, listActiveFollowUpCardIds } = require("../../storage/message_reply_send_store");
 const { getProgressCardForJob } = require("../../core/candidate_progress");
 const { canonicalBossJobSourceId } = require("../../core/boss_job_identity");
 const { projectMessageFollowUpCandidate } = require("../../core/message_follow_up");
@@ -25,7 +19,7 @@ const ACTIVE_SEND_STATUSES = ["pending", "selecting", "verified", "filled", "cli
 const MAX_TEXT = 4000;
 
 function createMessageFollowUpService({ db, generateDraft, now = () => new Date().toISOString() } = {}) {
-  if (!db || typeof db.prepare !== "function") throw new TypeError("db is required");
+  if (!db) throw new TypeError("db is required");
   if (typeof generateDraft !== "function") throw new TypeError("generateDraft is required");
   if (typeof now !== "function") throw new TypeError("now must be a function");
   const qualityWarnings = new Map();
@@ -50,18 +44,8 @@ function createMessageFollowUpService({ db, generateDraft, now = () => new Date(
       profileId: owner.profileId,
       limit: 500
     }).map((context) => [context.messageGroupKey, context]));
-    const sentCards = queryCardIds(db, `SELECT DISTINCT cards.id
-      FROM candidate_progress_cards cards
-      JOIN candidate_progress_events events ON events.card_id = cards.id
-      WHERE cards.profile_id = ? AND events.type = 'follow_up_sent'`, [owner.profileId]);
-    const activeCards = queryCardIds(db, `SELECT DISTINCT drafts.card_id AS id
-      FROM message_reply_drafts drafts
-      JOIN message_reply_send_items items ON items.draft_id = drafts.id
-      JOIN message_reply_send_batches batches ON batches.id = items.batch_id
-      WHERE drafts.profile_id = ? AND batches.profile_id = ?
-        AND drafts.message_intent = 'follow_up'
-        AND items.status IN (${ACTIVE_SEND_STATUSES.map(() => "?").join(",")})`,
-    [owner.profileId, owner.profileId, ...ACTIVE_SEND_STATUSES]);
+    const sentCards = new Set(listFollowUpSentCardIds(db, owner.profileId));
+    const activeCards = new Set(listActiveFollowUpCardIds(db, owner.profileId));
     const currentTime = isoText(now(), "now");
     const candidates = [];
     for (const entry of entries) {
@@ -282,10 +266,6 @@ function grouped(items, keyOf) {
     result.get(key).push(item);
   }
   return result;
-}
-
-function queryCardIds(db, sql, params) {
-  return new Set(db.prepare(sql).all(...params).map((row) => Number(row.id)));
 }
 
 function positiveInteger(value, label) {

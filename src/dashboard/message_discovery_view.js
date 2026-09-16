@@ -1,6 +1,8 @@
 const crypto = require("node:crypto");
 const { listUnresolvedMessageDiscoveryItems } = require("../core/message_preview_state");
 const { listIncomingContacts } = require("../application/funnel_analysis");
+const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
+const { findExactIdentityCandidates } = require("../application/message_discovery/queries");
 
 function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageReplyActionToken = "", helpers }) {
   const {
@@ -18,8 +20,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   if ((!Number.isSafeInteger(profileId) || profileId <= 0) && searchParams.has("planId")) {
     const planId = Number(searchParams.get("planId"));
     if (Number.isSafeInteger(planId) && planId > 0) {
-      plan = db.prepare("SELECT id, profile_id FROM search_plans WHERE id = ?").get(planId);
-      profileId = Number(plan?.profile_id);
+      plan = getSearchPlan(db, planId);
+      profileId = Number(plan?.profileId);
     }
   }
   if (!Number.isSafeInteger(profileId) || profileId <= 0) {
@@ -38,10 +40,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         reasonCode: durableUnresolved[0].reasonCode
       }
     : pageState;
-  plan ||= db.prepare(`SELECT id FROM search_plans
-    WHERE profile_id = ?
-    ORDER BY is_active DESC, updated_at DESC, id DESC
-    LIMIT 1`).get(profileId);
+  plan ||= getLatestSearchPlan(db, profileId);
   const originQuery = searchParams.get("workSite") === "zhaopin" ? "&workSite=zhaopin" : "";
   const todayPath = plan?.id ? `/plan?planId=${plan.id}${originQuery ? "&site=zhaopin" : ""}` : "/onboarding";
   const manualPath = plan?.id ? `/queue?planId=${plan.id}${originQuery ? "&site=zhaopin" : ""}` : "/queue";
@@ -439,7 +438,9 @@ function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded =
   const back = embedded ? "" : '<button type="button" class="message-back" data-message-back>返回列表</button>';
   if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${(item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位分析尚未完成。可重新开始只读发现，或自行到智联原始会话处理。</p></section>`;
   const complete = Boolean(String(item.positionTitle || "").trim() && String(item.company || "").trim());
-  const matches = complete ? exactIdentityCandidates(db, profileId, item) : [];
+  const matches = complete ? findExactIdentityCandidates(db, {
+    profileId, title: item.positionTitle, company: item.company
+  }) : [];
   const hiddenInputs = `<input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="conversationKey" value="${escapeAttr(item.conversationKey)}"><input type="hidden" name="previewDigest" value="${escapeAttr(item.previewDigest)}">`;
   const candidateChoices = matches.map((job) =>
     `<label><input type="radio" name="jobId" value="${job.id}"${matches.length === 1 ? " checked" : ""}>${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}</label>`
@@ -455,26 +456,6 @@ function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded =
 
 function messageViewKey(type, parts) {
   return `${type}-${crypto.createHash("sha256").update(JSON.stringify(parts.map((part) => String(part || "")))).digest("hex")}`;
-}
-
-function exactIdentityCandidates(db, profileId, item) {
-  return db.prepare(`SELECT DISTINCT jobs.id, jobs.title, jobs.company
-    FROM jobs
-    LEFT JOIN candidate_progress_cards cards
-      ON cards.job_id = jobs.id AND cards.profile_id = ?
-    LEFT JOIN job_observations observations ON observations.job_id = jobs.id
-    LEFT JOIN batches ON batches.id = observations.batch_id
-    WHERE lower(trim(jobs.title)) = lower(trim(?))
-      AND lower(trim(COALESCE(jobs.company, ''))) = lower(trim(?))
-      AND (
-        cards.id IS NOT NULL
-        OR batches.profile_id = ?
-      )
-      AND COALESCE(cards.stage, '') NOT IN ('rejected', 'closed')
-    ORDER BY jobs.last_seen_at DESC, jobs.id DESC
-    LIMIT 20`)
-    .all(profileId, item.positionTitle, item.company, profileId)
-    .map((row) => ({ id: Number(row.id), title: row.title, company: row.company || "" }));
 }
 
 function messageIntentLabel(value) {

@@ -45,14 +45,18 @@ try {
 }
 
 function contract01ExportsAndReferences() {
-  assert.equal(Object.keys(storage).length, 194);
-  assert.equal(Object.keys(candidateStore).length, 29);
-  assert.equal(Object.keys(jobStore).length, 29);
+  assert.equal(Object.keys(storage).length, 193);
+  assert.equal(Object.keys(candidateStore).length, 32);
+  assert.equal(Object.keys(jobStore).length, 35);
   assert.deepEqual(Object.keys(scanStore).sort(), [...SCAN_OPERATIONS, "SCAN_RUN_STATUSES", "normalizeBossPacing"].sort());
   assert.equal(storage.SCAN_RUN_STATUSES, scanStore.SCAN_RUN_STATUSES);
   for (const name of SCAN_OPERATIONS) assert.equal(storage[name], scanStore[name]);
-  for (const name of Object.keys(candidateStore)) assert.equal(storage[name], candidateStore[name]);
-  for (const name of Object.keys(jobStore)) assert.equal(storage[name], jobStore[name]);
+  for (const name of Object.keys(candidateStore).filter((name) => ![
+    "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"
+  ].includes(name))) assert.equal(storage[name], candidateStore[name]);
+  for (const name of Object.keys(jobStore).filter((name) => ![
+    "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
+  ].includes(name))) assert.equal(storage[name], jobStore[name]);
   assert.deepEqual(Object.keys(shared).sort(), [
     "OUTCOME_STATUSES", "immediateTransaction", "nowIso", "nullableText", "optionalInteger", "optionalPositiveInteger", "parseJson", "storageError", "validDate"
   ]);

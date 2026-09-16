@@ -16,6 +16,8 @@ const {
   releaseSiteScanLease,
   stopPendingMessageReplySendItems
 } = require("../core/storage");
+const { getActiveMessageReplySendBatch, getLatestMessageReplySendBatch,
+  listActiveMessageReplySendBatches, getMessageReplySendBatchOwner } = require("../application/message_reply_sending/queries");
 
 function createMessageReplySendController({
   db,
@@ -63,9 +65,7 @@ function createMessageReplySendController({
   function confirm(input = {}) {
     if (closing) throw controllerError("MESSAGE_REPLY_SEND_CONTROLLER_CLOSING", "message reply send controller is closing");
     const profileId = positiveInteger(input.profileId, "profileId");
-    const active = db.prepare(`SELECT id FROM message_reply_send_batches
-      WHERE profile_id = ? AND status IN ('confirmed','running')
-      ORDER BY id DESC LIMIT 1`).get(profileId);
+    const active = getActiveMessageReplySendBatch(db, profileId);
     if (active || activeByProfile.has(profileId)) {
       throw controllerError("MESSAGE_REPLY_SEND_PROFILE_BUSY", "this profile already has an active reply send batch");
     }
@@ -86,16 +86,14 @@ function createMessageReplySendController({
 
   function latest(input = {}) {
     const profileId = positiveInteger(input.profileId, "profileId");
-    const row = db.prepare(`SELECT id FROM message_reply_send_batches
-      WHERE profile_id = ? ORDER BY id DESC LIMIT 1`).get(profileId);
+    const row = getLatestMessageReplySendBatch(db, profileId);
     return row ? service.status({ profileId, batchId: Number(row.id) }) : null;
   }
 
   function reconcileHistoricalBatches() {
-    const rows = db.prepare(`SELECT id, profile_id FROM message_reply_send_batches
-      WHERE status IN ('confirmed','running') ORDER BY id`).all();
+    const rows = listActiveMessageReplySendBatches(db);
     for (const row of rows) {
-      const profileId = Number(row.profile_id);
+      const profileId = row.profileId;
       const batchId = Number(row.id);
       let snapshot = loadReplySendBatch(db, { profileId, batchId });
       for (const item of snapshot.items.filter((entry) => entry.status === "click_dispatched")) {
@@ -164,9 +162,9 @@ function createMessageReplySendController({
 
   function startExecution(batchIdValue) {
     const batchId = positiveInteger(batchIdValue, "batchId");
-    const row = db.prepare("SELECT profile_id, status FROM message_reply_send_batches WHERE id = ?").get(batchId);
+    const row = getMessageReplySendBatchOwner(db, batchId);
     if (!row) throw controllerError("MESSAGE_REPLY_SEND_BATCH_NOT_FOUND", "message reply send batch was not found");
-    const profileId = Number(row.profile_id);
+    const profileId = row.profileId;
     if (scheduledByProfile.get(profileId) === batchId) scheduledByProfile.delete(profileId);
     if (row.status !== "confirmed") return Promise.resolve(status({ profileId, batchId }));
     if (closing) {

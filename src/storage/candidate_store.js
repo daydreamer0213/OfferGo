@@ -217,6 +217,41 @@ function listCandidateResumeVersions(db, profileId) {
   });
 }
 
+function getCandidateResumeDocument(db, { profileId, resumeVersionId, activeOnly = false } = {}) {
+  const row = db.prepare(`SELECT rv.id, rv.resume_document_id, rv.name,
+    rd.original_file_name, rd.content_hash, rd.resume_text
+    FROM candidate_resume_versions rv
+    JOIN resume_documents rd ON rd.id = rv.resume_document_id
+    WHERE rv.id = ? AND rv.profile_id = ?${activeOnly ? " AND rv.is_active = 1" : ""}`)
+    .get(Number(resumeVersionId), Number(profileId));
+  return row ? {
+    id: Number(row.id),
+    documentId: Number(row.resume_document_id),
+    name: row.name,
+    fileName: row.original_file_name,
+    contentHash: row.content_hash,
+    text: row.resume_text
+  } : null;
+}
+
+function getActiveResumeText(db, profileId) {
+  const row = db.prepare(`SELECT documents.resume_text
+    FROM candidate_resume_versions versions
+    JOIN resume_documents documents ON documents.id = versions.resume_document_id
+    WHERE versions.profile_id = ? AND versions.is_active = 1
+    ORDER BY versions.updated_at DESC, versions.id DESC LIMIT 1`).get(Number(profileId));
+  return String(row?.resume_text || "");
+}
+
+function listCandidateResumeVersionLabels(db, { profileId, resumeVersionIds = [] } = {}) {
+  const ids = [...new Set(resumeVersionIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  return db.prepare(`SELECT id, name, version_key FROM candidate_resume_versions
+    WHERE profile_id = ? AND id IN (${placeholders})`).all(Number(profileId), ...ids)
+    .map((row) => ({ id: Number(row.id), name: row.name, versionKey: row.version_key }));
+}
+
 function listMatchingResumeVersions(db, profileId) {
   const versions = listCandidateResumeVersions(db, profileId);
   const excludedDocumentIds = new Set(db.prepare(`
@@ -564,6 +599,9 @@ module.exports = {
   listCandidateProfiles,
   saveCandidateResumeVersion,
   listCandidateResumeVersions,
+  getCandidateResumeDocument,
+  getActiveResumeText,
+  listCandidateResumeVersionLabels,
   listMatchingResumeVersions,
   recordResumeParseAttempt,
   listResumeParseAttempts,

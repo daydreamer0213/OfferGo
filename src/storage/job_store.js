@@ -174,6 +174,73 @@ function upsertJob(db, job, batchId) {
   return id;
 }
 
+function getJob(db, jobId) {
+  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(Number(jobId));
+  return row ? rowToJob(row) : null;
+}
+
+function getJobIdentity(db, jobId) {
+  const row = db.prepare("SELECT id, source, source_id, company FROM jobs WHERE id = ?").get(Number(jobId));
+  return row ? {
+    id: Number(row.id),
+    source: row.source,
+    sourceId: row.source_id || "",
+    company: row.company || ""
+  } : null;
+}
+
+function listJobIdentities(db, jobIds = []) {
+  return selectJobsByIds(db, jobIds, "id, source_id, company")
+    .map((row) => ({ id: Number(row.id), sourceId: row.source_id || "", company: row.company || "" }));
+}
+
+function listJobSummaries(db, jobIds = []) {
+  return selectJobsByIds(db, jobIds, "id, title, company")
+    .map((row) => ({ id: Number(row.id), title: row.title || "", company: row.company || "" }));
+}
+
+function findLinkableInboundJob(db, { profileId, planId, jobId } = {}) {
+  const row = db.prepare(`SELECT jobs.*
+    FROM jobs
+    WHERE jobs.id = ?
+      AND jobs.source = 'boss'
+      AND (
+        EXISTS (SELECT 1 FROM candidate_progress_cards cards
+          WHERE cards.profile_id = ? AND cards.job_id = jobs.id)
+        OR EXISTS (SELECT 1 FROM job_observations observations
+          JOIN batches ON batches.id = observations.batch_id
+          WHERE observations.job_id = jobs.id
+            AND batches.profile_id = ? AND batches.search_plan_id = ?)
+      )
+      AND NOT EXISTS (SELECT 1 FROM candidate_progress_cards cards
+        WHERE cards.profile_id = ? AND cards.job_id = jobs.id
+          AND cards.stage IN ('rejected', 'closed'))`)
+    .get(Number(jobId), Number(profileId), Number(profileId), Number(planId), Number(profileId));
+  return row ? rowToJob(row) : null;
+}
+
+function setZhaopinJobAvailability(db, { profileId, planId, observationId, jobId, sourceId, availability } = {}) {
+  const value = availability === "offline" ? "offline" : "unknown";
+  return immediateTransaction(db, () => {
+    db.prepare(`UPDATE job_observations
+      SET analysis_json = json_set(CASE WHEN json_valid(analysis_json) THEN analysis_json ELSE '{}' END, '$.sourceAvailability', ?)
+      WHERE id = ? AND job_id = ? AND EXISTS (
+        SELECT 1 FROM batches WHERE batches.id = job_observations.batch_id
+          AND batches.profile_id = ? AND batches.search_plan_id = ?
+      )`).run(value, Number(observationId), Number(jobId), Number(profileId), Number(planId));
+    db.prepare(`UPDATE jobs
+      SET analysis_json = json_set(CASE WHEN json_valid(analysis_json) THEN analysis_json ELSE '{}' END, '$.sourceAvailability', ?)
+      WHERE id = ? AND source = 'zhaopin' AND source_id = ?`).run(value, Number(jobId), String(sourceId || ""));
+    return value;
+  });
+}
+
+function selectJobsByIds(db, jobIds, columns) {
+  const ids = [...new Set((jobIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return [];
+  return db.prepare(`SELECT ${columns} FROM jobs WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids);
+}
+
 function recordJobObservation(db, jobId, batchId, job, seenAt) {
   const contentHash = sourceContentHash(job);
   const values = [
@@ -811,7 +878,8 @@ function queueRank(job) {
 }
 
 module.exports = {
-  upsertKeywordSource, upsertJob, listReportJobs, markApplication, bindBatchToPlan, rescorePlanObservations,
+  upsertKeywordSource, upsertJob, getJob, getJobIdentity, listJobIdentities, listJobSummaries,
+  findLinkableInboundJob, setZhaopinJobAvailability, listReportJobs, markApplication, bindBatchToPlan, rescorePlanObservations,
   reassessBatchObservations, addFollowUpNote, recordCandidateJobEvent, listCandidateJobEvents, recordRecommendationFeedback,
   markCandidateJob, buildFeedbackSummary, buildBatchSummary, getLatestBatchId, getLatestMainScanBatchId, listDecisionPool,
   getOutcomeAnalyticsSnapshot, listDecisionQueue, isJobAwaitingAction, decisionBucket, applyJobQualityGovernance,

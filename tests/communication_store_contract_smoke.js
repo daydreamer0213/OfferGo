@@ -6,7 +6,7 @@ const { spawnSync } = require("node:child_process");
 const COMMUNICATION_EXPORTS = [
   "BATCH_STATUSES", "ITEM_STATUSES", "TERMINAL_ITEM_STATUSES",
   "isCommunicationJobEligible",
-  "createCommunicationBatch", "getCommunicationBatch", "touchCommunicationBatch",
+  "createCommunicationBatch", "getCommunicationBatch", "listCommunicationBatchIds", "touchCommunicationBatch",
   "bindCommunicationBatchRuntime",
   "listCommunicationBatchItems", "setCommunicationBatchStatus",
   "resumeInterruptedCommunicationBatch", "pauseCommunicationBatchAfterReservationFailure",
@@ -30,9 +30,9 @@ process.removeListener("warning", onWarning);
 assert.deepStrictEqual(Object.keys(store).sort(), COMMUNICATION_EXPORTS);
 assert.strictEqual(coreFacade, store, "core compatibility facade must export the store object itself");
 for (const name of COMMUNICATION_EXPORTS) assert.strictEqual(coreFacade[name], store[name], `${name} must keep its direct reference`);
-assert.strictEqual(Object.keys(storage).length, 194);
-assert.strictEqual(Object.keys(candidateStore).length, 29);
-assert.strictEqual(Object.keys(jobStore).length, 29);
+assert.strictEqual(Object.keys(storage).length, 193);
+assert.strictEqual(Object.keys(candidateStore).length, 32);
+assert.strictEqual(Object.keys(jobStore).length, 35);
 assert.strictEqual(Object.keys(scanStore).length, 39);
 assert.strictEqual(Object.keys(sharedStore).length, 9);
 assert.strictEqual(storage.getSearchPlan, candidateStore.getSearchPlan);

@@ -7,6 +7,7 @@ const FACT_LABELS = Object.freeze({
   accepts_relocation: "能否接受异地工作",
   accepts_overtime: "对加班的态度"
 });
+const { getLatestSearchPlan } = require("../application/candidate_queries");
 
 function renderCommunicationProfilePage({ db, searchParams, service, helpers }) {
   const {
@@ -22,8 +23,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
   }
   const profile = getCandidateProfile(db, profileId);
   if (!profile) return renderErrorPage("候选人画像不存在。", "/onboarding", { code: "COMMUNICATION_PROFILE_NOT_FOUND" });
-  const plan = db.prepare(`SELECT id FROM search_plans WHERE profile_id = ?
-    ORDER BY is_active DESC, updated_at DESC, id DESC LIMIT 1`).get(profileId);
+  const plan = getLatestSearchPlan(db, profileId);
   const data = service.listCommunicationProfile({ profileId });
   const facts = data.facts.map((fact) => renderFact(fact, { profileId, escapeHtml, escapeAttr })).join("")
     || '<p class="line">目前还没有额外记录。你改写回复后，OfferGo 会把明确的新信息补到这里。</p>';

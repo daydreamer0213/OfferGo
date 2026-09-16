@@ -64,6 +64,7 @@ const all = Object.freeze([
   "job_export_smoke.js",
   "dashboard_job_export_smoke.js",
   "workflow_store_contract_smoke.js",
+  "workflow_state_invariants_smoke.js",
   "candidate_progress_storage_smoke.js",
   "funnel_threshold_policy_smoke.js",
   "funnel_strategy_round_store_smoke.js",
@@ -166,12 +167,14 @@ const all = Object.freeze([
   "flow_smoke.js",
   "job_match_benchmark.js",
   "private_full_chain_runner_smoke.js",
+  "storage_boundary_smoke.js",
   "architecture_boundaries_smoke.js",
   "test_manifest_smoke.js"
 ]);
 
 const groups = Object.freeze({
   fast: Object.freeze([
+  "storage_boundary_smoke.js",
   "architecture_boundaries_smoke.js",
   "test_manifest_smoke.js",
   "scoring_url_smoke.js",
@@ -187,6 +190,7 @@ const groups = Object.freeze({
   "funnel_threshold_policy_smoke.js",
   "matching_card_smoke.js",
   "workflow_application_smoke.js",
+  "workflow_state_invariants_smoke.js",
   "analysis_application_smoke.js",
   "communication_runtime_smoke.js",
   "communication_application_smoke.js",

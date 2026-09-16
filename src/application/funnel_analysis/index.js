@@ -12,6 +12,7 @@ const {
 const { buildFunnelSnapshot, projectFunnelEntry } = require("../../core/funnel_maturity");
 const { listUnresolvedMessageDiscoveryItems } = require("../../core/message_preview_state");
 const { listIncomingContacts } = require("./incoming_contacts");
+const { listCandidateResumeVersionLabels } = require("../../storage/candidate_store");
 
 function createFunnelAnalysisService({ db, now = () => new Date().toISOString() } = {}) {
   if (!db) throw new Error("funnel analysis database is required");
@@ -381,11 +382,8 @@ function metric(rows, key, eligible = () => true) {
 
 function resumeLabelMap(db, profileId, entries) {
   const ids = [...new Set(entries.map((entry) => Number(entry.resumeVersionId || 0)).filter(Boolean))];
-  if (!ids.length) return new Map();
-  const placeholders = ids.map(() => "?").join(",");
-  return new Map(db.prepare(`SELECT id, name, version_key FROM candidate_resume_versions
-    WHERE profile_id = ? AND id IN (${placeholders})`).all(profileId, ...ids)
-    .map((row) => [Number(row.id), String(row.name || row.version_key || "已记录简历版本")]));
+  return new Map(listCandidateResumeVersionLabels(db, { profileId, resumeVersionIds: ids })
+    .map((row) => [row.id, String(row.name || row.versionKey || "已记录简历版本")]));
 }
 
 function decisionLabel(value) {

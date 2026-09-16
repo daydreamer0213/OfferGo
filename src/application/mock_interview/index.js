@@ -1,17 +1,8 @@
-const {
-  getCandidateProfile,
-  getSearchPlan,
-  listCandidateResumeVersions,
-  listCandidateAnswerMemories,
-  listCandidateFactRevisions,
-  listDecisionPool,
-  createMockInterviewSession,
-  getMockInterviewSession,
-  listMockInterviewSessions,
-  answerMockInterviewTurn,
-  completeMockInterviewSession,
-  recordMockInterviewRetry
-} = require("../../core/storage");
+const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCandidateResumeDocument } = require("../../storage/candidate_store");
+const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
+const { listDecisionPool } = require("../../storage/job_store");
+const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
+  answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry } = require("../../storage/mock_interview_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   normalizeInterviewSettings,
@@ -310,16 +301,14 @@ function createMockInterviewService({ db, adapter = null } = {}) {
 
   function ownedResume(profileId, resumeVersionId) {
     const id = requiredId(resumeVersionId, "resumeVersionId");
-    const row = db.prepare(`SELECT rv.id, rv.name, rd.original_file_name, rd.content_hash, rd.resume_text
-      FROM candidate_resume_versions rv JOIN resume_documents rd ON rd.id = rv.resume_document_id
-      WHERE rv.id = ? AND rv.profile_id = ? AND rv.is_active = 1`).get(id, profileId);
+    const row = getCandidateResumeDocument(db, { profileId, resumeVersionId: id, activeOnly: true });
     if (!row) throw serviceError("MOCK_INTERVIEW_RESUME_NOT_OWNED", "启用中的简历不存在或不属于当前候选人");
     return {
       id: Number(row.id),
       name: row.name,
-      fileName: row.original_file_name,
-      contentHash: row.content_hash,
-      text: row.resume_text
+      fileName: row.fileName,
+      contentHash: row.contentHash,
+      text: row.text
     };
   }
 

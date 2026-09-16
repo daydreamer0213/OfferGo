@@ -1,6 +1,8 @@
 "use strict";
 
-const { createBatch, upsertJob, getActiveSearchPlan, immediateTransaction } = require("../../core/storage");
+const { createBatch } = require("../../storage/scan_store");
+const { upsertJob, setZhaopinJobAvailability } = require("../../storage/job_store");
+const { getActiveSearchPlan } = require("../../storage/candidate_store");
 const { ensureProgressCard, bindProgressCardThread, findMessageDiscoveryJobContext } = require("../../core/candidate_progress");
 const { retryOneJobAnalysis } = require("../analysis");
 
@@ -114,16 +116,9 @@ function createZhaopinMessageJobContextResolver({
   function annotateAvailability(context, availability) {
     const value = availability === "offline" ? "offline" : "unknown";
     if (context.analysis?.sourceAvailability === value) return;
-    immediateTransaction(db, () => {
-      db.prepare(`UPDATE job_observations
-        SET analysis_json = json_set(CASE WHEN json_valid(analysis_json) THEN analysis_json ELSE '{}' END, '$.sourceAvailability', ?)
-        WHERE id = ? AND job_id = ? AND EXISTS (
-          SELECT 1 FROM batches WHERE batches.id = job_observations.batch_id
-            AND batches.profile_id = ? AND batches.search_plan_id = ?
-        )`).run(value, context.observationId, context.jobId, normalizedProfileId, context.planId);
-      db.prepare(`UPDATE jobs
-        SET analysis_json = json_set(CASE WHEN json_valid(analysis_json) THEN analysis_json ELSE '{}' END, '$.sourceAvailability', ?)
-        WHERE id = ? AND source = 'zhaopin' AND source_id = ?`).run(value, context.jobId, context.sourceId);
+    setZhaopinJobAvailability(db, {
+      profileId: normalizedProfileId, planId: context.planId, observationId: context.observationId,
+      jobId: context.jobId, sourceId: context.sourceId, availability: value
     });
   }
 

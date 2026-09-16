@@ -1,15 +1,7 @@
-const {
-  getMessageReplyDraft,
-  saveMessageReplyDraftEdit,
-  completeMessageReplyDraft,
-  listCandidateAnswerMemories,
-  reviseCandidateAnswerMemory,
-  withdrawCandidateAnswerMemory,
-  listCandidateFactRevisions,
-  saveCandidateFact,
-  listCandidateFacts,
-  deleteCandidateFact
-} = require("../../core/storage");
+const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDraft,
+  listCandidateAnswerMemories, reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
+  listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
+const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
 const {
   replyDraftDigest,
   replyDraftWasEdited,

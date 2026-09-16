@@ -1,13 +1,7 @@
-const {
-  createBatch,
-  upsertJob,
-  getSearchPlan,
-  listMatchingResumeVersions,
-  getSearchPlanDependency,
-  getCandidateMatchingContext,
-  listDecisionPool,
-  isJobAwaitingAction
-} = require("../../core/storage");
+const { createBatch } = require("../../storage/scan_store");
+const { upsertJob, listDecisionPool, isJobAwaitingAction } = require("../../storage/job_store");
+const { getSearchPlan, listMatchingResumeVersions, getSearchPlanDependency,
+  getCandidateMatchingContext } = require("../../storage/candidate_store");
 const { profileToRuntimeConfigs } = require("../../core/search_plan");
 const { loadConfigs } = require("../../config");
 const { appError } = require("../../core/observability");

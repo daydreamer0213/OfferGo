@@ -1,9 +1,7 @@
-const {
-  createMessageReplySendBatch,
-  stopPendingMessageReplySendItems,
-  getMessageReplyDraft,
-  getMessageInboundContext
-} = require("../../core/storage");
+const { createMessageReplySendBatch, stopPendingMessageReplySendItems, getMessageInboundContext,
+  getMessageReplySendBatchOwner } = require("../../storage/message_reply_send_store");
+const { getMessageReplyDraft } = require("../../storage/message_learning_store");
+const { getJobIdentity } = require("../../storage/job_store");
 const {
   loadReplySendBatch,
   transitionReplySendBatch,
@@ -59,7 +57,7 @@ function createMessageReplySendingService({
       const draft = getMessageReplyDraft(db, { profileId, draftId: item.draftId });
       if (!draft || draft.closedAt || draft.revision !== item.revision
         || replyDraftWasEdited(draft.originalText, draft.currentText)) continue;
-      const job = db.prepare("SELECT id, source_id, company FROM jobs WHERE id = ?").get(draft.jobId) || {};
+      const job = getJobIdentity(db, draft.jobId) || {};
       const context = getMessageInboundContext(db, {
         profileId,
         cardId: draft.cardId,
@@ -67,7 +65,7 @@ function createMessageReplySendingService({
       });
       const { evidenceTexts } = buildMessageDraftQualityContext(db, {
         profileId,
-        job: { id: Number(job.id || draft.jobId), sourceId: job.source_id || "", company: job.company || "" },
+        job: { id: Number(job.id || draft.jobId), sourceId: job.sourceId || "", company: job.company || "" },
         messageTexts: (context?.inboundMessages || [])
           .filter((message) => message?.kind === "text")
           .map((message) => String(message.text || ""))
@@ -125,9 +123,9 @@ function createMessageReplySendingService({
   async function completeVerifiedItem({ batchId, itemId } = {}) {
     const batch = positiveInteger(batchId, "batchId");
     const item = positiveInteger(itemId, "itemId");
-    const owner = db.prepare("SELECT profile_id FROM message_reply_send_batches WHERE id = ?").get(batch);
+    const owner = getMessageReplySendBatchOwner(db, batch);
     if (!owner) throw sendingError("MESSAGE_REPLY_SEND_BATCH_NOT_FOUND", "message reply send batch was not found");
-    const profileId = Number(owner.profile_id);
+    const profileId = owner.profileId;
     let snapshot = loadReplySendBatch(db, { profileId, batchId: batch });
     let current = snapshot.items.find((entry) => entry.id === item);
     if (!current) throw sendingError("MESSAGE_REPLY_SEND_ITEM_NOT_FOUND", "message reply send item was not found");
