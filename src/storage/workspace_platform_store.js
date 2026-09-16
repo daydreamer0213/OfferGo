@@ -16,6 +16,9 @@ function getWorkspacePlatformPreference(db) {
 
 function saveWorkspacePlatformPreference(db, platforms, { now = nowIso() } = {}) {
   const normalized = normalizeWorkspacePlatforms(platforms, { allowEmpty: false });
+  const current = getWorkspacePlatformPreference(db);
+  if (current && current.platforms.length === normalized.length
+    && current.platforms.every((site, index) => site === normalized[index])) return current;
   db.prepare(`INSERT INTO workspace_platform_preferences(
       id, platforms_json, selected_at, updated_at
     ) VALUES (1, ?, ?, ?)

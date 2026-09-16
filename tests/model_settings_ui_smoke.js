@@ -39,6 +39,7 @@ async function main() {
   db = openDb(dbPath);
   const connectionProfiles = [];
   let primaryVerificationGate = null;
+  let distinctSaveGate = null;
   server = createDashboardServer({
     db,
     browserAuthority: { browserMode: "edge", cdpPort: null, profilePath: "" },
@@ -51,6 +52,10 @@ async function main() {
       if (primaryVerificationGate && settings.taskProfile === "deep_analysis") {
         primaryVerificationGate.started();
         await primaryVerificationGate.wait;
+      }
+      if (distinctSaveGate && settings.taskProfile === "deep_analysis") {
+        distinctSaveGate.started();
+        await distinctSaveGate.wait;
       }
       return { status: "verified", checkedAt: new Date().toISOString(), latencyMs: 7, httpStatus: 200 };
     }
@@ -323,6 +328,49 @@ async function main() {
   const afterSetup = await fetch(baseUrl + "/", { redirect: "manual" });
   assert.strictEqual(afterSetup.status, 303);
   assert.strictEqual(afterSetup.headers.get("location"), "/onboarding");
+  let releaseDistinctSave;
+  let markDistinctSaveStarted;
+  const distinctSaveStarted = new Promise((resolve) => { markDistinctSaveStarted = resolve; });
+  distinctSaveGate = {
+    started: markDistinctSaveStarted,
+    wait: new Promise((resolve) => { releaseDistinctSave = resolve; })
+  };
+  try {
+    const slowDeepSave = fetch(baseUrl + "/api/settings/model", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        taskProfile: "deep_analysis", action: "save", preset: "deepseek",
+        model: "deepseek-v4-pro", timeoutMs: "60000", thinkingMode: "enabled",
+        reasoningEffort: "high", concurrency: "1", credentialMode: "shared"
+      }),
+      redirect: "manual"
+    });
+    await distinctSaveStarted;
+    const localSettings = await fetch(baseUrl + "/settings");
+    assert.strictEqual(localSettings.status, 200, "a model connection test must not block local pages");
+    const batchSave = fetch(baseUrl + "/api/settings/model", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        taskProfile: "batch_screening", action: "save_parameters", preset: "deepseek",
+        model: "deepseek-v4-pro", timeoutMs: "45000", thinkingMode: "enabled",
+        reasoningEffort: "high", concurrency: "1", credentialMode: "shared"
+      }),
+      redirect: "manual"
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    releaseDistinctSave();
+    const [deepResponse, batchResponse] = await Promise.all([slowDeepSave, batchSave]);
+    assert.strictEqual(deepResponse.status, 303);
+    assert.strictEqual(batchResponse.status, 303);
+    const finalSettings = loadModelSettings({ root, fallbackModelConfig: fallback });
+    assert.strictEqual(finalSettings.settings.taskProfiles.batch_screening.timeoutMs, 45000,
+      "a delayed distinct save must not overwrite another profile's saved parameters");
+  } finally {
+    releaseDistinctSave?.();
+    distinctSaveGate = null;
+  }
   console.log("model_settings_ui_smoke ok");
 }
 

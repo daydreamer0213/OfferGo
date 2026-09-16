@@ -343,6 +343,7 @@ const WORKSPACE_RUNTIME_MESSAGES = Object.freeze({
   unchecked: "招聘平台工作区尚未检查。",
   platform_selection_required: "请先选择要使用的招聘平台。",
   platform_disabled: "这个招聘平台尚未启用。",
+  preparing: "招聘平台选择已保存，正在准备专用 Edge 页面。",
   login_required: "部分招聘平台需要登录，登录后重新检查即可。",
   search_page_required: "招聘平台搜索页需要重新确认。",
   communication_page_required: "招聘平台消息页需要重新确认。",
@@ -733,12 +734,14 @@ function createDashboardServer({
   const modelReady = (taskProfile, options = {}) =>
     modelStateReady(getRuntimeModelState(taskProfile), taskProfile, options);
   const modelSettingsSaveFlights = new Map();
+  let modelSettingsSaveTail = Promise.resolve();
   const runModelSettingsSave = (params, operation) => {
     const normalized = Object.keys(params).sort().map((key) => [key, params[key]]);
     const fingerprint = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
     const existing = modelSettingsSaveFlights.get(fingerprint);
     if (existing) return existing;
-    const pending = Promise.resolve().then(operation);
+    const pending = modelSettingsSaveTail.then(operation, operation);
+    modelSettingsSaveTail = pending.then(() => undefined, () => undefined);
     modelSettingsSaveFlights.set(fingerprint, pending);
     const clear = () => {
       if (modelSettingsSaveFlights.get(fingerprint) === pending) {
@@ -878,12 +881,30 @@ function createDashboardServer({
     ...messageFollowUpDependencies
   });
   let workspaceRuntime = publicWorkspaceRuntimeSnapshot();
+  let requestedPlatformReconciliation = 0;
+  let settledPlatformReconciliation = 0;
+  let platformReconciliationFlight = null;
+  const pendingPlatformWorkspace = (status = "not_ready") => {
+    const enabledPlatforms = activeWorkspacePlatforms(db);
+    return publicWorkspaceRuntimeSnapshot({
+      status,
+      enabledPlatforms,
+      platforms: ["boss", "zhaopin"].map((site) => ({
+        site,
+        status: enabledPlatforms.includes(site) ? status : "platform_disabled"
+      }))
+    });
+  };
+  const visibleWorkspaceRuntime = () => platformReconciliationFlight
+    && requestedPlatformReconciliation > settledPlatformReconciliation
+      ? pendingPlatformWorkspace("preparing")
+      : workspaceRuntime;
   const runtimeLogDir = resolveRuntimeLogDir({ dataRoot, logger });
   const runtimeDiagnostics = () => buildRuntimeDiagnostics({
     applicationVersion,
     launchSessionId,
     browser: browserSupervisor?.getSnapshot?.() || null,
-    workspace: workspaceRuntime
+    workspace: visibleWorkspaceRuntime()
   });
   let activeWorkspaceReconciliation = null;
   let workspaceLoginTimer = null;
@@ -955,12 +976,47 @@ function createDashboardServer({
     pending.then(clear, clear);
     return pending;
   };
-  const reconcileWorkspaceAfterCurrent = async (input) => {
-    const current = activeWorkspaceReconciliation;
-    if (current) {
-      try { await current; } catch { /* A fresh pass still uses the newly saved preference. */ }
-    }
-    return reconcileWorkspace(input);
+  const schedulePlatformReconciliation = (requestId) => {
+    requestedPlatformReconciliation += 1;
+    workspaceRuntime = pendingPlatformWorkspace();
+    const start = () => {
+      if (platformReconciliationFlight || workspaceClosing
+        || settledPlatformReconciliation >= requestedPlatformReconciliation) return;
+      const pending = Promise.resolve().then(async () => {
+        while (!workspaceClosing && settledPlatformReconciliation < requestedPlatformReconciliation) {
+          const current = activeWorkspaceReconciliation;
+          if (current) {
+            try { await current; } catch { /* Use the latest saved choice in a fresh pass. */ }
+          }
+          const target = requestedPlatformReconciliation;
+          try {
+            await reconcileWorkspace({ startupGuidance: false, reason: "platform_settings_saved" });
+          } catch (error) {
+            workspaceRuntime = pendingPlatformWorkspace();
+            logger.warn("workspace_platform_reconciliation_deferred", {
+              requestId,
+              errorCode: String(error?.code || "WORKSPACE_RECONCILIATION_FAILED")
+            });
+          }
+          settledPlatformReconciliation = target;
+        }
+      });
+      platformReconciliationFlight = pending;
+      const clear = () => {
+        if (platformReconciliationFlight === pending) platformReconciliationFlight = null;
+        start();
+      };
+      pending.then(clear, (error) => {
+        workspaceRuntime = pendingPlatformWorkspace();
+        settledPlatformReconciliation = requestedPlatformReconciliation;
+        logger.warn("workspace_platform_reconciliation_deferred", {
+          requestId,
+          errorCode: String(error?.code || "WORKSPACE_RECONCILIATION_FAILED")
+        });
+        clear();
+      });
+    };
+    start();
   };
   const ensureManagedWorkspaceReady = async (reason, site = 'boss') => {
     const enabledPlatforms = activeWorkspacePlatforms(db);
@@ -1140,7 +1196,7 @@ function createDashboardServer({
       if (req.method === "GET" && url.pathname === "/settings/platforms") {
         return sendHtml(res, renderWorkspacePlatformSettingsPage({
           preference: getWorkspacePlatformPreference(db),
-          workspace: workspaceRuntime,
+          workspace: visibleWorkspaceRuntime(),
           searchParams: url.searchParams
         }));
       }
@@ -1199,7 +1255,7 @@ function createDashboardServer({
           pid: process.pid,
           browserAuthority: frozenBrowserAuthority,
           browserRuntime: browserSupervisor?.getSnapshot?.() || null,
-          workspaceRuntime
+          workspaceRuntime: visibleWorkspaceRuntime()
         });
       }
       if (req.method === "GET" && url.pathname === "/api/runtime-status") {
@@ -1207,7 +1263,7 @@ function createDashboardServer({
         return sendJson(res, 200, {
           application: { status: "ready", ready: true },
           browser: browserSupervisor?.getSnapshot?.() || null,
-          workspace: publicWorkspaceRuntimeSnapshot(workspaceRuntime, site)
+          workspace: publicWorkspaceRuntimeSnapshot(visibleWorkspaceRuntime(), site)
         });
       }
       if (req.method === "GET" && url.pathname === "/api/runtime-diagnostics") {
@@ -1473,20 +1529,17 @@ function createDashboardServer({
         };
         const platforms = choices[String(params.choice || "").trim().toLowerCase()];
         if (!platforms) throw appError("WORKSPACE_PLATFORM_REQUIRED", "请选择 BOSS、智联或两个平台。", { statusCode: 400 });
-        saveWorkspacePlatformPreference(db, platforms);
-        let workspacePending = false;
-        if (workspaceReconciler && browserSupervisor?.getSnapshot?.()?.ready) {
-          try {
-            await reconcileWorkspaceAfterCurrent({ startupGuidance: false, reason: "platform_settings_saved" });
-          } catch (error) {
-            workspacePending = true;
-            logger.warn("workspace_platform_reconciliation_deferred", {
-              requestId,
-              errorCode: String(error?.code || "WORKSPACE_RECONCILIATION_FAILED")
-            });
+        const previous = getWorkspacePlatformPreference(db)?.platforms || [];
+        const saved = saveWorkspacePlatformPreference(db, platforms);
+        const changed = previous.length !== saved.platforms.length
+          || previous.some((site, index) => site !== saved.platforms[index]);
+        if (changed) {
+          workspaceRuntime = pendingPlatformWorkspace();
+          if (workspaceReconciler && browserSupervisor?.getSnapshot?.()?.ready) {
+            schedulePlatformReconciliation(requestId);
           }
         }
-        const next = safeDashboardNext(params.next, `/settings/platforms?saved=1${workspacePending ? "&workspacePending=1" : ""}`);
+        const next = safeDashboardNext(params.next, `/settings/platforms?saved=1${changed ? "&workspacePending=1" : ""}`);
         return redirect(res, next);
       }
       if (req.method === "POST" && url.pathname === "/api/settings/model") return handleModelSettingsSave(req, res, { root: dataRoot, fallbackModelConfig: modelConfig, connectionTester, logger, requestId, runModelSettingsSave });
@@ -5504,6 +5557,7 @@ function renderWorkspacePlatformSettingsPage({ preference, workspace, searchPara
   const statusText = (site) => ({
     ready: "页面已就绪",
     login_required: "需要登录",
+    preparing: "正在准备",
     not_ready: "正在准备"
   })[platformStates.get(site)] || "保存后自动准备";
   const option = (value, title, description, status) => `<label class="platform-choice${selected === value ? " selected" : ""}">

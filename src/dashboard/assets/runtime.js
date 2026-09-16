@@ -50,6 +50,15 @@
         endpoint: ""
       };
     }
+    if (workspace.status === "preparing") {
+      return {
+        state: "waiting",
+        title: "招聘平台选择已保存",
+        message: "正在准备专用 Edge 页面，你可以继续填写本地资料。",
+        button: "",
+        endpoint: ""
+      };
+    }
     const loginRequired = workspace.status === "login_required";
     return {
       state: loginRequired ? "attention" : "waiting",

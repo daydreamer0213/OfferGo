@@ -334,6 +334,7 @@ function quietLogger() {
   await workspaceLoginMonitorDeadlineSmoke();
   await browserDependentWorkspaceGateSmoke();
   await workspacePlatformChangeQueueSmoke();
+  await workspacePlatformFailureSmoke();
 
   console.log("dashboard_runtime_smoke ok");
 })().catch((error) => {
@@ -654,19 +655,116 @@ async function workspacePlatformChangeQueueSmoke() {
       body: new URLSearchParams({ choice: "zhaopin", next: "/settings" }),
       redirect: "manual"
     });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const firstResponse = await Promise.race([
+      save,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("platform save waited for browser reconciliation")), 500))
+    ]);
+    assert.strictEqual(firstResponse.status, 303, "saving the choice returns before browser preparation finishes");
+    const savedAt = getWorkspacePlatformPreference(queueDb).updatedAt;
+    const repeatedResponse = await fetch(`${base}/api/settings/platforms`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ choice: "zhaopin", next: "/settings" }),
+      redirect: "manual"
+    });
+    assert.strictEqual(repeatedResponse.status, 303);
+    assert.strictEqual(getWorkspacePlatformPreference(queueDb).updatedAt, savedAt,
+      "a repeated identical choice does not rewrite the preference");
+    const changedResponse = await fetch(`${base}/api/settings/platforms`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ choice: "both", next: "/settings" }),
+      redirect: "manual"
+    });
+    assert.strictEqual(changedResponse.status, 303);
     assert.deepStrictEqual(observedPreferences, [["boss"]],
       "saving a platform choice must not overlap an active workspace reconciliation");
+    const pendingRuntime = await getJson(base, "/api/runtime-status");
+    assert.strictEqual(pendingRuntime.body.workspace.status, "preparing",
+      "the saved choice must show browser preparation without waiting for it");
+    assert.match(pendingRuntime.body.workspace.message, /已保存.*正在准备/);
     releaseFirst();
     await startup;
-    const response = await save;
-    assert.strictEqual(response.status, 303);
-    assert.deepStrictEqual(observedPreferences, [["boss"], ["zhaopin"]],
-      "the queued reconciliation must use the newly saved platform choice");
+    for (let attempt = 0; attempt < 100 && observedPreferences.length < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.deepStrictEqual(observedPreferences, [["boss"], ["boss", "zhaopin"]],
+      "repeated saves are coalesced and the one queued pass uses the latest choice");
+    const settledAt = getWorkspacePlatformPreference(queueDb).updatedAt;
+    const afterReady = await fetch(`${base}/api/settings/platforms`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ choice: "both", next: "/settings" }),
+      redirect: "manual"
+    });
+    assert.strictEqual(afterReady.status, 303);
+    assert.strictEqual(getWorkspacePlatformPreference(queueDb).updatedAt, settledAt);
+    assert.strictEqual(observedPreferences.length, 2, "the same choice does not prepare tabs again after readiness");
   } finally {
     releaseFirst?.();
     await close(server);
     queueDb.close();
     fs.rmSync(queueDbPath, { force: true });
+  }
+}
+
+async function workspacePlatformFailureSmoke() {
+  const failureDbPath = path.join(smokeRoot, `platform-failure-${process.pid}-${Date.now()}.sqlite`);
+  const failureDb = openDb(failureDbPath);
+  const supervisor = fakeSupervisor();
+  supervisor.setSnapshot(snapshot("ready"));
+  let markFailed;
+  const failed = new Promise((resolve) => { markFailed = resolve; });
+  let selectedPasses = 0;
+  const server = createDashboardServer({
+    db: failureDb,
+    dbPath: failureDbPath,
+    root,
+    dataRoot: smokeRoot,
+    forceMock: true,
+    logger: quietLogger(),
+    browserSupervisor: supervisor,
+    browserAuthority: {
+      browserMode: "portable", cdpPort: 9222,
+      profilePath: "C:\\Users\\Example\\AppData\\Local\\RoleFlow\\BrowserProfile"
+    },
+    workspaceReconciler: async () => {
+      const platforms = getWorkspacePlatformPreference(failureDb)?.platforms || [];
+      if (!platforms.length) return { status: "platform_selection_required", enabledPlatforms: [] };
+      selectedPasses += 1;
+      if (selectedPasses === 1) {
+        const error = Object.assign(new Error("browser page did not respond"), { code: "BROWSER_TIMEOUT" });
+        markFailed();
+        throw error;
+      }
+      return { status: "login_required", enabledPlatforms: platforms };
+    }
+  });
+  const base = await listen(server);
+  try {
+    await server.reconcileWorkspace({ startupGuidance: false, reason: "initial_startup" });
+    assert.strictEqual((await getJson(base, "/api/runtime-status")).body.workspace.status,
+      "platform_selection_required");
+    const response = await fetch(`${base}/api/settings/platforms`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ choice: "both" }),
+      redirect: "manual"
+    });
+    assert.strictEqual(response.status, 303);
+    await failed;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const deferred = await getJson(base, "/api/runtime-status");
+    assert.strictEqual(deferred.body.workspace.status, "not_ready",
+      "a failed browser pass leaves the saved preference pending, not unselected");
+    assert.deepStrictEqual(getWorkspacePlatformPreference(failureDb).platforms, ["boss", "zhaopin"]);
+    const retried = await postJson(base, "/api/runtime/workspace/reconcile", { site: "boss" });
+    assert.strictEqual(retried.status, 200);
+    assert.strictEqual(retried.body.workspace.status, "login_required");
+    assert.strictEqual(selectedPasses, 2, "the failed choice is not automatically replayed");
+  } finally {
+    await close(server);
+    failureDb.close();
+    fs.rmSync(failureDbPath, { force: true });
   }
 }
