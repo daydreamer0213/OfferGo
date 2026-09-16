@@ -9,6 +9,8 @@ const {
   agentError
 } = require("./agent_protocol");
 
+const RUNNER_SCHEDULERS = new Map();
+
 class AgentCommandTransport {
   constructor(config = {}) {
     this.runnerId = requiredText(config.runnerId, "runnerId");
@@ -20,21 +22,20 @@ class AgentCommandTransport {
     this.env = config.env && typeof config.env === "object" ? { ...config.env } : { ...process.env };
     this.logger = config.logger || null;
     this.identityRevision = String(config.identityRevision || this.runnerId);
-    this.inFlight = new Map();
-    this.tail = Promise.resolve();
+    this.scheduler = runnerScheduler(this.runnerId, this.identityRevision, this.command, this.args);
     this.lastIdentity = { runner: this.runnerId, model: "default", runnerVersion: "unknown" };
   }
 
   requestJson(input = {}) {
     const fingerprint = agentRequestFingerprint(input, this.identityRevision);
-    const existing = this.inFlight.get(fingerprint);
+    const existing = this.scheduler.inFlight.get(fingerprint);
     if (existing) return existing;
     const operation = () => this.runRequest(input);
-    const pending = this.tail.then(operation, operation);
-    this.tail = pending.then(() => undefined, () => undefined);
-    this.inFlight.set(fingerprint, pending);
+    const pending = this.scheduler.tail.then(operation, operation);
+    this.scheduler.tail = pending.then(() => undefined, () => undefined);
+    this.scheduler.inFlight.set(fingerprint, pending);
     pending.finally(() => {
-      if (this.inFlight.get(fingerprint) === pending) this.inFlight.delete(fingerprint);
+      if (this.scheduler.inFlight.get(fingerprint) === pending) this.scheduler.inFlight.delete(fingerprint);
     }).catch(() => undefined);
     return pending;
   }
@@ -93,6 +94,18 @@ class AgentCommandTransport {
       fs.rmSync(requestDir, { recursive: true, force: true });
     }
   }
+}
+
+function runnerScheduler(runnerId, identityRevision, command, args) {
+  const key = crypto.createHash("sha256")
+    .update(JSON.stringify([runnerId, identityRevision, command, args]))
+    .digest("hex");
+  let scheduler = RUNNER_SCHEDULERS.get(key);
+  if (!scheduler) {
+    scheduler = { tail: Promise.resolve(), inFlight: new Map() };
+    RUNNER_SCHEDULERS.set(key, scheduler);
+  }
+  return scheduler;
 }
 
 function runChild({ command, args, cwd, env, stdin, timeoutMs, maxOutputBytes, signal }) {

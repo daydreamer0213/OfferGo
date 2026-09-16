@@ -98,6 +98,19 @@ async function expectCode(promise, code) {
     assert.strictEqual(serial.length, 2);
     assert.ok(serial[0].endedAt <= serial[1].startedAt, JSON.stringify(serial));
 
+    fs.writeFileSync(auditPath, "");
+    const peer = makeTransport(root, {
+      FAKE_AGENT_AUDIT: auditPath,
+      FAKE_AGENT_DELAY_MS: "60"
+    });
+    await Promise.all([
+      coalesced.requestJson({ systemPrompt: "system", input: { peer: 1 }, kind: "peer-first" }),
+      peer.requestJson({ systemPrompt: "system", input: { peer: 2 }, kind: "peer-second" })
+    ]);
+    const sharedSerial = fs.readFileSync(auditPath, "utf8").trim().split(/\r?\n/).map(JSON.parse);
+    assert.strictEqual(sharedSerial.length, 2);
+    assert.ok(sharedSerial[0].endedAt <= sharedSerial[1].startedAt, JSON.stringify(sharedSerial));
+
     const requestRoot = path.join(root, ".runtime", "agent-requests");
     assert.deepStrictEqual(fs.existsSync(requestRoot) ? fs.readdirSync(requestRoot) : [], []);
     console.log("agent command transport smoke passed");

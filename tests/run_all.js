@@ -127,6 +127,7 @@ const tests = [
   "mock_interview_service_smoke.js",
   "dashboard_mock_interview_smoke.js",
   "analyzer_initialization_smoke.js",
+  "agent_model_settings_smoke.js",
   "model_settings_smoke.js",
   "cli_model_settings_root_smoke.js",
   "model_task_profiles_smoke.js",

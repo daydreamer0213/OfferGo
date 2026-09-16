@@ -371,7 +371,7 @@ git commit -m "feat: add isolated Codex model runner"
 - Consumes: `AgentCommandTransport`, runner registry, and `StructuredModelAdapter`.
 - Produces: persisted `inferenceMode: "api" | "agent"`; `agent: { runnerId, capabilityFingerprint, verifiedAt, identity }`; runtime provider `agent_command`; `testAgentConnection({ root, runnerId, ... })`.
 
-- [ ] **Step 1: Write failing settings persistence and runtime tests**
+- [x] **Step 1: Write failing settings persistence and runtime tests**
 
 Cover legacy settings defaulting to API mode, Agent save without a Key, invalid runner rejection, no credential-store write, separate task-profile revisions, and runtime config:
 
@@ -393,13 +393,13 @@ assert.strictEqual(inspectSecret(root, "model-api-key-shared").configured, false
 
 Assert switching modes does not delete an already saved API Key and does not silently use it in Agent mode.
 
-- [ ] **Step 2: Run settings tests and verify the missing API**
+- [x] **Step 2: Run settings tests and verify the missing API**
 
 Run: `node tests/agent_model_settings_smoke.js`
 
 Expected: FAIL because `saveVerifiedAgentConfiguration` is not exported.
 
-- [ ] **Step 3: Extend normalized settings without breaking legacy files**
+- [x] **Step 3: Extend normalized settings without breaking legacy files**
 
 Normalize absent `inferenceMode` to `api`. Store Agent metadata separately from shared/independent API credentials. Do not include executable paths or commands in saved settings. Compute task-profile revisions from mode, runner ID, capability fingerprint, identity, and existing task parameters.
 
@@ -423,7 +423,7 @@ Runtime construction for Agent mode must produce:
 
 API mode continues to use `modelConfigFromProfile` and the encrypted secret store.
 
-- [ ] **Step 4: Construct the Agent adapter from the central factory**
+- [x] **Step 4: Construct the Agent adapter from the central factory**
 
 In `src/adapters/models/index.js`, add only the generic provider branch:
 
@@ -442,7 +442,7 @@ if (provider === "agent_command") {
 
 Do not add Codex-specific conditions to `StructuredModelAdapter`, workflow services, or dashboard controllers.
 
-- [ ] **Step 5: Run focused settings and factory tests**
+- [x] **Step 5: Run focused settings and factory tests**
 
 Run:
 
@@ -455,7 +455,7 @@ node tests/analyzer_initialization_smoke.js
 
 Expected: all pass; legacy/API settings remain compatible, and Agent mode constructs one generic adapter.
 
-- [ ] **Step 6: Register and commit Agent settings**
+- [x] **Step 6: Register and commit Agent settings**
 
 Add `agent_model_settings_smoke.js` to `tests/run_all.js`, then:
 
