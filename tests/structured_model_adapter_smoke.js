@@ -114,6 +114,7 @@ const transport = {
   assert.strictEqual(adapter.provider, "agent_command");
   assert.strictEqual(adapter.model, "account-default");
   assert.match(calls.find((call) => call.kind === "reviewMockInterviewRetry").systemPrompt, /只比较/);
+  assert.match(calls.find((call) => call.kind === "generateResumeOptimization").systemPrompt, /必须为 1-12 条/);
   assert.deepStrictEqual(
     new Set(calls.map((call) => call.kind)),
     new Set([...cases.map(([method]) => method), "matchResponsibilities", "matchRequirements"])
