@@ -31,6 +31,31 @@ const ERROR_GUIDANCE = Object.freeze({
     impact: "本轮没有继续分析，已保存进度仍然保留。",
     nextAction: "前往“模型与设置”完成连接测试后再继续。"
   },
+  MODEL_AGENT_NOT_INSTALLED: {
+    title: "没有找到本机 Codex",
+    impact: "Agent 模式尚未启用，当前已保存的模型设置不受影响。",
+    nextAction: "请先安装 Codex，并在终端完成登录，然后返回模型设置重新测试。"
+  },
+  MODEL_AGENT_UPDATE_REQUIRED: {
+    title: "本机 Codex 需要更新",
+    impact: "当前版本不支持 OfferGo 所需的安全调用方式，Agent 模式尚未启用。",
+    nextAction: "请先更新 Codex，然后返回模型设置重新测试。"
+  },
+  MODEL_AGENT_AUTH_REQUIRED: {
+    title: "本机 Codex 尚未登录",
+    impact: "Agent 模式尚未启用，OfferGo 没有保存或修改你的登录信息。",
+    nextAction: "请先在终端运行 Codex 并完成登录，然后返回模型设置重新测试。"
+  },
+  MODEL_AGENT_QUOTA_EXHAUSTED: {
+    title: "本机 Codex 额度不足",
+    impact: "本次连接测试已停止，Agent 模式没有被重复执行或部分保存。",
+    nextAction: "请检查 Codex 账号套餐或等待额度恢复，然后返回模型设置重新测试。"
+  },
+  MODEL_AGENT_UNAVAILABLE: {
+    title: "本机 Codex 暂时不可用",
+    impact: "本次连接测试没有完成，当前已保存的模型设置不受影响。",
+    nextAction: "请检查 Codex 是否能在终端正常运行，然后返回模型设置重新测试。"
+  },
   BOSS_LOGIN_REQUIRED: {
     title: "BOSS 登录已经失效",
     impact: "OfferGo 已停止访问页面，当前进度仍然保留。",

@@ -134,10 +134,12 @@ const {
   loadModelSettings,
   saveModelTaskProfileParameters,
   saveVerifiedPrimaryModelProfiles,
+  saveVerifiedAgentConfiguration,
   saveVerifiedModelTaskProfile,
   saveVerifiedBatchBackup,
   restoreRecommendedTaskProfile,
   testModelConnection,
+  testAgentConnection,
   resolveRuntimeModelConfig,
   resolveRuntimeBatchBackup,
   isModelReady,
@@ -535,6 +537,7 @@ function createDashboardServer({
   modelReadinessChecker = null,
   batchBackupResolver = null,
   connectionTester = testModelConnection,
+  agentConnectionTester = testAgentConnection,
   logger = createLogger({ root: dataRoot, component: "dashboard" }),
   spawnProcess = spawn,
   workflowHealth = {},
@@ -1542,7 +1545,7 @@ function createDashboardServer({
         const next = safeDashboardNext(params.next, `/settings/platforms?saved=1${changed ? "&workspacePending=1" : ""}`);
         return redirect(res, next);
       }
-      if (req.method === "POST" && url.pathname === "/api/settings/model") return handleModelSettingsSave(req, res, { root: dataRoot, fallbackModelConfig: modelConfig, connectionTester, logger, requestId, runModelSettingsSave });
+      if (req.method === "POST" && url.pathname === "/api/settings/model") return handleModelSettingsSave(req, res, { root: dataRoot, fallbackModelConfig: modelConfig, connectionTester, agentConnectionTester, logger, requestId, runModelSettingsSave });
       if (req.method === "POST" && url.pathname === "/api/profile") return handleProfileSave(req, res, db, { logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/resume-version") return handleResumeVersionSave(req, res, { db, root, dataRoot, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/plan/recommend") return handlePlanRecommend(req, res, { db, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
@@ -1948,7 +1951,7 @@ async function handleMatchCardConfirm(req, res, { db, logger, requestId }) {
   }
 }
 
-async function handleModelSettingsSave(req, res, { root, fallbackModelConfig, connectionTester, logger, requestId, runModelSettingsSave }) {
+async function handleModelSettingsSave(req, res, { root, fallbackModelConfig, connectionTester, agentConnectionTester, logger, requestId, runModelSettingsSave }) {
   let taskProfile = "";
   let action = "";
   try {
@@ -1958,7 +1961,8 @@ async function handleModelSettingsSave(req, res, { root, fallbackModelConfig, co
     const result = await runModelSettingsSave(params, () => saveModelSettingsRequest(params, {
       root,
       fallbackModelConfig,
-      connectionTester
+      connectionTester,
+      agentConnectionTester
     }));
     logger.info(result.event, { requestId, ...result.metadata });
     redirect(res, result.location);
@@ -2572,9 +2576,29 @@ function matchingCardOnboardingGate(db, profileId, cardId) {
   };
 }
 
-async function saveModelSettingsRequest(params, { root, fallbackModelConfig, connectionTester }) {
+async function saveModelSettingsRequest(params, { root, fallbackModelConfig, connectionTester, agentConnectionTester }) {
   const taskProfile = String(params.taskProfile || "").trim();
   const action = String(params.action || "save").trim();
+  if (taskProfile === "agent_models") {
+    if (action !== "verify_agent") {
+      throw appError("MODEL_SETTINGS_ACTION_INVALID", "模型设置操作无效。", { statusCode: 400 });
+    }
+    const state = await saveVerifiedAgentConfiguration({
+      root,
+      input: { inferenceMode: "agent", runnerId: String(params.runnerId || "") },
+      fallbackModelConfig,
+      agentConnectionTester
+    });
+    return {
+      event: "agent_model_verified",
+      metadata: {
+        runnerId: state.settings.agent.runnerId,
+        runnerVersion: state.settings.agent.identity.runnerVersion,
+        capabilityFingerprint: state.settings.agent.capabilityFingerprint
+      },
+      location: "/settings?profile=agent_models&modelConfigured=1"
+    };
+  }
   if (taskProfile === "primary_models") {
     if (action !== "verify_primary") {
       throw appError("MODEL_SETTINGS_ACTION_INVALID", "模型设置操作无效。", { statusCode: 400 });
@@ -5404,7 +5428,11 @@ function renderOnboarding({ profiles, modelState, modelReady, selectedProfileId 
   const selectedId = String(selectedProfileId || "");
   const options = profiles.map((profile) => `<option value="${escapeAttr(profile.id)}"${String(profile.id) === selectedId ? " selected" : ""}>更新：${escapeHtml(profile.displayName)}（${escapeHtml(profile.updatedAt.slice(0, 10))}）</option>`).join("");
   const settings = modelState?.settings || {};
-  const status = modelReady ? `${settings.preset || settings.provider} · ${settings.model} · 已验证` : "模型尚未通过连接测试";
+  const status = modelReady
+    ? settings.inferenceMode === "agent"
+      ? `Codex · ${settings.agent?.identity?.model || "账号默认模型"} · 已验证`
+      : `${settings.preset || settings.provider} · ${settings.model} · 已验证`
+    : "模型尚未通过连接测试";
   const unavailable = modelReady ? "" : `<p class="setup-warning">解析简历需要可用模型。你仍可查看已有岗位和投递记录；要新建或更新画像，请先<a href="/settings?next=%2Fonboarding">配置并测试模型</a>。</p>`;
   return renderLegacyDashboardPage({ title: "简历分析", currentPath: "/onboarding", stage: "入门", body: `<main id="main-content">
   <h1>简历分析</h1>
@@ -5417,7 +5445,7 @@ function renderOnboarding({ profiles, modelState, modelReady, selectedProfileId 
     <label>或粘贴简历文本<textarea id="resume-text" name="resumeText" placeholder="工作/实习经历、项目经历、专业技能、个人优势" oninput="document.querySelector('[name=resume]').value=''"></textarea></label>
     <div class="inline-form"><button type="button" data-template="${escapeAttr(JSON.stringify(resumeTextTemplate()))}" onclick="const target=document.getElementById(&quot;resume-text&quot;);if(!target.value.trim())target.value=JSON.parse(this.dataset.template);target.focus()">使用模板</button></div>
     ${renderResumePreviewControls()}
-    <p class="hint">提交后先在本地提取文本；姓名、手机号、邮箱、住址和身份证号会在本地遮盖后再发送模型，由当前模型厂商生成画像和本地筛选方案。API Key 与原始文件不会随请求发送。</p>
+    <p class="hint">提交后先在本地提取文本；姓名、手机号、邮箱、住址和身份证号会在本地遮盖后再发送当前模型，由它生成画像和本地筛选方案。API Key 与原始文件不会随请求发送。</p>
   </form>
   ${profiles.length ? `<section class="panel"><h2>已有候选人</h2>${profiles.map((profile) => `<p><a href="/plan?profileId=${profile.id}&planId=${profile.activePlanId || ""}">${escapeHtml(profile.displayName)}</a> · 最近更新 ${escapeHtml(profile.updatedAt.slice(0, 16).replace("T", " "))}</p>`).join("")}</section>` : ""}
 </main>${resumePreviewScript()}` });
@@ -5584,6 +5612,8 @@ function renderWorkspacePlatformSettingsPage({ preference, workspace, searchPara
 
 function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady = false }) {
   const settings = modelState.settings || {};
+  const inferenceMode = settings.inferenceMode === "agent" ? "agent" : "api";
+  const agent = settings.agent || {};
   const currentCredentials = [
     settings.sharedCredential,
     settings.independentCredentials?.deep_analysis,
@@ -5600,6 +5630,8 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
       ? "备用模型连接测试通过，配置已保存。"
       : selectedProfile === "primary_models"
         ? "深度分析和批量筛选连接测试均已通过，配置已保存。"
+        : selectedProfile === "agent_models"
+          ? "本机 Agent 连接测试通过，已启用免填 API Key 模式。"
         : "模型连接测试通过，配置已保存。"}</p>`
     : "";
   const modelSaved = searchParams.get("modelSaved")
@@ -5608,9 +5640,15 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
   const restored = searchParams.get("recommended")
     ? `<p class="setup-warning">已恢复推荐值；请重新测试连接后再使用该任务配置。</p>`
     : "";
-  const nextStep = primaryModelsReady
+  const readyNextStep = primaryModelsReady
     ? `<a class="settings-next" href="/onboarding">下一步：填写简历</a>`
+    : "";
+  const apiNextStep = inferenceMode === "api" && readyNextStep
+    ? readyNextStep
     : `<span class="settings-next disabled" aria-disabled="true" tabindex="-1">下一步：填写简历</span><small class="settings-next-hint">请先测试两项主模型连接。</small>`;
+  const agentNextStep = inferenceMode === "agent" && readyNextStep
+    ? readyNextStep
+    : `<span class="settings-next disabled" aria-disabled="true" tabindex="-1">下一步：填写简历</span><small class="settings-next-hint">请先测试本机 Agent 连接。</small>`;
   const keyStatus = modelState.keyErrorCode === "SECRET_UNREADABLE"
     ? "API Key 文件无法解密，请重新输入"
     : modelState.keyConfigured
@@ -5630,16 +5668,25 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
     selected: selectedProfile === "batch_backup"
   });
   const presetJson = JSON.stringify(presets).replace(/</g, "\\u003c");
+  const agentIdentity = agent.identity || {};
+  const agentVerified = Boolean(agent.capabilityFingerprint && agent.verifiedAt);
+  const agentStatus = agentVerified
+    ? `已验证 · ${agentIdentity.runnerVersion || "版本未知"} · ${String(agent.verifiedAt).replace("T", " ").slice(0, 16)}`
+    : "尚未验证";
   const body = `<style>
-    .settings-page{max-width:1160px;padding-top:28px}.settings-header{max-width:760px;margin:28px 0 20px}.settings-header h1{font-size:30px;margin:4px 0 9px}.eyebrow{margin:0;color:#176b5b;font-size:13px;font-weight:700}.settings-credentials{border-left:4px solid #176b5b}.settings-provider-link{margin-bottom:0}.settings-next{display:inline-flex;align-items:center;min-height:42px;padding:0 16px;border-radius:6px;background:#176b5b;color:#fff;font-weight:700;text-decoration:none}.settings-next:hover{background:#115447;text-decoration:none}.settings-next.disabled{background:#d8dee3;color:#68737d;cursor:not-allowed}.settings-next-hint{align-self:center;color:#57606a}.settings-shared-actions{justify-content:flex-start;align-items:center}.settings-primary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.settings-profile{min-width:0;scroll-margin-top:18px;padding:22px}.settings-profile.selected{box-shadow:0 0 0 3px #b9ddd4}.settings-profile-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.settings-profile-head h2{font-size:21px;margin-bottom:4px}.settings-current{margin:0;color:#46545e;font-size:13px}.settings-recommended{margin:12px 0;padding:10px 12px;border:1px solid #c9d8de;border-radius:6px;background:#f7fafb;color:#46545e;font-size:13px}.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.settings-field{display:grid;gap:6px;font-size:14px;font-weight:600}.settings-field input,.settings-field select{width:100%;box-sizing:border-box}.settings-field small{font-size:12px;line-height:1.45;font-weight:400;color:#57606a}.settings-field-wide{grid-column:1/-1}.settings-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px;margin-top:18px}.settings-secondary{background:#fff;color:#176b5b;border-color:#176b5b}.settings-advanced{margin-top:16px}.settings-advanced summary{cursor:pointer;font-weight:700}.settings-advanced-grid{margin-top:14px}.settings-status{padding:9px 11px;border-left:3px solid #8c959f;background:#f6f8fa}.settings-status.verified{border-left-color:#176b5b;background:#edf7f4}.settings-backup{scroll-margin-top:18px}.settings-backup summary{cursor:pointer;font-size:18px;font-weight:700}.settings-backup-body{padding-top:16px}.settings-toggle{display:flex;align-items:center;gap:8px}.settings-toggle input{width:auto}.setup-warning{border-left:4px solid #bf8700;background:#fff8c5;padding:10px 12px;margin:12px 0}@media(max-width:900px){.settings-primary-grid{grid-template-columns:1fr}}@media(max-width:760px){.settings-page{padding-top:16px}.settings-header{margin:20px 0 16px}.settings-header h1{font-size:26px}.settings-profile{padding:16px}.settings-profile-head{display:block}.settings-current{margin-top:7px}.settings-grid{grid-template-columns:1fr}.settings-field-wide{grid-column:auto}.settings-actions{justify-content:stretch}.settings-actions button{width:100%}.settings-next{box-sizing:border-box;justify-content:center;width:100%}}
+    .settings-page{max-width:1160px;padding-top:28px}.settings-header{max-width:760px;margin:28px 0 20px}.settings-header h1{font-size:30px;margin:4px 0 9px}.eyebrow{margin:0;color:#176b5b;font-size:13px;font-weight:700}.settings-mode-picker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 16px}.settings-mode-button{display:grid;gap:4px;text-align:left;padding:16px;border:1px solid #c9d8de;border-radius:8px;background:#fff;color:#26323a}.settings-mode-button strong{font-size:17px}.settings-mode-button small{color:#57606a}.settings-mode-button[aria-pressed="true"]{border-color:#176b5b;box-shadow:0 0 0 2px #b9ddd4;background:#edf7f4}.settings-mode-panel[hidden]{display:none}.settings-credentials{border-left:4px solid #176b5b}.settings-agent{border-left:4px solid #4b57a6}.settings-agent-facts{display:grid;gap:8px;margin:16px 0;padding:14px;background:#f6f8fa;border-radius:6px}.settings-provider-link{margin-bottom:0}.settings-next{display:inline-flex;align-items:center;min-height:42px;padding:0 16px;border-radius:6px;background:#176b5b;color:#fff;font-weight:700;text-decoration:none}.settings-next:hover{background:#115447;text-decoration:none}.settings-next.disabled{background:#d8dee3;color:#68737d;cursor:not-allowed}.settings-next-hint{align-self:center;color:#57606a}.settings-shared-actions{justify-content:flex-start;align-items:center}.settings-primary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.settings-profile{min-width:0;scroll-margin-top:18px;padding:22px}.settings-profile.selected{box-shadow:0 0 0 3px #b9ddd4}.settings-profile-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.settings-profile-head h2{font-size:21px;margin-bottom:4px}.settings-current{margin:0;color:#46545e;font-size:13px}.settings-recommended{margin:12px 0;padding:10px 12px;border:1px solid #c9d8de;border-radius:6px;background:#f7fafb;color:#46545e;font-size:13px}.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.settings-field{display:grid;gap:6px;font-size:14px;font-weight:600}.settings-field input,.settings-field select{width:100%;box-sizing:border-box}.settings-field small{font-size:12px;line-height:1.45;font-weight:400;color:#57606a}.settings-field-wide{grid-column:1/-1}.settings-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px;margin-top:18px}.settings-secondary{background:#fff;color:#176b5b;border-color:#176b5b}.settings-advanced{margin-top:16px}.settings-advanced summary{cursor:pointer;font-weight:700}.settings-advanced-grid{margin-top:14px}.settings-status{padding:9px 11px;border-left:3px solid #8c959f;background:#f6f8fa}.settings-status.verified{border-left-color:#176b5b;background:#edf7f4}.settings-backup{scroll-margin-top:18px}.settings-backup summary{cursor:pointer;font-size:18px;font-weight:700}.settings-backup-body{padding-top:16px}.settings-toggle{display:flex;align-items:center;gap:8px}.settings-toggle input{width:auto}.setup-warning{border-left:4px solid #bf8700;background:#fff8c5;padding:10px 12px;margin:12px 0}@media(max-width:900px){.settings-primary-grid{grid-template-columns:1fr}}@media(max-width:760px){.settings-page{padding-top:16px}.settings-header{margin:20px 0 16px}.settings-header h1{font-size:26px}.settings-mode-picker{grid-template-columns:1fr}.settings-profile{padding:16px}.settings-profile-head{display:block}.settings-current{margin-top:7px}.settings-grid{grid-template-columns:1fr}.settings-field-wide{grid-column:auto}.settings-actions{justify-content:stretch}.settings-actions button{width:100%}.settings-next{box-sizing:border-box;justify-content:center;width:100%}}
   </style><main id="main-content" class="settings-page">
     <header class="settings-header">
       <p class="eyebrow">按任务选择模型</p>
       <h1>模型设置</h1>
-      <p class="hint">深度分析处理简历与内容生成；批量筛选处理岗位理解、匹配和重试。两套配置默认共享厂商和 API Key，但模型参数互不覆盖。</p>
+      <p class="hint">可以填写 API Key，也可以直接使用本机已登录的 Agent。两种方式共用同一套简历分析、岗位理解和匹配流程。</p>
     </header>
     ${saved}${modelSaved}${restored}
-    <section class="panel settings-credentials">
+    <div class="settings-mode-picker" data-model-mode-current="${inferenceMode}">
+      <button class="settings-mode-button" type="button" data-model-mode="api" aria-pressed="${inferenceMode === "api"}"><strong>使用 API Key</strong><small>填写模型厂商的 Key，直接调用兼容接口。</small></button>
+      <button class="settings-mode-button" type="button" data-model-mode="agent" aria-pressed="${inferenceMode === "agent"}"><strong>使用本机 Agent</strong><small>使用本机已登录的 Codex，无需在 OfferGo 中填写 Key。</small></button>
+    </div>
+    <section class="panel settings-credentials settings-mode-panel" data-model-mode-panel="api"${inferenceMode === "api" ? "" : " hidden"}>
       <h2>共享厂商和 API Key</h2>
       <p>默认模式：两套任务配置共享厂商和 Windows 加密保存的 Key。需要拆分时，在对应配置的“高级设置”中选择“独立厂商和 API Key”。</p>
       <form class="settings-shared-form" method="post" action="/api/settings/model">
@@ -5649,15 +5696,33 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
           <label class="settings-field">共享模型厂商<select id="shared-model-preset" name="preset">${renderPresetOptions(presets, settings.sharedCredential?.preset || "deepseek")}</select><small>选择后会同步到仍使用共享凭据的任务配置。</small></label>
           <label class="settings-field">共享 API Key<input id="shared-model-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="${modelState.keyConfigured ? "已保存，留空保持不变" : "粘贴 API Key"}"><small>一次测试深度分析和批量筛选，两项均通过后保存。</small></label>
         </div>
-        <div class="settings-actions settings-shared-actions"><button type="submit">测试连接并保存</button>${nextStep}</div>
+        <div class="settings-actions settings-shared-actions"><button type="submit">测试连接并保存</button>${apiNextStep}</div>
       </form>
       <p class="settings-current">当前共享厂商：${escapeHtml(settings.sharedCredential?.preset || "未设置")} · ${escapeHtml(keyStatus)}</p>
       <p class="settings-current">深度分析：${escapeHtml(modelConnectionLabel(settings.taskProfiles?.deep_analysis?.connection))} · 批量筛选：${escapeHtml(modelConnectionLabel(settings.taskProfiles?.batch_screening?.connection))}</p>
       <p class="settings-provider-link">还没有 DeepSeek API Key？<a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer">打开 DeepSeek 开放平台</a></p>
     </section>
-    <div class="settings-primary-grid">${profileSections}</div>
-    ${backupSection}
-    <p class="hint">API Key 不进入设置 JSON、日志、数据库或页面响应。</p>
+    <section class="panel settings-agent settings-mode-panel" data-model-mode-panel="agent"${inferenceMode === "agent" ? "" : " hidden"}>
+      <h2>本机 Agent</h2>
+      <p>OfferGo 会通过本机已登录的 Codex 处理模型任务。简历文本和职位信息会发送给该 Agent；OfferGo 不保存 Agent 的登录凭据。</p>
+      <p class="setup-warning">免填 API Key 不等于免费，会消耗本机 Agent 账号的套餐额度。</p>
+      <div class="settings-agent-facts">
+        <span><strong>当前支持：</strong>Codex</span>
+        <span><strong>模型：</strong>${escapeHtml(agentIdentity.model || "账号默认模型")}</span>
+        <span><strong>连接状态：</strong>${escapeHtml(agentStatus)}</span>
+      </div>
+      <form class="settings-agent-form" method="post" action="/api/settings/model">
+        <input type="hidden" name="taskProfile" value="agent_models">
+        <input type="hidden" name="action" value="verify_agent">
+        <input type="hidden" name="runnerId" value="codex">
+        <div class="settings-actions settings-shared-actions"><button type="submit">测试 Codex 并启用</button>${agentNextStep}</div>
+      </form>
+    </section>
+    <div class="settings-mode-panel" data-model-mode-panel="api"${inferenceMode === "api" ? "" : " hidden"}>
+      <div class="settings-primary-grid">${profileSections}</div>
+      ${backupSection}
+      <p class="hint">API Key 不进入设置 JSON、日志、数据库或页面响应。</p>
+    </div>
     <script id="model-preset-data" type="application/json">${presetJson}</script>
     ${modelSettingsClientScript()}
   </main>`;
@@ -5783,6 +5848,13 @@ function modelConnectionLabel(connection = {}) {
 
 function modelSettingsClientScript() {
   return `<script>(function(){
+    const modeButtons=[...document.querySelectorAll("[data-model-mode]")];
+    const modePanels=[...document.querySelectorAll("[data-model-mode-panel]")];
+    const showMode=(mode)=>{
+      modeButtons.forEach((button)=>button.setAttribute("aria-pressed",String(button.dataset.modelMode===mode)));
+      modePanels.forEach((panel)=>{panel.hidden=panel.dataset.modelModePanel!==mode});
+    };
+    modeButtons.forEach((button)=>button.addEventListener("click",()=>showMode(button.dataset.modelMode)));
     const presets=JSON.parse(document.getElementById("model-preset-data").textContent);
     const sharedPreset=document.getElementById("shared-model-preset");
     ${supportsDeepSeekV4Thinking.toString()}

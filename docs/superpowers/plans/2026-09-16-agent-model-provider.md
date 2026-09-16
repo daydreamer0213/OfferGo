@@ -478,7 +478,7 @@ git commit -m "feat: add keyless agent model settings"
 - Consumes: public normalized settings, `probeAgentRunner`, and `saveVerifiedAgentConfiguration` from Task 4.
 - Produces: settings form field `inferenceMode`; Agent status card; POST action for test-and-save; first-run readiness satisfied by either verified API or verified Agent mode.
 
-- [ ] **Step 1: Write failing dashboard tests**
+- [x] **Step 1: Write failing dashboard tests**
 
 Extend `model_settings_ui_smoke.js` to assert:
 
@@ -491,7 +491,7 @@ assert.doesNotMatch(agentSection, /name="apiKey"/);
 
 Post Agent mode with an injected delayed tester and assert the local GET remains responsive, two identical saves invoke the tester once, success redirects with `modelConfigured=1`, and auth/update/quota errors render an exact next action. Extend onboarding tests so a verified Agent configuration unlocks the same next step as a verified API configuration.
 
-- [ ] **Step 2: Run UI tests and verify they fail on missing mode controls**
+- [x] **Step 2: Run UI tests and verify they fail on missing mode controls**
 
 Run:
 
@@ -502,17 +502,17 @@ node tests/onboarding_progress_ui_smoke.js
 
 Expected: FAIL because the Agent option is absent.
 
-- [ ] **Step 3: Render server-owned mode controls and status**
+- [x] **Step 3: Render server-owned mode controls and status**
 
 Add a two-choice mode selector above the existing API settings. Agent mode renders only allowlisted runners, detection status, safe action text, “测试并使用本机 Agent”, last verification metadata, and disclosure that resume/JD content goes to the Agent provider and consumes that account's allowance.
 
 Keep the existing API form intact inside its mode panel. Client JavaScript only toggles panels and disables a form during its own request; server validation remains authoritative.
 
-- [ ] **Step 4: Add serialized/coalesced save handling**
+- [x] **Step 4: Add serialized/coalesced save handling**
 
 Reuse the existing model-settings save flight/tail mechanism. Fingerprint Agent saves using normalized mode and runner ID, never private input. The POST operation calls the injected `agentConnectionTester`, persists only after success, and redirects. Stable errors return to the Agent panel with no partial “verified” state.
 
-- [ ] **Step 5: Verify dashboard and onboarding behavior**
+- [x] **Step 5: Verify dashboard and onboarding behavior**
 
 Run:
 
