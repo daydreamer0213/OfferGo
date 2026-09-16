@@ -11,9 +11,6 @@ const DEFAULT_MODEL_TIMEOUT_MS = 60000;
 const THINKING_MODES = new Set(["enabled", "disabled"]);
 const REASONING_EFFORTS = new Set(["high", "max"]);
 const CREDENTIAL_REFS = new Set(["shared", "independent"]);
-const INFERENCE_MODES = new Set(["api", "agent"]);
-const AGENT_RUNNER_IDS = new Set(["codex"]);
-const AGENT_MIN_TIMEOUT_MS = 300000;
 const MODEL_TASK_PROFILE_IDS = ["deep_analysis", "batch_screening"];
 
 const RECOMMENDED_TASK_PROFILES = Object.freeze({
@@ -255,7 +252,7 @@ function loadModelSettings({ root, fallbackModelConfig, readOnly = false, inspec
     keyReadable: Boolean(keyState.readable),
     keyErrorCode,
     connectionStatus: primary.connection?.status || "unverified",
-    modelConfig: modelConfigFromSettings(settings, "", source === "legacy" ? legacyApiKeyEnv(fallbackModelConfig) : null, root)
+    modelConfig: modelConfigFromSettings(settings, "", source === "legacy" ? legacyApiKeyEnv(fallbackModelConfig) : null)
   };
 }
 
@@ -305,7 +302,7 @@ async function saveVerifiedPrimaryModelProfiles({
   connectionTester = testModelConnection
 }) {
   const current = loadModelSettings({ root, fallbackModelConfig });
-  const settings = applySharedCredentialInput(normalizeSettings({ ...current.settings, inferenceMode: "api" }), input);
+  const settings = applySharedCredentialInput(current.settings, input);
   const sharedSecretId = secretIdForCredential("model-api-key-shared", settings.sharedCredential);
   const suppliedSharedKey = String(input.apiKey || "").trim();
   const storedSharedKey = sharedSecretId && inspectSecret(root, sharedSecretId).configured
@@ -363,51 +360,6 @@ async function saveVerifiedModelConfiguration({ root, input, fallbackModelConfig
   });
 }
 
-async function saveVerifiedAgentConfiguration({
-  root,
-  input,
-  fallbackModelConfig,
-  agentConnectionTester = testAgentConnection
-}) {
-  const runnerId = normalizeAgentRunnerId(input?.runnerId);
-  const verification = await agentConnectionTester({ root, runnerId });
-  if (!verification || verification.status !== "ready") throw agentVerificationError(verification);
-  const checkedAt = String(verification.checkedAt || new Date().toISOString());
-  let settings = normalizeSettings({
-    ...loadModelSettings({ root, fallbackModelConfig }).settings,
-    inferenceMode: "agent",
-    agent: {
-      runnerId,
-      capabilityFingerprint: String(verification.capabilityFingerprint || "").slice(0, 128),
-      verifiedAt: checkedAt,
-      identity: verification.identity || { runner: runnerId, model: "account-default", runnerVersion: "unknown" }
-    }
-  });
-  for (const profileId of MODEL_TASK_PROFILE_IDS) {
-    const effective = effectiveTaskProfile(settings, profileId);
-    const fingerprint = profileFingerprint(effective);
-    settings.taskProfiles[profileId].revision = fingerprint;
-    settings.taskProfiles[profileId].connection = {
-      status: "verified",
-      checkedAt,
-      latencyMs: Number.isFinite(Number(verification.latencyMs)) ? Number(verification.latencyMs) : null,
-      httpStatus: null,
-      fingerprint
-    };
-  }
-  settings.revision = settingsFingerprint(settings);
-  settings = normalizeSettings(settings);
-  const settingsFile = settingsPath(root);
-  const oldSettings = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
-  try {
-    writeSettings(root, settings);
-  } catch (error) {
-    restoreFile(settingsFile, oldSettings);
-    throw appError("MODEL_SETTINGS_SAVE_FAILED", "Agent 已验证，但本机配置保存失败；原配置已恢复，请重试。", { cause: error, statusCode: 500 });
-  }
-  return loadModelSettings({ root, fallbackModelConfig });
-}
-
 async function saveVerifiedModelTaskProfile({
   root,
   taskProfile,
@@ -416,8 +368,7 @@ async function saveVerifiedModelTaskProfile({
   connectionTester = testModelConnection
 }) {
   const profileId = normalizeTaskProfileId(taskProfile);
-  const loaded = loadModelSettings({ root, fallbackModelConfig });
-  const current = { ...loaded, settings: normalizeSettings({ ...loaded.settings, inferenceMode: "api" }) };
+  const current = loadModelSettings({ root, fallbackModelConfig });
   const proposedSettings = applyTaskProfileInput(current.settings, profileId, input);
   const profile = proposedSettings.taskProfiles[profileId];
   const targetSecretId = secretIdForSettings(proposedSettings, profileId);
@@ -569,39 +520,10 @@ async function testModelConnection({ settings, apiKey, fetchImpl = fetch }) {
   return { status: "verified", checkedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt, httpStatus: response.status };
 }
 
-async function testAgentConnection({ root, runnerId }) {
-  const { probeAgentRunner } = require("../adapters/models/agent_runner_registry");
-  const startedAt = Date.now();
-  const result = await probeAgentRunner({ runnerId, dataRoot: root, connectionTest: true });
-  return { ...result, checkedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt };
-}
-
-function agentVerificationError(result = {}) {
-  const status = String(result.status || "unavailable");
-  if (status === "not_installed") return appError("MODEL_AGENT_NOT_INSTALLED", result.message || "没有找到本机 Agent，请先安装。", { statusCode: 400 });
-  if (status === "update_required") return appError("MODEL_AGENT_UPDATE_REQUIRED", result.message || "本机 Agent 需要更新。", { statusCode: 400 });
-  if (status === "auth_required") return appError("MODEL_AGENT_AUTH_REQUIRED", result.message || "请先登录本机 Agent。", { statusCode: 400 });
-  if (result.errorCode === "MODEL_AGENT_QUOTA_EXHAUSTED") return appError("MODEL_AGENT_QUOTA_EXHAUSTED", result.message || "本机 Agent 当前额度不足。", { statusCode: 400 });
-  return appError("MODEL_AGENT_UNAVAILABLE", result.message || "本机 Agent 暂时不可用。", { statusCode: 502 });
-}
-
 function resolveRuntimeModelConfig({ root, fallbackModelConfig, taskProfile, readOnly = false }) {
   const loaded = loadModelSettings({ root, fallbackModelConfig, readOnly, inspectCredential: false });
   const profileId = normalizeTaskProfileId(taskProfile || "deep_analysis");
   const profile = loaded.settings.taskProfiles[profileId];
-  if (loaded.settings.inferenceMode === "agent") {
-    return {
-      ...loaded,
-      secretId: "",
-      concurrency: 1,
-      revision: profile.revision,
-      keyStored: false,
-      keyConfigured: false,
-      keyReadable: false,
-      keyErrorCode: "",
-      modelConfig: modelConfigFromAgentSettings(loaded.settings, profileId, root)
-    };
-  }
   const secretId = secretIdForSettings(loaded.settings, profileId);
   const keyState = loadRuntimeSecretState(root, secretId);
   const effective = effectiveTaskProfile(loaded.settings, profileId);
@@ -667,11 +589,9 @@ function isModelReady(modelState, { taskProfile = "deep_analysis", checkedAfter 
   const profile = modelState.settings.taskProfiles[profileId];
   if (!profile) return false;
   const effective = effectiveTaskProfile(modelState.settings, profileId);
-  const keyOk = effective.provider === "agent_command"
-    ? Boolean(modelState.settings.agent?.runnerId && modelState.settings.agent?.capabilityFingerprint)
-    : effective.provider === "mock"
-      ? modelState.source === "runtime"
-      : Boolean(modelState.keyConfigured && modelState.keyReadable);
+  const keyOk = effective.provider === "mock"
+    ? modelState.source === "runtime"
+    : Boolean(modelState.keyConfigured && modelState.keyReadable);
   if (!keyOk) return false;
   const verified = profile.connection?.status === "verified"
     && profile.connection?.fingerprint === profileFingerprint(effective);
@@ -701,17 +621,14 @@ function restoreRecommendedTaskProfile({ root, taskProfile, fallbackModelConfig 
   return loadModelSettings({ root, fallbackModelConfig });
 }
 
-function modelConfigFromSettings(settings, apiKey = "", apiKeyEnv = "ZHIPPING_MODEL_API_KEY", dataRoot = "") {
+function modelConfigFromSettings(settings, apiKey = "", apiKeyEnv = "ZHIPPING_MODEL_API_KEY") {
   const normalized = normalizeSettings(settings);
-  if (normalized.inferenceMode === "agent") return modelConfigFromAgentSettings(normalized, "deep_analysis", dataRoot);
   return modelConfigFromProfile(effectiveTaskProfile(normalized, "deep_analysis"), apiKey, apiKeyEnv);
 }
 
 function normalizeSettings(raw = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("模型设置必须是对象。");
   if (raw.schemaVersion === 2 && raw.taskProfiles) {
-    const inferenceMode = normalizeInferenceMode(raw.inferenceMode);
-    const agent = normalizeAgentSettings(raw.agent || {}, { required: inferenceMode === "agent" });
     const sharedCredential = normalizeCredential(raw.sharedCredential || raw.shared || {});
     const taskProfiles = {};
     for (const id of MODEL_TASK_PROFILE_IDS) {
@@ -732,8 +649,6 @@ function normalizeSettings(raw = {}) {
     const batchBackup = normalizeBatchBackup(raw.batchBackup || {});
     const settings = {
       schemaVersion: 2,
-      inferenceMode,
-      agent,
       credentialMode: raw.credentialMode === "independent" ? "independent" : "shared",
       sharedCredential,
       taskProfiles,
@@ -741,12 +656,6 @@ function normalizeSettings(raw = {}) {
       batchBackup,
       revision: ""
     };
-    for (const id of MODEL_TASK_PROFILE_IDS) {
-      const effective = effectiveTaskProfile(settings, id);
-      const fingerprint = profileFingerprint(effective);
-      settings.taskProfiles[id].revision = fingerprint;
-      settings.taskProfiles[id].connection = normalizeConnection(raw.taskProfiles[id]?.connection, fingerprint);
-    }
     settings.revision = settingsFingerprint(settings);
     return withPublicAliases(settings);
   }
@@ -805,8 +714,6 @@ function settingsFromLegacyV1(raw = {}) {
   }
   const settings = {
     schemaVersion: 2,
-    inferenceMode: "api",
-    agent: defaultAgentSettings(),
     credentialMode: "shared",
     sharedCredential: shared,
     taskProfiles,
@@ -833,8 +740,6 @@ function defaultSettings() {
   }
   const settings = {
     schemaVersion: 2,
-    inferenceMode: "api",
-    agent: defaultAgentSettings(),
     credentialMode: "shared",
     sharedCredential,
     taskProfiles,
@@ -919,23 +824,6 @@ function normalizeTaskProfile(id, raw = {}) {
 function effectiveTaskProfile(settings, profileId) {
   const profile = settings?.taskProfiles?.[profileId];
   if (!profile) return null;
-  if (settings.inferenceMode === "agent") {
-    const agent = settings.agent || defaultAgentSettings();
-    return {
-      preset: "agent",
-      provider: "agent_command",
-      baseUrl: "",
-      model: agent.identity?.model || "account-default",
-      timeoutMs: profile.timeoutMs,
-      thinkingMode: profile.thinkingMode,
-      reasoningEffort: profile.reasoningEffort,
-      concurrency: 1,
-      credentialRef: "agent",
-      runnerId: agent.runnerId,
-      capabilityFingerprint: agent.capabilityFingerprint,
-      runnerVersion: agent.identity?.runnerVersion || "unknown"
-    };
-  }
   const independent = profile.credentialRef === "independent" && settings.independentCredentials?.[profileId];
   const credential = independent || settings.sharedCredential || {};
   return {
@@ -1012,53 +900,6 @@ function normalizeCredential(raw = {}) {
     provider: preset.provider,
     baseUrl: presetId === "custom" ? normalizeBaseUrl(raw.baseUrl) : normalizeBaseUrl(preset.baseUrl)
   };
-}
-
-function normalizeInferenceMode(value) {
-  const mode = String(value || "api").trim().toLowerCase();
-  if (!INFERENCE_MODES.has(mode)) throw appError("MODEL_INFERENCE_MODE_INVALID", "模型使用方式无效。", { statusCode: 400 });
-  return mode;
-}
-
-function normalizeAgentRunnerId(value) {
-  const runnerId = String(value || "").trim().toLowerCase();
-  if (!AGENT_RUNNER_IDS.has(runnerId)) {
-    throw appError("MODEL_AGENT_RUNNER_INVALID", "请选择受支持的本机 Agent。", { statusCode: 400 });
-  }
-  return runnerId;
-}
-
-function normalizeAgentSettings(raw = {}, { required = false } = {}) {
-  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const runnerId = source.runnerId ? normalizeAgentRunnerId(source.runnerId) : "";
-  if (required && !runnerId) throw appError("MODEL_AGENT_RUNNER_INVALID", "请选择受支持的本机 Agent。", { statusCode: 400 });
-  const identitySource = source.identity && typeof source.identity === "object" && !Array.isArray(source.identity)
-    ? source.identity
-    : {};
-  return {
-    runnerId,
-    capabilityFingerprint: String(source.capabilityFingerprint || "").trim().slice(0, 128),
-    verifiedAt: String(source.verifiedAt || "").trim().slice(0, 64),
-    identity: {
-      runner: safeAgentIdentity(identitySource.runner || runnerId, runnerId || "unknown"),
-      model: safeAgentIdentity(identitySource.model, "account-default"),
-      runnerVersion: safeAgentIdentity(identitySource.runnerVersion, "unknown")
-    }
-  };
-}
-
-function defaultAgentSettings() {
-  return {
-    runnerId: "",
-    capabilityFingerprint: "",
-    verifiedAt: "",
-    identity: { runner: "unknown", model: "account-default", runnerVersion: "unknown" }
-  };
-}
-
-function safeAgentIdentity(value, fallback) {
-  const text = String(value || "").trim().slice(0, 120);
-  return text && /^[\w .:/+@()-]+$/u.test(text) ? text : fallback;
 }
 
 function normalizeBatchBackup(raw = {}) {
@@ -1240,7 +1081,7 @@ function legacySecretIdForSettings(settings) {
 }
 
 function profileFingerprint(profile = {}) {
-  const parts = [
+  return crypto.createHash("sha256").update([
     profile.provider,
     profile.baseUrl,
     profile.model,
@@ -1248,11 +1089,7 @@ function profileFingerprint(profile = {}) {
     profile.reasoningEffort,
     profile.timeoutMs,
     profile.concurrency
-  ];
-  if (profile.provider === "agent_command") {
-    parts.push(profile.runnerId, profile.capabilityFingerprint, profile.runnerVersion);
-  }
-  return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 64);
+  ].join("|")).digest("hex").slice(0, 64);
 }
 
 function legacyProfileFingerprint(profile = {}) {
@@ -1267,11 +1104,6 @@ function legacyProfileFingerprint(profile = {}) {
 
 function settingsFingerprint(settings) {
   const parts = [
-    settings.inferenceMode,
-    settings.agent?.runnerId,
-    settings.agent?.capabilityFingerprint,
-    settings.agent?.identity?.model,
-    settings.agent?.identity?.runnerVersion,
     settings.credentialMode,
     settings.sharedCredential?.provider,
     settings.sharedCredential?.baseUrl,
@@ -1325,27 +1157,6 @@ function modelConfigFromProfile(profile, apiKey = "", apiKeyEnv = "ZHIPPING_MODE
         reasoningEffort: profile.reasoningEffort,
         apiKey: apiKey || "",
         apiKeyEnv
-      }
-    }
-  };
-}
-
-function modelConfigFromAgentSettings(settings, profileId, dataRoot) {
-  const normalized = normalizeSettings(settings);
-  const profile = effectiveTaskProfile(normalized, normalizeTaskProfileId(profileId));
-  return {
-    provider: "agent_command",
-    providers: {
-      agent_command: {
-        runnerId: normalized.agent.runnerId,
-        dataRoot: String(dataRoot || ""),
-        model: profile.model,
-        runnerVersion: normalized.agent.identity.runnerVersion,
-        capabilityFingerprint: normalized.agent.capabilityFingerprint,
-        timeoutMs: Math.max(profile.timeoutMs, AGENT_MIN_TIMEOUT_MS),
-        maxRetries: 0,
-        thinkingMode: profile.thinkingMode,
-        reasoningEffort: profile.reasoningEffort
       }
     }
   };
@@ -1464,13 +1275,11 @@ module.exports = {
   saveModelTaskProfileParameters,
   saveVerifiedPrimaryModelProfiles,
   saveVerifiedModelConfiguration,
-  saveVerifiedAgentConfiguration,
   saveVerifiedModelTaskProfile,
   saveVerifiedBatchBackup,
   restoreRecommendedTaskProfile,
   resolveReadOnlyModelSettingsRoot,
   testModelConnection,
-  testAgentConnection,
   resolveRuntimeModelConfig,
   resolveRuntimeBatchBackup,
   isModelReady,

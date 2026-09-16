@@ -57,14 +57,6 @@ async function runSmoke() {
 }
 
 async function main() {
-  for (const relativePath of [
-    "src/adapters/models/agent_protocol.js",
-    "src/adapters/models/agent_command_transport.js",
-    "src/adapters/models/agent_runners/codex.js",
-    "docs/agent-assisted-install.md"
-  ]) {
-    assert(fs.existsSync(path.join(root, relativePath)), `missing Agent runtime source: ${relativePath}`);
-  }
   dashboardPort = Number(process.env.ROLEFLOW_STARTUP_DASHBOARD_PORT || 0)
     || await reserveFreePort();
   process.env.ROLEFLOW_STARTUP_DASHBOARD_PORT = String(dashboardPort);

@@ -38,17 +38,8 @@ main().catch((error) => {
 async function main() {
   db = openDb(dbPath);
   const connectionProfiles = [];
-  const agentConnectionCalls = [];
   let primaryVerificationGate = null;
   let distinctSaveGate = null;
-  let agentVerificationGate = null;
-  let agentConnectionResult = {
-    status: "ready",
-    checkedAt: new Date().toISOString(),
-    latencyMs: 9,
-    capabilityFingerprint: "ui-smoke-agent-capability",
-    identity: { runner: "codex", model: "account-default", runnerVersion: "9.9.9" }
-  };
   server = createDashboardServer({
     db,
     browserAuthority: { browserMode: "edge", cdpPort: null, profilePath: "" },
@@ -67,14 +58,6 @@ async function main() {
         await distinctSaveGate.wait;
       }
       return { status: "verified", checkedAt: new Date().toISOString(), latencyMs: 7, httpStatus: 200 };
-    },
-    agentConnectionTester: async ({ runnerId }) => {
-      agentConnectionCalls.push(runnerId);
-      if (agentVerificationGate) {
-        agentVerificationGate.started();
-        await agentVerificationGate.wait;
-      }
-      return { ...agentConnectionResult, identity: { ...agentConnectionResult.identity, runner: runnerId } };
     }
   });
   await listen(server);
@@ -117,13 +100,6 @@ async function main() {
     "当前值",
     "推荐值",
     "恢复推荐值",
-    "使用 API Key",
-    "使用本机 Agent",
-    "免填 API Key 不等于免费，会消耗本机 Agent 账号的套餐额度",
-    "首次连接测试通常需要 1–3 分钟",
-    'name="taskProfile" value="agent_models"',
-    'name="action" value="verify_agent"',
-    'name="runnerId" value="codex"',
     "共享厂商和 API Key",
     'id="shared-model-preset"',
     'id="shared-model-api-key"',
@@ -156,9 +132,6 @@ async function main() {
   assert(/settings-credentials[\s\S]*id="shared-model-preset"[\s\S]*id="shared-model-api-key"/.test(settingsHtml));
   assert(/<details[^>]*id="model-profile-batch_backup"(?![^>]*\sopen)/.test(settingsHtml));
   assert(!settingsHtml.includes("ui-smoke-key-not-visible-after-save"));
-  const agentPanel = settingsHtml.match(/<section class="panel settings-agent[\s\S]*?<\/section>/)?.[0];
-  assert(agentPanel, "settings page must render the local Agent panel");
-  assert(!agentPanel.includes('name="apiKey"'), "local Agent panel must not request an API Key");
   assertModelSettingsSubmitGuard(settingsHtml);
 
   const apiKey = "ui-smoke-key-not-visible-after-save";
@@ -212,9 +185,8 @@ async function main() {
   ), true);
   const readySettings = await fetch(baseUrl + "/settings?profile=primary_models&modelConfigured=1");
   const readySettingsHtml = await readySettings.text();
-  const readyApiPanel = readySettingsHtml.match(/<section class="panel settings-credentials[\s\S]*?<\/section>/)?.[0] || "";
-  assert(readyApiPanel.includes('class="settings-next" href="/onboarding"'));
-  assert(!readyApiPanel.includes('class="settings-next disabled"'));
+  assert(readySettingsHtml.includes('class="settings-next" href="/onboarding"'));
+  assert(!readySettingsHtml.includes('class="settings-next disabled"'));
 
   const afterSave = await fetch(baseUrl + "/settings");
   const afterHtml = await afterSave.text();
@@ -398,82 +370,6 @@ async function main() {
   } finally {
     releaseDistinctSave?.();
     distinctSaveGate = null;
-  }
-
-  let releaseAgentVerification;
-  let markAgentVerificationStarted;
-  const agentVerificationStarted = new Promise((resolve) => { markAgentVerificationStarted = resolve; });
-  agentVerificationGate = {
-    started: markAgentVerificationStarted,
-    wait: new Promise((resolve) => { releaseAgentVerification = resolve; })
-  };
-  const agentModelBody = new URLSearchParams({
-    taskProfile: "agent_models",
-    action: "verify_agent",
-    runnerId: "codex"
-  }).toString();
-  try {
-    const repeatedAgentSaves = Promise.all([
-      fetch(baseUrl + "/api/settings/model", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: agentModelBody,
-        redirect: "manual"
-      }),
-      fetch(baseUrl + "/api/settings/model", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: agentModelBody,
-        redirect: "manual"
-      })
-    ]);
-    await agentVerificationStarted;
-    const responsiveSettings = await fetch(baseUrl + "/settings");
-    assert.strictEqual(responsiveSettings.status, 200, "an Agent connection test must not block local pages");
-    releaseAgentVerification();
-    const agentResponses = await repeatedAgentSaves;
-    for (const response of agentResponses) {
-      assert.strictEqual(response.status, 303);
-      assert.strictEqual(response.headers.get("location"), "/settings?profile=agent_models&modelConfigured=1");
-    }
-  } finally {
-    releaseAgentVerification?.();
-    agentVerificationGate = null;
-  }
-  assert.deepStrictEqual(agentConnectionCalls, ["codex"], "identical Agent verification requests must coalesce");
-  publicState = loadModelSettings({ root, fallbackModelConfig: fallback });
-  assert.strictEqual(publicState.settings.inferenceMode, "agent");
-  assert.strictEqual(publicState.settings.agent.identity.runnerVersion, "9.9.9");
-  const agentRuntime = resolveRuntimeModelConfig({ root, fallbackModelConfig: fallback, taskProfile: "deep_analysis" });
-  assert.strictEqual(agentRuntime.modelConfig.provider, "agent_command");
-  assert.strictEqual(agentRuntime.modelConfig.providers.agent_command.apiKey, undefined);
-  const agentReadyPage = await fetch(baseUrl + "/settings?profile=agent_models&modelConfigured=1");
-  const agentReadyHtml = await agentReadyPage.text();
-  assert(agentReadyHtml.includes("本机 Agent 连接测试通过，已启用免填 API Key 模式"));
-  assert(agentReadyHtml.includes('data-model-mode-panel="agent"'));
-  assert(agentReadyHtml.includes('class="settings-next" href="/onboarding"'));
-  const agentOnboarding = await fetch(baseUrl + "/onboarding");
-  const agentOnboardingHtml = await agentOnboarding.text();
-  assert(agentOnboardingHtml.includes("Codex · account-default · 已验证"));
-  assert(!agentOnboardingHtml.includes("模型尚未通过连接测试"));
-
-  const agentFailureCases = [
-    [{ status: "auth_required", message: "login required" }, "请先在终端运行 Codex 并完成登录，然后返回模型设置重新测试。"],
-    [{ status: "update_required", message: "update required" }, "请先更新 Codex，然后返回模型设置重新测试。"],
-    [{ status: "unavailable", errorCode: "MODEL_AGENT_QUOTA_EXHAUSTED", message: "quota exhausted" }, "请检查 Codex 账号套餐或等待额度恢复，然后返回模型设置重新测试。"]
-  ];
-  for (const [result, expectedNextAction] of agentFailureCases) {
-    agentConnectionResult = result;
-    const failedAgentSave = await fetch(baseUrl + "/api/settings/model", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: agentModelBody,
-      redirect: "manual"
-    });
-    const failureHtml = await failedAgentSave.text();
-    assert.strictEqual(failedAgentSave.status, 400);
-    assert(failureHtml.includes(expectedNextAction), `Agent failure must explain: ${expectedNextAction}`);
-    assert.strictEqual(loadModelSettings({ root, fallbackModelConfig: fallback }).settings.inferenceMode, "agent");
   }
   console.log("model_settings_ui_smoke ok");
 }

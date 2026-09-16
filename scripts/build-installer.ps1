@@ -144,7 +144,6 @@ foreach ($RelativePath in @(
   "configs\scoring.yaml",
   "configs\model.json",
   "docs\README.md",
-  "docs\agent-assisted-install.md",
   "docs\daily_workflow.md",
   "docs\onboarding_workflow.md",
   "docs\operations.md",

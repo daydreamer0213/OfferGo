@@ -664,14 +664,6 @@ function assertStandardInstallerStageBoundary() {
     const stageMatch = combined(result).match(/Installer stage:\s*(.+)\r?$/m);
     assert(stageMatch, `missing installer stage path:\n${combined(result)}`);
     const stageDir = stageMatch[1].trim();
-    for (const relativePath of [
-      path.join("src", "adapters", "models", "agent_protocol.js"),
-      path.join("src", "adapters", "models", "agent_command_transport.js"),
-      path.join("src", "adapters", "models", "agent_runners", "codex.js"),
-      path.join("docs", "agent-assisted-install.md")
-    ]) {
-      assert(fs.existsSync(path.join(stageDir, relativePath)), `installer stage must include ${relativePath}`);
-    }
     assert(fs.existsSync(path.join(stageDir, "scripts", "migrate-browser-profile.ps1")), "installer stage must include explicit profile migration");
     assert(fs.existsSync(path.join(stageDir, "scripts", "prepare-user-data.ps1")), "installer stage must include stable user-data preparation");
     assertWindowsIcon(fs.readFileSync(path.join(stageDir, "assets", "OfferGo.ico")));
@@ -701,8 +693,6 @@ function assertStandardInstallerStageBoundary() {
       || /jobs\.sqlite|\.sqlite(?:-(?:wal|shm))?$|\.key$|(^|[\\/])\.env(?:\.|$)|(^|[\\/])secrets?([\\/]|$)/i.test(relativePath)
     );
     assert.deepStrictEqual(forbidden, [], `installer stage contains forbidden paths:\n${forbidden.join("\n")}`);
-    assert(!listTree(stageDir).some((relativePath) => /(^|[\\/])codex(?:\.exe)?$/i.test(relativePath)),
-      "installer must use the user's existing Codex and must not bundle a Codex executable");
   } finally {
     removeUniqueChild(fixture.fixtureRoot, fixture.testRoot);
   }
