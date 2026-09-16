@@ -595,7 +595,7 @@ node tests/workflow_analysis_executor_smoke.js
 
 Expected: all pass; Agent auth/config errors pause or fail through existing stable model error paths, and cancellation reaches the child process.
 
-- [ ] **Step 5: Commit full feature coverage**
+- [x] **Step 5: Commit full feature coverage**
 
 ```powershell
 git add tests/structured_model_adapter_smoke.js tests/agent_command_transport_smoke.js tests/resume_optimization_service_smoke.js tests/mock_interview_service_smoke.js tests/message_reply_learning_smoke.js tests/workflow_analysis_executor_smoke.js src/adapters/models src/core
@@ -618,7 +618,7 @@ git commit -m "test: cover all model tasks through Agent transport"
 - Consumes: final UI labels, runner statuses, and diagnostics from Tasks 3–5.
 - Produces: a deterministic agent-readable install path and packaging checks that the runner ships in source and installer builds.
 
-- [ ] **Step 1: Add failing packaging/source assertions**
+- [x] **Step 1: Add failing packaging/source assertions**
 
 Assert source and staged installer include:
 
@@ -635,15 +635,15 @@ Run: `node tests/windows_installer_smoke.js`
 
 Expected: FAIL until the new files are included by the normal stage/build path.
 
-- [ ] **Step 2: Write the deterministic installation guide**
+- [x] **Step 2: Write the deterministic installation guide**
 
 The guide tells an installing Agent to download the repository, preserve private data boundaries, use D: for large generated data when available, verify Node/Edge/Codex capabilities, run `npm test`, build or launch using existing scripts, open the local settings page, and stop before recruitment login or external sends. Include exact success signals and recovery instructions; never tell the Agent to inspect credentials.
 
-- [ ] **Step 3: Update product and operations documentation**
+- [x] **Step 3: Update product and operations documentation**
 
 Document both model modes, allowance disclosure, stable Agent errors, non-sensitive diagnostics, no automatic billing-path fallback, and synthetic-first acceptance. Update first-use flow so either a verified API connection or a verified Agent connection satisfies model readiness.
 
-- [ ] **Step 4: Run startup and packaging checks**
+- [x] **Step 4: Run startup and packaging checks**
 
 Run:
 

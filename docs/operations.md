@@ -17,11 +17,13 @@
 - 时间、级别、组件、事件、请求编号和错误码。
 - 扫描批次、方案 ID、岗位来源 ID 等定位元数据。
 - 模型调用类型、提供商、模型、缓存命中、延迟、重试次数、HTTP 状态和 token 用量。
+- Agent runner、版本、能力指纹、稳定错误码和耗时；不记录传给 Agent 的标准输入或返回正文。
 
 永不记录：
 
 - API Key、Authorization、Cookie、Token、密码和 BOSS 登录态。
 - 简历正文、JD 全文、模型输入输出、上传文件内容和 HTTP body。
+- Codex 登录凭据、Agent 请求正文、子进程标准输出和标准错误原文。
 
 日志写入失败不会中断用户流程。所有输出在写盘前统一脱敏。
 
@@ -32,6 +34,8 @@
 3. 需要更完整的上下文时，搜索 `.runtime\logs` 下的 JSONL。
 4. 运行 `node tests/run_all.js`。当前 v1.3.0 候选注册 142 项离线检查，不访问 BOSS；启动边界测试使用注入的进程与 HTTP 探针，不再生成假的 `msedge.exe`。发布时必须以标签所指精确提交重新运行 142/142 门禁，不能沿用历史计数。
 5. 只有离线检查通过后，才在已登录 Edge 上做 3–5 条只读小样本验收。
+
+真实 Agent 验收先使用合成简历和合成 JD，确认结构化输出、超时、取消、重复提交合并和临时目录清理都正常后，才能让用户自行进入真实简历流程。验收失败时不得自动切换到 API Key，也不得把未完成结果标记为已验证。
 
 ## 浏览器登录资料
 
@@ -137,6 +141,11 @@ node -e "const {openDb}=require('./src/core/storage'); const db=openDb('data/job
 - `RESUME_TEXT_TOO_SHORT`：常见于扫描 PDF、图片简历或旧 `.doc`；改用粘贴文本。
 - `MODEL_AUTH_FAILED`：Key 无效或没有权限。
 - `MODEL_AUTH_REQUIRED`：模型鉴权暂停，修复 Key 后必须重新测试批量模型再继续本轮。
+- `MODEL_AGENT_NOT_INSTALLED`：没有找到本机 Codex；安装并确认命令可用后重新测试。
+- `MODEL_AGENT_UPDATE_REQUIRED`：Codex 版本不支持当前调用边界；更新后重新测试。
+- `MODEL_AGENT_AUTH_REQUIRED`：Codex 尚未登录或登录已失效；在 Codex 正常入口登录后重新测试。
+- `MODEL_AGENT_QUOTA_EXHAUSTED`：Codex 套餐额度不足；检查套餐或等待恢复后重新测试。
+- `MODEL_AGENT_UNAVAILABLE`：Codex 暂时不可用；先确认它能独立运行并访问网络。
 - `MODEL_CONFIGURATION_REQUIRED`：批量模型地址、模型名或配置无效。
 - `MODEL_TIMEOUT_CIRCUIT_OPEN`：当前恢复周期第 10 个最终模型超时，工作流已安全暂停。
 - `LEASE_EXPIRED`：岗位任务租约过期；系统会按剩余岗位级重试额度恢复或终止该任务。
