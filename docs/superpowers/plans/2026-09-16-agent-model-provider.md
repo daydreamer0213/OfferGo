@@ -179,7 +179,7 @@ git commit -m "refactor: separate model tasks from transport"
 - Consumes: `ModelTransport.requestJson({ systemPrompt, input, kind, signal })` from Task 1.
 - Produces: `new AgentCommandTransport({ runnerId, command, args, dataRoot, timeoutMs, maxOutputBytes, logger })`; `makeAgentRequest`, `parseAgentResponse`, `agentRequestFingerprint`; protocol version `1`.
 
-- [ ] **Step 1: Write protocol and process failure tests**
+- [x] **Step 1: Write protocol and process failure tests**
 
 The fake runner reads one JSON line from stdin and selects behavior using `FAKE_AGENT_MODE`. The test must assert valid success plus invalid JSON, request-ID mismatch, oversized output, non-zero exit, timeout, abort, and input secrecy:
 
@@ -204,13 +204,13 @@ assert.ok(!JSON.stringify(transport.lastSpawn || {}).includes("secret-resume-mar
 
 Two simultaneous identical calls must increment the fixture process counter once. Two different calls must record non-overlapping start/end intervals.
 
-- [ ] **Step 2: Run the test and verify missing transport failure**
+- [x] **Step 2: Run the test and verify missing transport failure**
 
 Run: `node tests/agent_command_transport_smoke.js`
 
 Expected: FAIL because the protocol and transport modules do not exist.
 
-- [ ] **Step 3: Implement strict protocol validation**
+- [x] **Step 3: Implement strict protocol validation**
 
 Implement protocol construction and parsing around these shapes:
 
@@ -232,7 +232,7 @@ function parseAgentResponse(text, requestId) {
 
 Only allow documented error codes and bounded messages. Hash the stable task inputs plus runner/model revision for coalescing; never place raw input in the fingerprint or logs.
 
-- [ ] **Step 4: Implement serial/coalesced child-process execution**
+- [x] **Step 4: Implement serial/coalesced child-process execution**
 
 Use `spawn(command, args, { shell: false, windowsHide: true, cwd: requestDir, stdio: ["pipe", "pipe", "pipe"] })`. Write exactly one request to stdin, close it, and bound stdout/stderr while reading. Store no raw stderr after converting it to a stable error. Use a promise tail per transport and a map of fingerprints to in-flight promises:
 
@@ -252,7 +252,7 @@ requestJson(input) {
 
 On timeout or abort, terminate the process tree with a bounded grace period. Resolve and verify the temporary request directory remains under `<dataRoot>/.runtime/agent-requests` before cleanup.
 
-- [ ] **Step 5: Run transport tests and add them to the full gate**
+- [x] **Step 5: Run transport tests and add them to the full gate**
 
 Run: `node tests/agent_command_transport_smoke.js`
 
@@ -260,7 +260,7 @@ Expected: PASS, one process for duplicate input, serial timestamps for distinct 
 
 Register `agent_command_transport_smoke.js` in `tests/run_all.js`.
 
-- [ ] **Step 6: Commit the generic transport**
+- [x] **Step 6: Commit the generic transport**
 
 ```powershell
 git add src/adapters/models/agent_protocol.js src/adapters/models/agent_command_transport.js tests/fixtures/fake_agent_runner.js tests/agent_command_transport_smoke.js tests/run_all.js
