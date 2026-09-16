@@ -42,7 +42,7 @@ async function expectCode(promise, code) {
     assert.strictEqual(update.status, "update_required");
 
     const auditPath = path.join(root, "codex-audit.jsonl");
-    const spec = runner.commandSpec({ dataRoot: root, env: runnerEnv("success", auditPath) });
+    const spec = runner.commandSpec({ dataRoot: root, env: runnerEnv("success", auditPath), runnerVersion: "9.9.9" });
     const transport = new AgentCommandTransport({ ...spec, runnerId: "codex", dataRoot: root, timeoutMs: 1200 });
     const result = await transport.requestJson({
       systemPrompt: "return a JSON object",
@@ -56,6 +56,7 @@ async function expectCode(promise, code) {
       }
     });
     assert.deepStrictEqual(result, { ok: true });
+    assert.strictEqual(transport.lastIdentity.runnerVersion, "9.9.9");
     const invocation = JSON.parse(fs.readFileSync(auditPath, "utf8").trim());
     const argsText = invocation.args.join(" ");
     for (const flag of ["exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--ignore-rules", "--output-schema", "--output-last-message", "--cd"]) {

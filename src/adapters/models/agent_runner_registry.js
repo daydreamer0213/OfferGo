@@ -18,11 +18,11 @@ const RUNNERS = Object.freeze({
     id: "codex",
     label: "Codex",
     modulePath: require.resolve("./agent_runners/codex"),
-    commandSpec({ env = process.env, capabilityFingerprint = "codex-unprobed" } = {}) {
+    commandSpec({ env = process.env, capabilityFingerprint = "codex-unprobed", runnerVersion = "" } = {}) {
       return {
         command: process.execPath,
         args: [require.resolve("./agent_runners/codex")],
-        env: { ...env },
+        env: { ...env, ...(runnerVersion ? { OFFERGO_CODEX_VERSION: String(runnerVersion) } : {}) },
         identityRevision: capabilityFingerprint
       };
     }

@@ -12,7 +12,8 @@ function createModelAdapter(modelConfig = {}, options = {}) {
   if (provider === "agent_command") {
     const runner = getAgentRunner(providerConfig.runnerId);
     const commandSpec = runner.commandSpec({
-      capabilityFingerprint: providerConfig.capabilityFingerprint
+      capabilityFingerprint: providerConfig.capabilityFingerprint,
+      runnerVersion: providerConfig.runnerVersion
     });
     const transport = new AgentCommandTransport({
       ...commandSpec,
