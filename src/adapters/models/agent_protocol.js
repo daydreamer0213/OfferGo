@@ -18,7 +18,7 @@ function makeAgentRequest({
   taskKind,
   systemPrompt,
   input,
-  outputSchema = { type: "object" },
+  outputSchema = null,
   timeoutMs,
   maxOutputBytes
 }) {
@@ -28,7 +28,7 @@ function makeAgentRequest({
     taskKind: requiredText(taskKind, "taskKind"),
     systemPrompt: requiredText(systemPrompt, "systemPrompt"),
     input: input && typeof input === "object" ? input : {},
-    outputSchema: outputSchema && typeof outputSchema === "object" ? outputSchema : { type: "object" },
+    outputSchema: outputSchema && typeof outputSchema === "object" && !Array.isArray(outputSchema) ? outputSchema : null,
     limits: {
       timeoutMs: positiveInteger(timeoutMs, "timeoutMs"),
       maxOutputBytes: positiveInteger(maxOutputBytes, "maxOutputBytes")
@@ -68,7 +68,7 @@ function agentRequestFingerprint(input, identityRevision = "") {
     kind: String(input?.kind || "unknown"),
     systemPrompt: String(input?.systemPrompt || ""),
     input: input?.input || {},
-    outputSchema: input?.outputSchema || { type: "object" }
+    outputSchema: input?.outputSchema || null
   })).digest("hex");
 }
 

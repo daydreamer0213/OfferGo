@@ -43,7 +43,7 @@ async function invokeCodex(request) {
   const schemaPath = path.join(requestDir, "output-schema.json");
   const resultPath = path.join(requestDir, "last-message.json");
   fs.mkdirSync(workspace, { recursive: true });
-  fs.writeFileSync(schemaPath, JSON.stringify(request.outputSchema || { type: "object" }));
+  if (request.outputSchema) fs.writeFileSync(schemaPath, JSON.stringify(request.outputSchema));
   const command = String(process.env.OFFERGO_CODEX_COMMAND || "codex");
   const prefix = parseArgsPrefix(process.env.OFFERGO_CODEX_ARGS_JSON);
   const args = [
@@ -54,7 +54,7 @@ async function invokeCodex(request) {
     "--ignore-user-config",
     "--ignore-rules",
     "--sandbox", "read-only",
-    "--output-schema", schemaPath,
+    ...(request.outputSchema ? ["--output-schema", schemaPath] : []),
     "--output-last-message", resultPath,
     "--cd", workspace,
     "-"
@@ -152,6 +152,9 @@ function mapCodexFailure(stderr, exitCode) {
   }
   if (/usage limit|quota|credits? exhausted|rate limit/i.test(text)) {
     return agentError("MODEL_AGENT_QUOTA_EXHAUSTED", "Codex 当前额度不足，请检查套餐额度后重试。" );
+  }
+  if (/invalid schema|invalid_json_schema/i.test(text)) {
+    return agentError("MODEL_AGENT_PROTOCOL_INVALID", "Codex 拒绝了结构化输出约束。" );
   }
   return agentError("MODEL_AGENT_PROCESS_FAILED", `Codex 进程异常退出（${Number(exitCode)}）。`);
 }

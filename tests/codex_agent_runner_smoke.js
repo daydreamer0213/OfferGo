@@ -47,7 +47,13 @@ async function expectCode(promise, code) {
     const result = await transport.requestJson({
       systemPrompt: "return a JSON object",
       input: { resume: "secret-resume-marker" },
-      kind: "connectionTest"
+      kind: "connectionTest",
+      outputSchema: {
+        type: "object",
+        properties: { ok: { type: "boolean", const: true } },
+        required: ["ok"],
+        additionalProperties: false
+      }
     });
     assert.deepStrictEqual(result, { ok: true });
     const invocation = JSON.parse(fs.readFileSync(auditPath, "utf8").trim());
@@ -58,6 +64,16 @@ async function expectCode(promise, code) {
     assert.ok(!argsText.includes("secret-resume-marker"));
     assert.ok(invocation.receivedPrompt);
     assert.notStrictEqual(path.resolve(invocation.cwd), path.resolve(process.cwd()));
+
+    const businessResult = await transport.requestJson({
+      systemPrompt: "return a business JSON object",
+      input: { fixture: true },
+      kind: "analyzeResume"
+    });
+    assert.deepStrictEqual(businessResult, { ok: true });
+    const businessInvocation = fs.readFileSync(auditPath, "utf8").trim().split(/\r?\n/).map(JSON.parse).at(-1);
+    assert.ok(!businessInvocation.args.includes("--output-schema"),
+      "a task without a concrete schema must not send an invalid generic schema to Codex");
 
     for (const [mode, code] of [
       ["auth", "MODEL_AGENT_AUTH_REQUIRED"],
