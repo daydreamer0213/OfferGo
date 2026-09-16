@@ -59,7 +59,7 @@
 - Consumes: current `validateModelResult(kind, value, context)`, split semantic matching helpers, and existing OpenAI-compatible configuration.
 - Produces: `new StructuredModelAdapter({ transport, provider, model, thinkingMode, reasoningEffort, logger })`; transport contract `requestJson({ systemPrompt, input, kind, signal }): Promise<object>`; backward-compatible `new OpenAICompatibleAdapter(config)`.
 
-- [ ] **Step 1: Add a failing provider-neutral delegation test**
+- [x] **Step 1: Add a failing provider-neutral delegation test**
 
 Create `tests/structured_model_adapter_smoke.js` with a recording transport and representative tasks:
 
@@ -91,13 +91,13 @@ const transport = {
 })().catch((error) => { console.error(error); process.exit(1); });
 ```
 
-- [ ] **Step 2: Run the new test and verify the missing-module failure**
+- [x] **Step 2: Run the new test and verify the missing-module failure**
 
 Run: `node tests/structured_model_adapter_smoke.js`
 
 Expected: FAIL because `src/adapters/models/structured.js` does not exist.
 
-- [ ] **Step 3: Move model task behavior behind a transport interface**
+- [x] **Step 3: Move model task behavior behind a transport interface**
 
 Move the public task methods and provider-neutral helpers from `openai_compatible.js` into `StructuredModelAdapter`. Its only raw model call is:
 
@@ -141,7 +141,7 @@ class OpenAICompatibleAdapter extends StructuredModelAdapter {
 
 Re-export the current parser helpers from `openai_compatible.js` so all existing callers remain valid.
 
-- [ ] **Step 4: Register and run the focused behavior-preservation tests**
+- [x] **Step 4: Register and run the focused behavior-preservation tests**
 
 Add `structured_model_adapter_smoke.js` next to `model_adapter_smoke.js` in `tests/run_all.js`.
 
@@ -157,7 +157,7 @@ node tests/semantic_pipeline_smoke.js
 
 Expected: all pass with existing OpenAI request bodies, retries, validation, and output behavior unchanged.
 
-- [ ] **Step 5: Commit the behavior-preserving extraction**
+- [x] **Step 5: Commit the behavior-preserving extraction**
 
 ```powershell
 git add src/adapters/models/structured.js src/adapters/models/openai_transport.js src/adapters/models/openai_compatible.js tests/structured_model_adapter_smoke.js tests/run_all.js
