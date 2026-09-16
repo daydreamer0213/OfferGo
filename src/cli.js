@@ -16,13 +16,11 @@ const { resolvePlannedKeywords } = require("./core/keyword_planner");
 const { createJobAnalysisRunner, runWorkflowAnalysisPhase } = require("./core/job_analysis");
 const { completedWorkflowAnalysisCount } = require("./core/workflow_analysis_tasks");
 const { analyzeResumeToPlan } = require("./core/profile_onboarding");
-const { processOnboardingRun } = require("./core/onboarding_run");
+const { processOnboardingRun } = require("./application/onboarding/run");
 const {
-  createOnboardingRun,
-  getLatestReusableOnboardingRunByContentHash,
-  getOnboardingRunContext,
-  retryOnboardingRun
-} = require("./storage/onboarding_store");
+  agentOnboardCommand,
+  agentConfirmCommand
+} = require("./commands/agent_onboarding");
 const { closeAgentStdioTransport } = require("./adapters/models");
 const {
   CITY_CODES,
@@ -84,8 +82,6 @@ const {
   markApplication,
   getCandidateProfile,
   getCandidateMatchingContext,
-  getMatchingCard,
-  confirmMatchingCard,
   getSearchPlan,
   getSearchPlanDependency,
   getLatestBatchId,
@@ -226,8 +222,16 @@ async function main() {
   if (command === "refresh-details") return executeWithSiteScanLease(db, args, command, (signal, execution) => refreshDetails(db, args, { signal, execution }));
   if (command === "refresh-activity") return executeWithSiteScanLease(db, args, command, (signal, execution) => refreshDetails(db, { ...args, "activity-only": true }, { signal, execution }));
   if (command === "profile-create") return createProfile(db, args);
-  if (command === "agent-onboard") return agentOnboard(db, args);
-  if (command === "agent-confirm") return agentConfirm(db, args);
+  if (command === "agent-onboard") return agentOnboardCommand({
+    db,
+    args,
+    root: ROOT,
+    dataRoot: runtimePaths.dataRoot,
+    logger,
+    modelConfig: agentStdioModelConfig(),
+    attachResumeDocumentFile
+  });
+  if (command === "agent-confirm") return agentConfirmCommand({ db, args });
   if (command === "onboarding-process") return processOnboardingCommand(db, args);
   if (command === "bind-batch") return bindBatch(db, args);
   if (command === "reassess-batch") return reassessBatch(db, args);
@@ -2630,134 +2634,6 @@ async function createProfile(db, args) {
   console.log(`Profile: ${saved.profileId}`);
   console.log(`Search plan: ${saved.planId}`);
   console.log(`Keywords: ${planKeywords(plan).join("、")}`);
-}
-
-async function agentOnboard(db, args) {
-  if (args.agent !== true) throw codedError("AGENT_FLAG_REQUIRED", "agent-onboard 必须显式传入 --agent。");
-  if (!args.resume) throw new Error("需要 --resume <简历文件路径>");
-  const operationId = requireAgentOperationId(args);
-  const resumePath = path.resolve(String(args.resume));
-  const fileName = path.basename(resumePath);
-  const buffer = require("node:fs").readFileSync(resumePath);
-  const resume = await parseResumeUpload({ fileName, buffer, root: ROOT, runtimeRoot: runtimePaths.dataRoot });
-  const operationContext = getOnboardingRunContext(db, operationId);
-  const existing = operationContext?.run || null;
-  if (existing) {
-    if (operationContext.document?.contentHash !== resume.contentHash) {
-      throw codedError(
-        "AGENT_OPERATION_ID_CONFLICT",
-        `操作编号 ${operationId} 已用于另一份简历；新一轮请生成新的操作编号。`
-      );
-    }
-  }
-  if (existing?.status === "completed" && existing.profileId && existing.matchingCardId && existing.searchPlanId) {
-    writeAgentOnboardingResult(db, existing);
-    return existing;
-  }
-  if (existing?.status === "running") {
-    throw codedError("AGENT_ONBOARDING_ALREADY_RUNNING", `操作 ${existing.id} 正在运行，请等待当前进程完成。`);
-  }
-  const retryable = existing?.status === "failed"
-    || (existing?.status === "completed" && existing.matchingCardId && !existing.searchPlanId && existing.errorCode);
-  if (!existing && args["refresh-profile"] !== true) {
-    const reusable = getLatestReusableOnboardingRunByContentHash(db, resume.contentHash);
-    if (reusable) {
-      writeAgentOnboardingResult(db, reusable, { operationId, reused: true });
-      return reusable;
-    }
-  }
-  const created = existing
-    ? { created: false, run: retryable ? retryOnboardingRun(db, existing.id) : existing }
-    : createOnboardingRun(db, {
-        displayName: String(args.name || path.parse(fileName).name || "候选人").trim(),
-        document: resume,
-        operationId
-      });
-  if (created.created) {
-    try {
-      const storedFilePath = storeResumeSourceFile({
-        root: runtimePaths.dataRoot,
-        documentId: created.run.resumeDocumentId,
-        fileName,
-        buffer
-      });
-      attachResumeDocumentFile(db, created.run.resumeDocumentId, storedFilePath);
-    } catch (error) {
-      logger.warn("agent_resume_source_file_save_failed", {
-        documentId: created.run.resumeDocumentId,
-        error: errorMeta(error)
-      });
-    }
-  }
-  const result = await processOnboardingRun({
-    db,
-    runId: created.run.id,
-    modelConfig: agentStdioModelConfig(),
-    logger: logger.child({ runId: created.run.id, operation: "agent_onboarding" })
-  });
-  if (result.status !== "completed" || !result.profileId || !result.matchingCardId || !result.searchPlanId) {
-    const error = new Error(result.errorMessage || "Agent 首次使用流程没有生成完整结果。");
-    error.code = result.errorCode || "AGENT_ONBOARDING_INCOMPLETE";
-    throw error;
-  }
-  writeAgentOnboardingResult(db, result);
-  return result;
-}
-
-function writeAgentOnboardingResult(db, result, { operationId = result.id, reused = false } = {}) {
-  const matchingCard = getMatchingCard(db, result.matchingCardId);
-  const searchPlan = getSearchPlan(db, result.searchPlanId);
-  process.stdout.write(`${JSON.stringify({
-    protocol: "offergo.agent.stdio",
-    version: 1,
-    type: "command_result",
-    command: "agent-onboard",
-    result: {
-      operationId,
-      runId: result.id,
-      reused,
-      profileId: result.profileId,
-      profileVersionId: result.profileVersionId,
-      matchingCardId: result.matchingCardId,
-      matchingCard: matchingCard?.card || null,
-      searchPlanId: result.searchPlanId,
-      searchPlan: searchPlan?.plan || null
-    }
-  })}\n`);
-}
-
-function agentConfirm(db, args) {
-  if (args.agent !== true) throw codedError("AGENT_FLAG_REQUIRED", "agent-confirm 必须显式传入 --agent。");
-  const profileId = Number(args.profile);
-  const cardId = Number(args.card);
-  if (!Number.isInteger(profileId) || profileId <= 0) throw new Error("需要 --profile <Profile ID>");
-  if (!Number.isInteger(cardId) || cardId <= 0) throw new Error("需要 --card <Matching Card ID>");
-  const card = getMatchingCard(db, cardId);
-  if (!card || card.profileId !== profileId) throw codedError("MATCHING_CARD_NOT_FOUND", "匹配卡不存在或不属于该候选人。");
-  const confirmed = confirmMatchingCard(db, { profileId, cardId });
-  process.stdout.write(`${JSON.stringify({
-    protocol: "offergo.agent.stdio",
-    version: 1,
-    type: "command_result",
-    command: "agent-confirm",
-    result: {
-      profileId,
-      matchingCardId: confirmed.id,
-      status: confirmed.status
-    }
-  })}\n`);
-  return confirmed;
-}
-
-function requireAgentOperationId(args) {
-  const value = String(args["operation-id"] || "").trim();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw codedError(
-      "AGENT_OPERATION_ID_REQUIRED",
-      "agent-onboard 需要 --operation-id <UUID>；同一次命令重试沿用该 UUID，新的使用轮次生成新 UUID。"
-    );
-  }
-  return value.toLowerCase();
 }
 
 async function processOnboardingCommand(db, args) {
