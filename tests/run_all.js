@@ -112,6 +112,7 @@ const tests = [
   "communication_calibration_gate_smoke.js",
   "dashboard_scan_lifecycle_smoke.js",
   "agent_command_transport_smoke.js",
+  "codex_agent_runner_smoke.js",
   "structured_model_adapter_smoke.js",
   "model_adapter_smoke.js",
   "model_parser_resilience_smoke.js",

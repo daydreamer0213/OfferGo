@@ -282,7 +282,7 @@ git commit -m "feat: add generic agent model transport"
 - Consumes: Agent protocol v1 from Task 2.
 - Produces: `getAgentRunner("codex")`, `probeAgentRunner({ runnerId, env })`, and a protocol-speaking Codex runner executable invoked through `process.execPath`.
 
-- [ ] **Step 1: Write failing capability and invocation tests**
+- [x] **Step 1: Write failing capability and invocation tests**
 
 Put a fake `codex` executable first on a temporary PATH. It records argv/cwd/stdin and can simulate help, success, auth, quota, malformed output, timeout, and cancellation. Assertions must include:
 
@@ -300,13 +300,13 @@ assert.notStrictEqual(invocation.cwd, projectRoot);
 
 Also assert that missing flags produce `update_required`, a login failure produces `MODEL_AGENT_AUTH_REQUIRED`, and a quota response produces `MODEL_AGENT_QUOTA_EXHAUSTED`.
 
-- [ ] **Step 2: Run the test and verify missing runner failure**
+- [x] **Step 2: Run the test and verify missing runner failure**
 
 Run: `node tests/codex_agent_runner_smoke.js`
 
 Expected: FAIL because the runner registry does not exist.
 
-- [ ] **Step 3: Implement the runner registry and capability probe**
+- [x] **Step 3: Implement the runner registry and capability probe**
 
 Use a source-owned allowlist:
 
@@ -322,7 +322,7 @@ const RUNNERS = Object.freeze({
 
 The probe resolves `codex` from PATH, runs `codex exec --help`, checks the exact required flags, then runs a bounded non-sensitive round trip returning `{ ok: true }`. Report only `ready`, `not_installed`, `update_required`, `auth_required`, or `unavailable`, plus a safe action message and capability fingerprint.
 
-- [ ] **Step 4: Implement isolated Codex execution**
+- [x] **Step 4: Implement isolated Codex execution**
 
 The runner reads the protocol request from stdin, writes a permissive object JSON Schema into its request directory, and invokes Codex without shell interpolation. Use capability-confirmed arguments equivalent to:
 
@@ -340,7 +340,7 @@ The runner reads the protocol request from stdin, writes a permissive object JSO
 
 Build the stdin prompt from the system prompt plus a JSON data block and an explicit ban on tools, file reads, file writes, browsing, and external actions. Parse exactly one JSON object from the last-message file. Convert known CLI failures to stable protocol errors without returning raw stderr.
 
-- [ ] **Step 5: Run the fake Codex tests and register them**
+- [x] **Step 5: Run the fake Codex tests and register them**
 
 Run: `node tests/codex_agent_runner_smoke.js`
 
@@ -348,7 +348,7 @@ Expected: PASS with no prompt content in argv, isolated cwd, required flags, cor
 
 Register `codex_agent_runner_smoke.js` in `tests/run_all.js`.
 
-- [ ] **Step 6: Commit the Codex runner**
+- [x] **Step 6: Commit the Codex runner**
 
 ```powershell
 git add src/adapters/models/agent_runners/codex.js src/adapters/models/agent_runner_registry.js tests/codex_agent_runner_smoke.js tests/fixtures/fake_codex_cli.js tests/run_all.js
