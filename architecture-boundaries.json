@@ -151,12 +151,10 @@
     "pattern:dashboard-direct-sql:dashboard/message_reply_send_controller.js#9459414b2f99-3",
     "pattern:dashboard-direct-sql:dashboard/message_reply_send_controller.js#e4e4865cb281-2",
     "pattern:dashboard-direct-sql:dashboard/message_reply_send_controller.js#f36b2c26729e-1",
-    "pattern:dashboard-direct-sql:dashboard/server.js#36fab5a39465-2",
     "pattern:dashboard-direct-sql:dashboard/server.js#4ddd600f0b48-1",
-    "pattern:dashboard-direct-sql:dashboard/server.js#81e250837b59-4",
-    "pattern:dashboard-direct-sql:dashboard/server.js#94a83963e153-5",
-    "pattern:dashboard-direct-sql:dashboard/server.js#989c6f77116d-7",
-    "pattern:dashboard-direct-sql:dashboard/server.js#9a445356ac8d-6",
-    "pattern:dashboard-direct-sql:dashboard/server.js#f61e7f30fa04-3"
+    "pattern:dashboard-direct-sql:dashboard/server.js#81e250837b59-2",
+    "pattern:dashboard-direct-sql:dashboard/server.js#94a83963e153-3",
+    "pattern:dashboard-direct-sql:dashboard/server.js#989c6f77116d-5",
+    "pattern:dashboard-direct-sql:dashboard/server.js#9a445356ac8d-4"
   ]
 }

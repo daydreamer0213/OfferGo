@@ -533,6 +533,12 @@ function countWorkflowJobTasks(db, workflowRunId) {
   ).get(workflowRunId).n);
 }
 
+function workflowHasAnalysisTasks(db, workflowRunId) {
+  return Boolean(db.prepare(
+    "SELECT 1 FROM workflow_job_tasks WHERE workflow_run_id = ? LIMIT 1"
+  ).get(String(workflowRunId || "")));
+}
+
 function insertWorkflowJobTaskRow(db, {
   workflowRunId,
   batchId,
@@ -1284,6 +1290,7 @@ module.exports = {
   workflowJobTaskRow,
   jobAnalysisAttemptRow,
   countWorkflowJobTasks,
+  workflowHasAnalysisTasks,
   insertWorkflowJobTaskRow,
   reactivateWorkflowDetailRequiredTaskRow,
   selectReadyWorkflowJobEntries,

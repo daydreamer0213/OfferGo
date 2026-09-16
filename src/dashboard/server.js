@@ -179,12 +179,7 @@ const {
 } = require("../core/workflow_inventory");
 const { buildWorkflowHealthReport } = require("../core/workflow_health");
 const { getWorkflowProgressSnapshot, listWorkflowProgressJobs } = require("../core/workflow_progress");
-const {
-  startWorkflow,
-  resumeWorkflow,
-  controlWorkflow,
-  getWorkflowStatus
-} = require("../application/workflow");
+const { createDashboardWorkflowService } = require("../application/workflow/dashboard_service");
 const {
   requestWorkflowPause,
   resumeWorkflowRun,
@@ -305,6 +300,7 @@ const { CdpBrowserAdapter } = require("../adapters/browser/cdp");
 const { createMessageDiscoveryController } = require("./message_discovery_controller");
 const { createMessageReplySendController } = require("./message_reply_send_controller");
 const { createMessageFollowUpController } = require("./message_follow_up_controller");
+const { createWorkflowController } = require("./workflow_controller");
 const { renderMessageDiscoveryPage } = require("./message_discovery_view");
 const { renderMessageFollowUpPage } = require("./pages/message_follow_up");
 const { renderCommunicationProfilePage } = require("./communication_profile_view");
@@ -1158,6 +1154,35 @@ function createDashboardServer({
       source: "active_plan_catch_up"
     });
   };
+  const workflowService = createDashboardWorkflowService({
+    db,
+    root,
+    dataRoot,
+    dbPath,
+    scanRuns,
+    logger,
+    spawnProcess,
+    buildDashboardState: buildWorkflowDashboardState,
+    startScan: startPlanScan,
+    resolveNewWorkflowBrowser: resolveDashboardWorkflowBrowser,
+    acquisitionContextResolver: resolveSerializedAcquisitionContext,
+    currentSearchContextResolver: resolveSerializedCurrentSearchContext,
+    browserReadinessProbe: inspectWorkflowResumeBrowserReadiness,
+    publicBrowserReadinessSnapshot,
+    ensureWorkspaceReady: (site) => runBrowserRead(() => ensureManagedWorkspaceReady("workflow_start", site)),
+    getBatchModelState: () => getRuntimeModelState("batch_screening"),
+    batchModelReady: (state = getRuntimeModelState("batch_screening")) =>
+      modelStateReady(state, "batch_screening"),
+    getBatchBackup: getRuntimeBatchBackup,
+    planRescore,
+    schedule: workflowControlSchedule,
+    controlGraceMs: workflowControlGraceMs
+  });
+  const workflowController = createWorkflowController({
+    service: workflowService,
+    logger,
+    renderUiError: respondUiError
+  });
   const dashboardServer = http.createServer(async (req, res) => {
     const requestId = logger.requestId();
     const startedAt = Date.now();
@@ -1409,24 +1434,11 @@ function createDashboardServer({
         return sendJson(res, 200, publicOnboardingRun(run));
       }
       if (req.method === "GET" && url.pathname === "/api/scan-status") return sendJson(res, 200, scanStatus(scanRuns, url.searchParams.get("planId"), db));
-      if (req.method === "GET" && url.pathname === "/api/workflow-status") return handleWorkflowStatus(res, db, url.searchParams.get("runId"), logger);
-      if (req.method === "POST" && url.pathname === "/api/workflow-control") {
-        return handleWorkflowControl(req, res, {
-          db,
-          root,
-          dataRoot,
-          dbPath,
-          scanRuns,
-          logger,
-          requestId,
-          spawnProcess,
-          browserReadinessProbe: inspectWorkflowResumeBrowserReadiness,
-          getBatchModelState: () => getRuntimeModelState("batch_screening"),
-          batchModelReady: () => modelReady("batch_screening"),
-          workflowControlSchedule,
-          workflowControlGraceMs,
-          resolveNewWorkflowBrowser: resolveDashboardWorkflowBrowser
-        });
+      if (req.method === "GET" && url.pathname === "/api/workflow-status") {
+        return workflowController.status(res, url.searchParams.get("runId"));
+      }
+      if (req.method === "POST" && ["/api/workflow-control", "/api/workflow-run/control"].includes(url.pathname)) {
+        return workflowController.control(req, res, { requestId });
       }
       if (req.method === "GET" && url.pathname === "/api/communication-status") return handleCommunicationStatus(res, db, url.searchParams.get("batchId"));
       if (req.method === "GET" && url.pathname === "/api/message-discovery-status") return handleMessageDiscoveryStatus(res, messageDiscovery, url.searchParams.get("profileId"));
@@ -1547,14 +1559,12 @@ function createDashboardServer({
       if (req.method === "POST" && url.pathname === "/api/resume-version") return handleResumeVersionSave(req, res, { db, root, dataRoot, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/plan/recommend") return handlePlanRecommend(req, res, { db, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/plan") return handlePlanSave(req, res, db, { root, logger, requestId, rescore: planRescore });
-      if (req.method === "POST" && url.pathname === "/api/workflow-run") {
-        const batchModelState = getRuntimeModelState("batch_screening");
-        const backupRuntime = batchModelState.settings?.batchBackup?.enabled
-          ? getRuntimeBatchBackup()
-          : null;
-        return handleWorkflowRunStart(req, res, { db, root, dataRoot, dbPath, scanRuns, modelReady: modelStateReady(batchModelState, "batch_screening"), modelState: batchModelState, backupRuntime, logger, requestId, spawnProcess, acquisitionContextResolver: resolveSerializedAcquisitionContext, planRescore, resolveNewWorkflowBrowser: resolveDashboardWorkflowBrowser, ensureWorkspaceReady: (site) => runBrowserRead(() => ensureManagedWorkspaceReady('workflow_start', site)) });
+      if (req.method === "POST" && ["/api/workflow-run", "/api/workflow-run/start"].includes(url.pathname)) {
+        return workflowController.start(req, res, { requestId });
       }
-      if (req.method === "POST" && url.pathname === "/api/workflow-run/resume") return handleWorkflowRunResume(req, res, { db, root, dataRoot, dbPath, scanRuns, batchModelReady: modelReady("batch_screening"), logger, requestId, spawnProcess, browserReadinessProbe: inspectWorkflowResumeBrowserReadiness, resolveNewWorkflowBrowser: resolveDashboardWorkflowBrowser, currentSearchContextResolver: resolveSerializedCurrentSearchContext });
+      if (req.method === "POST" && url.pathname === "/api/workflow-run/resume") {
+        return workflowController.resume(req, res, { requestId });
+      }
       if (req.method === "POST" && url.pathname === "/api/scan") {
         await ensureManagedWorkspaceReady("scan_start");
         return handlePlanScan(req, res, { db, root, dataRoot, dbPath, scanRuns, modelReady: modelReady("batch_screening"), logger, requestId, spawnProcess, resolveNewWorkflowBrowser: resolveDashboardWorkflowBrowser });
@@ -2418,6 +2428,11 @@ function buildWorkflowDashboardState(
   };
 }
 
+function asIso(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
+}
+
 function workflowRunsWithAccessUsage(db, runs, localDay, site = 'boss') {
   const since = new Date(`${localDay}T00:00:00+08:00`).toISOString();
   const usageByRun = new Map();
@@ -3122,599 +3137,6 @@ async function resolveLiveZhaopinContext({ db, plan, matchingContext, logger, br
   return { site: 'zhaopin', acquisitionMode: 'inherited', ...scope, currentTargetUrl: state.url,
     keywordSource: freezeKeywordSource({ planRecord: plan, matchingCardRevision: matchingCardRevision(matchingContext?.matchingCard) }),
     platformPolicy: compileZhaopinPlatformRuntimePolicy({ searchScope: scope.searchScope, filterSummary: state.filterSummary }) };
-}
-
-function preparePlanForNewWorkflow({ db, plan, matchingContext, root, rescore = rescorePlanObservations }) {
-  const active = getActiveWorkflowRun(db, {
-    profileId: plan.profileId,
-    planId: plan.id
-  });
-  if (active) return { rescored: 0, skipped: true };
-  const configs = profileToRuntimeConfigs(
-    loadConfigs(root),
-    matchingContext?.candidateProfile || {},
-    plan.plan,
-    listMatchingResumeVersions(db, plan.profileId),
-    matchingContext?.matchingCard || null
-  );
-  return rescore(db, { planId: plan.id, configs });
-}
-
-async function handleWorkflowRunStart(req, res, {
-  db,
-  root,
-  dataRoot = root,
-  dbPath,
-  scanRuns,
-  modelReady,
-  modelState,
-  backupRuntime,
-  logger,
-  requestId,
-  spawnProcess,
-  acquisitionContextResolver,
-  planRescore,
-  resolveNewWorkflowBrowser,
-  ensureWorkspaceReady = async () => {}
-}) {
-  let planId = 0;
-  try {
-    const params = parseBody(await readBody(req), req.headers["content-type"] || "");
-    const site = String(params.site || 'boss').trim().toLowerCase();
-    if (!['boss', 'zhaopin'].includes(site)) throw appError('UNKNOWN_SITE', '请选择 BOSS 或智联。', { statusCode: 400 });
-    await ensureWorkspaceReady(site);
-    planId = Number(params.planId || 0);
-    const browserAuthority = resolveNewWorkflowBrowser(params);
-    const result = await startWorkflow({
-      db,
-      input: { ...params, ...browserAuthority, root, dataRoot, dbPath, scanRuns, modelReady, modelState, backupRuntime, requestId, spawnProcess },
-      deps: {
-        appError, getSearchPlan, getCandidateProfile, getCandidateMatchingContext, getSearchPlanDependency,
-        assertSearchPlanReady,
-        getActiveWorkflow: (database, record, site) => getActiveWorkflowRun(database, { profileId: record.profileId, planId: record.id, site }),
-        buildDashboardState: buildWorkflowDashboardState, workflowBlockedMessage,
-        resolveNewWorkflowBrowser: () => browserAuthority, acquisitionContextResolver, assertAcquisitionContext,
-        acquisitionModeOf, freezeWorkflowPlan,
-        preparePlanForNewWorkflow: (context) => preparePlanForNewWorkflow({ ...context, root, rescore: planRescore }),
-        scanAvailability: assertWorkflowScanAvailable, workflowModelProfilesSnapshot,
-        createWorkflowRun, transitionWorkflowRun, spawnScan: startPlanScan,
-        settleFailedWorkflowLaunch, logger
-      }
-    });
-    redirect(res, `/workflow?runId=${encodeURIComponent(result.workflow.id)}`);
-  } catch (error) {
-    respondUiError(res, error, modelSettingsBack(error, planId ? `/plan?planId=${planId}` : "/plan"), {
-      logger,
-      requestId,
-      event: "workflow_run_start_failed",
-      fallbackCode: "WORKFLOW_RUN_START_FAILED"
-    });
-  }
-}
-
-function assertWorkflowScanAvailable(db, scanRuns, planId, logger, site = 'boss') {
-  assertBossRuntimeAvailable(db, { site });
-  const orphaned = interruptOrphanedScanRuns(db, {
-    site,
-    heartbeatTimeoutMs: PRODUCT_POLICY.operations.scanOrphanTimeoutMs
-  });
-  if (orphaned.interrupted) logger?.warn("orphaned_scan_runs_interrupted", orphaned);
-  const latestRun = getLatestScanRun(db, { planId, site });
-  if (latestRun?.status === "running" || [...scanRuns.values()].some((run) => !run.exited)) {
-    throw appError("WORKFLOW_SCAN_ALREADY_RUNNING", "BOSS 已有扫描任务正在运行，请先完成当前任务。", { statusCode: 409 });
-  }
-  const activeLease = getSiteScanLease(db, site) || getSiteScanLease(db, site === 'boss' ? 'zhaopin' : 'boss');
-  if (activeLease) {
-    throw appError("WORKFLOW_SCAN_LEASE_ACTIVE", `BOSS 已有扫描任务运行中（${activeLease.command}）。`, { statusCode: 409 });
-  }
-}
-
-async function handleWorkflowRunResume(req, res, {
-  db,
-  root,
-  dataRoot = root,
-  dbPath,
-  scanRuns,
-  batchModelReady,
-  logger,
-  requestId,
-  spawnProcess,
-  browserReadinessProbe,
-  resolveNewWorkflowBrowser,
-  currentSearchContextResolver
-}) {
-  let workflowRunId = "";
-  try {
-    const params = parseBody(await readBody(req), req.headers["content-type"] || "");
-    workflowRunId = String(params.workflowRunId || params.runId || "").trim();
-    const browserAuthority = resolveNewWorkflowBrowser(params);
-    const result = await resumeWorkflow({
-      db,
-      input: { ...params, ...browserAuthority, workflowRunId, root, dataRoot, dbPath, scanRuns, batchModelReady, requestId, spawnProcess },
-      deps: {
-        appError, getWorkflowRun, getBatch, workflowResumeNeedsBatchModel, assertCompleteInheritedContext,
-        assertCompleteGeneratedContext, assertFrozenWorkflowPlan,
-        resolveWorkflowResumeBrowserMode, normalizeCdpPort, portableCdpPort: PORTABLE_CDP_PORT,
-        validateResumeBatch, assertWorkflowAnalysisBatch, workflowResumeRequiresBrowser, browserReadinessProbe,
-        publicBrowserReadinessSnapshot, assertWorkflowResumeBrowserReady,
-        resolveCurrentSearchContext: ({ workflow, browserMode, cdpPort }) => {
-          const plan = getSearchPlan(db, workflow.planId);
-          if (!plan) throw appError("WORKFLOW_PLAN_NOT_FOUND", "本轮任务的 Search Plan 不存在。", { statusCode: 404 });
-          return currentSearchContextResolver({
-            site: workflow.site || 'boss',
-            db,
-            plan,
-            matchingContext: getCandidateMatchingContext(db, plan.profileId),
-            logger,
-            browserMode,
-            cdpPort
-          });
-        },
-        replaceWorkflowScanContext,
-        transitionWorkflowRun,
-        scanAvailability: assertWorkflowScanAvailable, spawnScan: startPlanScan, settleFailedWorkflowLaunch, logger
-      }
-    });
-    if (result.scopeChange) {
-      return sendHtml(res, renderWorkflowScopeChoicePage({
-        workflowRunId,
-        browserMode: browserAuthority.browserMode,
-        cdpPort: browserAuthority.cdpPort,
-        expectedScopeToken: result.scopeChange.expectedScopeToken
-      }), 409);
-    }
-    redirect(res, `/workflow?runId=${encodeURIComponent(result.workflow.id)}`);
-  } catch (error) {
-    respondUiError(res, error, modelSettingsBack(
-      error,
-      workflowRunId ? `/workflow?runId=${encodeURIComponent(workflowRunId)}` : "/plan"
-    ), {
-      logger,
-      requestId,
-      event: "workflow_run_resume_failed",
-      fallbackCode: "WORKFLOW_RUN_RESUME_FAILED"
-    });
-  }
-}
-
-function renderWorkflowScopeChoicePage({ workflowRunId, browserMode, cdpPort, expectedScopeToken }) {
-  const identity = `<input type="hidden" name="workflowRunId" value="${escapeAttr(workflowRunId)}"><input type="hidden" name="browserMode" value="${escapeAttr(browserMode)}">${cdpPort ? `<input type="hidden" name="cdpPort" value="${Number(cdpPort)}">` : ""}`;
-  return renderPage("搜索条件已经变化", `<main><h1>搜索条件已经变化</h1><section class="panel"><p>本轮开始时的条件与当前 BOSS 搜索页不同。旧结果不会与新结果混合。</p><div class="workflow-actions"><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="new"><input type="hidden" name="expectedScopeToken" value="${escapeAttr(expectedScopeToken)}"><button data-workflow-primary="true">按新条件重新开始本轮</button></form><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="original"><button class="secondary">继续开始时的条件</button></form><a class="button-link" href="/workflow?runId=${encodeURIComponent(workflowRunId)}">返回本轮</a></div></section></main>`);
-}
-
-function workflowResumeRequiresBrowser(db, workflow) {
-  if (!workflow) return false;
-  if (workflow.status === "created") return true;
-  const phase = String(workflow.resumePhase || "");
-  if (phase === "scanning") return true;
-  if (phase === "analyzing") return false;
-  // Crash recovery without an explicit resume phase: if analysis tasks were
-  // already initialized, the remaining work is local analysis only and must
-  // not require BOSS readiness. Otherwise the scan phase is still pending.
-  const hasAnalysisTasks = Boolean(
-    db.prepare("SELECT 1 FROM workflow_job_tasks WHERE workflow_run_id = ? LIMIT 1").get(workflow.id)
-  );
-  if (hasAnalysisTasks) return false;
-  const scan = workflow.scanRunId ? getScanRun(db, workflow.scanRunId) : null;
-  if (!scan) return true;
-  return ["running", "created", "scanning"].includes(String(scan.status || ""));
-}
-
-function workflowResumeNeedsBatchModel(db, workflow) {
-  if (!workflow) return false;
-  if (workflow.scanNeeded) return true;
-  if (["scanning", "analyzing"].includes(String(workflow.resumePhase || ""))) return true;
-  return Boolean(
-    db.prepare("SELECT 1 FROM workflow_job_tasks WHERE workflow_run_id = ? LIMIT 1").get(workflow.id)
-  );
-}
-
-function assertWorkflowResumeBrowserReady(readiness) {
-  if (readiness.ready && readiness.status === "ready") return;
-  const code = {
-    starting: "BROWSER_RUNTIME_NOT_READY",
-    unavailable: "BROWSER_RUNTIME_NOT_READY",
-    conflict: "BROWSER_RUNTIME_NOT_READY",
-    stopped: "BROWSER_RUNTIME_NOT_READY",
-    needs_attention: "BROWSER_RUNTIME_NOT_READY",
-    browser_unavailable: "BROWSER_UNAVAILABLE",
-    boss_tab_missing: "BOSS_TAB_REQUIRED",
-    login_required: "BOSS_LOGIN_REQUIRED",
-    search_page_required: "BOSS_SEARCH_PAGE_INVALID",
-    communication_page_required: "BOSS_COMMUNICATION_PAGE_LOST",
-    risk_control: "BOSS_RISK_CONTROL"
-  }[readiness.status] || "BROWSER_READINESS_INVALID";
-  throw appError(code, readiness.message, { statusCode: 409 });
-}
-
-function resolveWorkflowResumeBrowserMode(workflow, requestedMode = "") {
-  const acquisitionMode = String(workflow?.planner?.acquisitionMode || "").trim();
-  const requested = String(requestedMode || "").trim().toLowerCase();
-  if (acquisitionMode === "inherited" || workflow?.planner?.planSnapshotVersion === 2) {
-    const stored = String(workflow?.planner?.browserMode || "edge").trim().toLowerCase();
-    if (!["edge", "portable"].includes(stored)) {
-      throw appError(
-        "WORKFLOW_BROWSER_MODE_INVALID",
-        "本轮保存的浏览器模式无效。",
-        { statusCode: 409 }
-      );
-    }
-    if (requested && requested !== stored) {
-      throw appError(
-        "WORKFLOW_BROWSER_MODE_MISMATCH",
-        `本轮已固定使用 ${stored}，不能切换浏览器。`,
-        { statusCode: 409 }
-      );
-    }
-    return stored;
-  }
-  if (requested && !["edge", "portable"].includes(requested)) {
-    throw appError(
-      "WORKFLOW_BROWSER_MODE_INVALID",
-      "浏览器模式必须是 OfferGo 专用 Edge（推荐）或使用当前 Edge（高级，需要浏览器连接组件）。",
-      { statusCode: 409 }
-    );
-  }
-  const stored = String(
-    workflow?.planner?.browserMode
-      || workflow?.planner?.browser?.mode
-      || ""
-  ).trim().toLowerCase();
-  return requested || (["edge", "portable"].includes(stored) ? stored : "edge");
-}
-
-function handleWorkflowStatus(res, db, workflowRunId, logger = null) {
-  const result = getWorkflowStatus({
-    db,
-    workflowRunId,
-    deps: {
-      recover: recoverWorkflowRuns,
-      orphanTimeoutMs: PRODUCT_POLICY.operations.scanOrphanTimeoutMs,
-      progressSnapshot: getWorkflowProgressSnapshot,
-      getWorkflowRun,
-      communicationBatchSummary,
-      publicCommunicationStatus,
-      publicWorkflow,
-      logger
-    }
-  });
-  sendJson(res, result.statusCode, result.body);
-}
-
-async function handleWorkflowControl(req, res, {
-  db,
-  root,
-  dataRoot = root,
-  dbPath,
-  scanRuns,
-  logger,
-  requestId,
-  spawnProcess,
-  browserReadinessProbe,
-  getBatchModelState,
-  batchModelReady,
-  workflowControlSchedule,
-  workflowControlGraceMs,
-  resolveNewWorkflowBrowser
-}) {
-  let workflowRunId = "";
-  let action = "";
-  try {
-    const params = parseBody(await readBody(req), req.headers["content-type"] || "");
-    const browserAuthority = resolveNewWorkflowBrowser(params);
-    workflowRunId = String(params.workflowRunId || params.runId || "").trim();
-    action = String(params.action || "").trim().toLowerCase();
-    await controlWorkflow({
-      db,
-      input: {
-        ...params,
-        ...browserAuthority,
-        workflowRunId,
-        action,
-        root,
-        dataRoot,
-        dbPath,
-        scanRuns,
-        requestId,
-        spawnProcess,
-        schedule: workflowControlSchedule,
-        controlGraceMs: workflowControlGraceMs
-      },
-      deps: {
-        appError, getWorkflowRun, exactActiveWorkflowRun, exactPersistedWorkflowRunIsRunning,
-        requestWorkflowPause, requestWorkflowStop, finalizeWorkflowControl, scheduleExactWorkflowControlFallback,
-        workflowResumeNeedsBatchModel, resolveWorkflowControlBrowserAuthority, browserReadinessProbe,
-        publicBrowserReadinessSnapshot, assertWorkflowResumeBrowserReady, sameWorkflowControlSnapshot,
-        getBatch, validateResumeBatch, scanAvailability: assertWorkflowScanAvailable, assertWorkflowAnalysisBatch,
-        workflowBatchResumeEvidence, getBatchModelState, batchModelReady, resumeWorkflowRun,
-        spawnScan: startPlanScan, settleFailedWorkflowLaunch, transitionWorkflowRun,
-        portableCdpPort: PORTABLE_CDP_PORT, logger
-      }
-    });
-    return redirect(res, `/workflow?runId=${encodeURIComponent(workflowRunId)}`);
-  } catch (error) {
-    const issue = publicError(error, {
-      fallbackCode: "WORKFLOW_CONTROL_FAILED",
-      fallbackMessage: "工作流控制未能完成。",
-      statusCode: 409
-    });
-    logger.error("workflow_control_failed", {
-      requestId,
-      workflowRunId,
-      action,
-      error: errorMeta(error),
-      errorCode: issue.code
-    });
-    const guidance = userFacingError(issue.code, issue.message);
-    return sendJson(res, issue.statusCode, {
-      error: `${guidance.title}：${guidance.impact} ${guidance.nextAction}`,
-      errorCode: issue.code,
-      requestId,
-      ...(issue.code === "MODEL_CONFIGURATION_REQUIRED"
-        ? { settingsHref: "/settings#model-profile-batch_screening" }
-        : {})
-    });
-  }
-}
-
-function sameWorkflowControlSnapshot(before, after) {
-  return Boolean(before && after)
-    && before.id === after.id
-    && before.status === after.status
-    && before.controlState === after.controlState
-    && Number(before.progressRevision || 0) === Number(after.progressRevision || 0);
-}
-
-function settleFailedWorkflowLaunch(db, scanRuns, workflow, error) {
-  const current = getWorkflowRun(db, workflow?.id);
-  if (!current
-    || !["scanning", "analyzing"].includes(current.status)
-    || exactActiveWorkflowRun(scanRuns, current)) {
-    return current;
-  }
-  return transitionWorkflowRun(db, {
-    id: current.id,
-    status: "interrupted",
-    errorCode: String(error?.code || "WORKFLOW_PROCESS_LAUNCH_FAILED"),
-    errorMessage: String(error?.message || "workflow process launch failed")
-  });
-}
-
-function scheduleExactWorkflowControlFallback({
-  db,
-  scanRuns,
-  workflowRunId,
-  expectedRun,
-  expectedControlState,
-  schedule,
-  graceMs,
-  logger
-}) {
-  if (!expectedRun?.child || typeof schedule !== "function") return null;
-  const expectedChild = expectedRun.child;
-  const delayMs = Math.max(1, Number(graceMs)
-    || PRODUCT_POLICY.operations.modelAnalysis.taskLeaseTtlMs);
-  let timer;
-  try {
-    timer = schedule(() => {
-      const workflow = getWorkflowRun(db, workflowRunId);
-      const active = exactActiveWorkflowRun(scanRuns, workflow);
-      if (!workflow
-        || workflow.controlState !== expectedControlState
-        || active !== expectedRun
-        || active.child !== expectedChild
-        || active.exited) {
-        return false;
-      }
-      if (typeof expectedChild.kill !== "function") {
-        logger?.warn("workflow_control_fallback_unavailable", {
-          workflowRunId,
-          controlState: expectedControlState
-        });
-        return false;
-      }
-      const killed = expectedChild.kill("SIGTERM");
-      logger?.warn("workflow_control_fallback_terminated", {
-        workflowRunId,
-        controlState: expectedControlState,
-        killed: killed !== false
-      });
-      return killed !== false;
-    }, delayMs);
-    timer?.unref?.();
-  } catch (error) {
-    logger?.error("workflow_control_fallback_schedule_failed", {
-      workflowRunId,
-      controlState: expectedControlState,
-      error: errorMeta(error)
-    });
-  }
-  return timer || null;
-}
-
-function publicWorkflow(workflow) {
-  return {
-    id: String(workflow.id || ""),
-    status: String(workflow.status || ""),
-    controlState: String(workflow.controlState || "none"),
-    lastActivityAt: workflow.lastActivityAt || null,
-    progressRevision: Number(workflow.progressRevision || 0),
-    successfulCount: Number(workflow.successfulCount || 0),
-    errorCode: workflow.errorCode ? String(workflow.errorCode) : null
-  };
-}
-
-function publicCommunicationStatus(communication) {
-  if (!communication) return null;
-  return {
-    batch: {
-      id: Number(communication.batch?.id || 0),
-      status: String(communication.batch?.status || "")
-    },
-    summary: {
-      batchId: Number(communication.summary?.batchId || 0),
-      batchStatus: String(communication.summary?.batchStatus || ""),
-      statusCounts: Object.fromEntries(
-        Object.entries(communication.summary?.statusCounts || {})
-          .filter(([status, count]) => /^[a-z_]+$/.test(status) && Number.isFinite(Number(count)))
-          .map(([status, count]) => [status, Math.max(0, Number(count))])
-      ),
-      total: Math.max(0, Number(communication.summary?.total || 0)),
-      terminal: Math.max(0, Number(communication.summary?.terminal || 0)),
-      remaining: Math.max(0, Number(communication.summary?.remaining || 0))
-    }
-  };
-}
-
-function exactActiveWorkflowRun(scanRuns, workflow) {
-  if (!workflow) return null;
-  const keys = [
-    `workflow:${workflow.id}`,
-    Number(workflow.planId)
-  ];
-  for (const key of keys) {
-    const local = scanRuns.get(key);
-    if (local
-      && !local.exited
-      && local.workflowRunId === workflow.id
-      && local.child) {
-      return local;
-    }
-  }
-  return null;
-}
-
-function exactPersistedWorkflowRunIsRunning(db, workflow) {
-  if (!workflow?.scanRunId) return false;
-  return getScanRun(db, workflow.scanRunId)?.status === "running";
-}
-
-function workflowModelProfilesSnapshot(modelState, { backupRuntime = null } = {}) {
-  const settings = modelState?.settings || {};
-  const batch = settings.taskProfiles?.batch_screening;
-  if (!batch?.revision) {
-    throw appError(
-      "MODEL_CONFIGURATION_REQUIRED",
-      "批量筛选模型配置缺少版本，不能创建可恢复工作流。",
-      { statusCode: 409 }
-    );
-  }
-  const credential = batch.credentialRef === "independent"
-    ? settings.independentCredentials?.batch_screening
-    : settings.sharedCredential;
-  const backup = settings.batchBackup;
-  const backupUsable = Boolean(
-    backupRuntime
-    && backup?.enabled
-    && backup.connection?.status === "verified"
-  );
-  return {
-    batch_screening: {
-      revision: String(batch.revision),
-      provider: String(credential?.provider || ""),
-      model: String(batch.model || ""),
-      thinkingMode: String(batch.thinkingMode || "disabled"),
-      reasoningEffort: String(batch.reasoningEffort || "high"),
-      timeoutMs: Number(batch.timeoutMs || 0),
-      concurrency: Number(batch.concurrency || 1)
-    },
-    batch_backup: backupUsable ? {
-      revision: String(backup.revision || backupRuntime.revision || ""),
-      provider: String(backup.provider || ""),
-      model: String(backup.model || ""),
-      thinkingMode: String(backup.thinkingMode || "disabled"),
-      reasoningEffort: String(backup.reasoningEffort || "high"),
-      timeoutMs: Number(backup.timeoutMs || 0)
-    } : null
-  };
-}
-
-function workflowBatchResumeEvidence(modelState, { ready = false } = {}) {
-  const profile = modelState?.settings?.taskProfiles?.batch_screening;
-  if (!ready || !profile || profile.connection?.status !== "verified") return {};
-  return {
-    batchModelRevision: String(profile.revision || ""),
-    batchModelVerifiedAt: String(profile.connection.checkedAt || "")
-  };
-}
-
-function assertWorkflowAnalysisBatch(db, workflow) {
-  const batch = workflow?.scanBatchId ? getBatch(db, workflow.scanBatchId) : null;
-  if (!batch
-    || batch.site !== (workflow.site || 'boss')
-    || Number(batch.searchPlanId || 0) !== Number(workflow?.planId || 0)
-    || Number(batch.profileId || 0) !== Number(workflow?.profileId || 0)) {
-    throw appError(
-      "WORKFLOW_ANALYSIS_BATCH_MISMATCH",
-      "本轮持久化分析批次不存在或不属于当前工作流。",
-      { statusCode: 409 }
-    );
-  }
-  return batch;
-}
-
-function resolveWorkflowControlBrowserAuthority(workflow, params = {}) {
-  const acquisitionMode = String(workflow?.planner?.acquisitionMode || "").trim();
-  if (!["generated", "inherited"].includes(acquisitionMode)) {
-    throw appError(
-      "WORKFLOW_ACQUISITION_MODE_INVALID",
-      "本轮任务的采集模式无效。",
-      { statusCode: 409 }
-    );
-  }
-  if (acquisitionMode === "inherited") {
-    try {
-      assertCompleteInheritedContext(workflow.planner, {
-        code: "WORKFLOW_INHERITED_SNAPSHOT_INVALID",
-        message: "本轮继承模式快照不完整。",
-        planId: workflow.planId
-      });
-    } catch (error) {
-      throw appError(
-        "WORKFLOW_INHERITED_SNAPSHOT_INVALID",
-        "本轮继承模式快照不完整。",
-        { statusCode: 409, cause: error }
-      );
-    }
-  }
-  const browserMode = resolveWorkflowResumeBrowserMode(workflow, params.browserMode);
-  if (browserMode === "edge") {
-    if (workflow?.planner?.planSnapshotVersion === 2 && workflow.planner?.cdpPort != null) {
-      throw appError("WORKFLOW_BROWSER_AUTHORITY_INVALID", "本轮保存的浏览器身份无效。", { statusCode: 409 });
-    }
-    return { browserMode: "edge", cdpPort: null };
-  }
-  const storedCdpPort = Number(workflow?.planner?.cdpPort);
-  if (workflow?.planner?.planSnapshotVersion === 2 && storedCdpPort !== PORTABLE_CDP_PORT) {
-    throw appError("WORKFLOW_BROWSER_AUTHORITY_INVALID", "本轮保存的浏览器身份无效。", { statusCode: 409 });
-  }
-  const cdpPort = normalizeCdpPort(
-    params.cdpPort || (Number.isInteger(storedCdpPort) ? storedCdpPort : PORTABLE_CDP_PORT)
-  );
-  if (cdpPort !== PORTABLE_CDP_PORT) {
-    throw appError(
-      "INHERITED_PORTABLE_PORT_REQUIRED",
-      "继承模式必须使用 OfferGo 专用 Edge（推荐）的固定浏览器身份。",
-      { statusCode: 409 }
-    );
-  }
-  return { browserMode, cdpPort };
-}
-
-function workflowBlockedMessage(code, plan = {}) {
-  return {
-    WORKFLOW_DAILY_RUN_LIMIT: "今天的三轮任务都已创建。",
-    WORKFLOW_DAILY_TARGET_REACHED: "今天的目标已完成，无需再创建新一轮。",
-    WORKFLOW_THIRD_SCAN_NOT_NEEDED: "当前候选库存已足够，不需要追加第三轮扫描。",
-    WORKFLOW_SCAN_INTERVAL: plan.nextRunAt
-      ? `两轮扫描至少间隔 2 小时，下次可在 ${new Date(plan.nextRunAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} 开始。`
-      : "两轮扫描至少间隔 2 小时。"
-  }[code] || "当前不能创建新一轮。";
-}
-
-function asIso(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
 }
 
 function startPlanScan(scanRuns, {
@@ -6479,7 +5901,6 @@ const OUTCOME_TIER_LABELS = {
   caution: "慎投",
   not_recommended: "不推荐"
 };
-
 function outcomeTierLabel(key) {
   return Object.hasOwn(OUTCOME_TIER_LABELS, key) ? OUTCOME_TIER_LABELS[key] : "";
 }
