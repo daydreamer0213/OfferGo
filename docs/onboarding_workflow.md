@@ -7,8 +7,8 @@
 ## 用户路径
 
 ```text
-打开工作台
-  -> 配置并实测模型连接
+普通用户打开工作台
+  -> 填写 API Key 并实测模型连接
   -> 上传简历或粘贴文本
   -> 本地提取和质量诊断
   -> 模型生成 CandidateProfile
@@ -19,6 +19,8 @@
   -> 打开已登录的 BOSS 搜索页并按需设置筛选条件
   -> 执行一轮筛选、确认清单并按需开始沟通
 ```
+
+如果用户把项目交给 Agent，Agent 不执行上述前端步骤。每次使用先运行 `agent-onboard --resume <path> --operation-id <uuid> --agent`：简历未变化就复用已保存的画像、匹配偏好卡和搜索计划；首次使用或简历变化时才通过当前进程的 stdio 协议生成它们。Agent 检查并用 `agent-confirm` 确认匹配卡后，再使用带 `--agent` 的 CLI 继续后续工作。相同 UUID 只表示同一条命令重试，下一次使用生成新 UUID；只有用户明确要求时才加 `--refresh-profile` 强制重新分析。OfferGo 不保存 Key，也不从项目内部启动第二个 Agent。详见 [Agent 无界面运行](agent-operation.md)。
 
 模型配置位于使用链路前面，但不会封锁历史数据：未配置模型时仍能查看已有岗位、投递记录和诊断信息。
 

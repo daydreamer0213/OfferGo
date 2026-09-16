@@ -174,6 +174,17 @@ node -e "const {openDb}=require('./src/core/storage'); const db=openDb('data/job
 - 沟通处于 `paused` 或安全中断状态时可由用户恢复；`click_dispatched` 等不明确状态不会自动再次点击。
 - 重启只执行本地失联校准，不会自行导航 BOSS 或继续沟通。
 
+## Agent 无界面协议错误
+
+| 错误码 | 含义 | 处理 |
+| --- | --- | --- |
+| `AGENT_STDIO_RESPONSE_INVALID` | Agent 返回的不是协议要求的单行 JSON 对象 | 按当前请求的 `replyFormat` 重新生成响应，不复用旧任务结果 |
+| `AGENT_STDIO_RESPONSE_MISMATCH` | 响应任务 ID 与当前请求不一致 | 停止当前命令，重新启动并只回答当前请求 |
+| `AGENT_STDIO_TIMEOUT` | 外层 Agent 长时间没有返回结果 | 确认 Agent 仍在处理当前终端任务，再由 Agent 重新运行该命令 |
+| `AGENT_STDIO_CANCELLED` / `AGENT_STDIO_CLOSED` | 当前 Agent 任务被取消或标准输入关闭 | 保留已有本地检查点，重新运行未完成命令 |
+
+这些错误只存在于 `--agent` 无界面路径。普通前端仍使用 API Key，不显示 Agent 配置入口。
+
 ## 数据库检查
 
 主数据库为 `data\jobs.sqlite`。升级前先复制到 `data\backups`，再执行迁移和 `PRAGMA quick_check`。不得通过删除主库来解决显示或迁移问题。

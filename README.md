@@ -60,6 +60,19 @@ Windows 普通用户：
 
 模型不可用时，历史岗位和投递记录仍可查看；简历解析和语义匹配会明确显示为待处理，不会伪装成模型结论。
 
+### 通过 Agent 使用（不打开前端）
+
+如果用户把仓库直接交给 Codex、Claude Code、Kimi 等 Agent，Agent 应使用无界面 CLI，不启动 Dashboard，也不要求用户填写 Key。首次流程运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 agent-onboard `
+  --resume "D:\资料\resume.docx" `
+  --operation-id "550e8400-e29b-41d4-a716-446655440000" --agent `
+  --data-root "D:\DevData\OfferGo-user-data"
+```
+
+OfferGo 通过当前进程的 JSON 行协议把结构化任务交给正在运行项目的 Agent；外层 Agent 自己返回结果，项目不会再次启动 Codex 或其他 Agent。重试同一条命令时沿用同一个 `operation-id`，下一次使用生成新的 UUID。简历内容没有变化时会直接复用已有画像、匹配卡和搜索方案，只有明确加入 `--refresh-profile` 才重新分析。完整协议、匹配卡确认和后续命令见 [Agent 无界面运行说明](docs/agent-operation.md)。招聘网站的只读、确认和外部发送边界保持不变。
+
 ### 浏览器连接
 
 当前开发代码默认使用“OfferGo 专用 Edge（推荐）”，不依赖 Edge Control。Edge Control 扩展和桥接只服务于“使用当前 Edge（高级，需要浏览器连接组件）”，不进入普通安装包，也不会自动下载；高级模式缺少组件时会停止，不会切换浏览器 authority（浏览器控制权）。

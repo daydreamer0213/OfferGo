@@ -47,6 +47,7 @@ assert(portableEdgeLauncher.includes("9222"));
 assert(portableEdgeLauncher.includes("https://www.zhipin.com/web/geek/jobs"));
 assert(releasePackager.includes('"LICENSE"'), "release package must include the AGPL license");
 assert(releasePackager.includes('"NOTICE"'), "release package must include copyright and third-party notices");
+assert(releasePackager.includes('"agent-operation.md"'), "release package must include the headless Agent guide");
 assert(!releasePackager.includes('Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs")'), "release package must not recursively include internal development evidence");
 const selfCheckDir = path.join(root, ".runtime", "self-check");
 fs.mkdirSync(selfCheckDir, { recursive: true });

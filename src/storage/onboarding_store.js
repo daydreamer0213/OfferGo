@@ -12,17 +12,28 @@ const INITIAL_SEARCH_PREPARATION_EVENT = "onboarding_initial_search_prepared";
 function createOnboardingRun(db, {
   profileId = null,
   displayName = "候选人",
-  document
+  document,
+  operationId = null
 } = {}) {
   const requestedProfileId = Number(profileId || 0) || null;
+  const requestedOperationId = String(operationId || "").trim() || null;
   const hash = String(document?.contentHash || "").trim();
   if (!hash || !String(document?.text || "").trim()) {
     throw new Error("onboarding run requires a parsed resume document");
   }
-  const duplicate = findDuplicateRun(db, requestedProfileId, hash);
-  if (duplicate) return { created: false, run: onboardingRunRow(duplicate) };
+  if (requestedOperationId) {
+    const existing = getOnboardingRun(db, requestedOperationId);
+    if (existing) return { created: false, run: existing };
+  } else {
+    const duplicate = findDuplicateRun(db, requestedProfileId, hash);
+    if (duplicate) return { created: false, run: onboardingRunRow(duplicate) };
+  }
 
   return immediateTransaction(db, () => {
+    if (requestedOperationId) {
+      const existing = getOnboardingRun(db, requestedOperationId);
+      if (existing) return { created: false, run: existing };
+    }
     const now = nowIso();
     let candidateId = requestedProfileId;
     if (candidateId) {
@@ -53,7 +64,7 @@ function createOnboardingRun(db, {
       JSON.stringify(maskResumeDiagnostics(document.diagnostics || {})),
       now
     ).lastInsertRowid);
-    const id = crypto.randomUUID();
+    const id = requestedOperationId || crypto.randomUUID();
     db.prepare(`
       INSERT INTO onboarding_runs(
         id, profile_id, resume_document_id, status, stage, progress_revision,
@@ -103,6 +114,24 @@ function getOnboardingRun(db, id) {
   return onboardingRunRow(db.prepare(
     "SELECT * FROM onboarding_runs WHERE id = ?"
   ).get(String(id || "")));
+}
+
+function getLatestReusableOnboardingRunByContentHash(db, contentHash) {
+  const hash = String(contentHash || "").trim();
+  if (!hash) return null;
+  return onboardingRunRow(db.prepare(`
+    SELECT runs.*
+    FROM onboarding_runs runs
+    JOIN resume_documents documents ON documents.id = runs.resume_document_id
+    JOIN candidate_matching_cards cards ON cards.id = runs.matching_card_id
+    JOIN search_plans plans ON plans.id = runs.search_plan_id
+    WHERE documents.content_hash = ?
+      AND runs.status = 'completed'
+      AND runs.profile_version_id IS NOT NULL
+      AND cards.status IN ('draft', 'confirmed')
+    ORDER BY runs.updated_at DESC, runs.created_at DESC
+    LIMIT 1
+  `).get(hash));
 }
 
 function getOnboardingRunContext(db, id) {
@@ -373,6 +402,7 @@ module.exports = {
   ACTIVE_STATUSES,
   createOnboardingRun,
   getOnboardingRun,
+  getLatestReusableOnboardingRunByContentHash,
   getOnboardingRunContext,
   claimOnboardingRun,
   checkpointOnboardingRun,

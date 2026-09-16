@@ -122,6 +122,8 @@ async function main() {
   assert(settingsHtml.includes('aria-disabled="true"'));
   assert(settingsHtml.includes('tabindex="-1"'));
   assert.strictEqual((settingsHtml.match(/>测试连接并保存<\/button>/g) || []).length, 1);
+  assert(!settingsHtml.includes("使用本机 Agent"), "Agent-operated usage must not appear in the frontend");
+  assert(!settingsHtml.includes("测试 Codex 并启用"), "the frontend must remain API-key only");
   assert(/model-profile-deep_analysis[\s\S]*value="save_parameters"[\s\S]*>保存模型参数<\/button>/.test(settingsHtml));
   assert(/model-profile-batch_screening[\s\S]*value="save_parameters"[\s\S]*>保存模型参数<\/button>/.test(settingsHtml));
   assert(/settings-primary-grid[\s\S]*model-profile-deep_analysis[\s\S]*model-profile-batch_screening/.test(settingsHtml));

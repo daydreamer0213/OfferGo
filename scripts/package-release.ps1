@@ -53,6 +53,7 @@ $StageDocsDir = Join-Path $StageDir "docs"
 New-Item -ItemType Directory -Force -Path $StageDocsDir | Out-Null
 foreach ($name in @(
   "README.md",
+  "agent-operation.md",
   "boss-communication-calibration.md",
   "daily_workflow.md",
   "llm_contracts.md",

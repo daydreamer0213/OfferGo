@@ -18,6 +18,13 @@ const { completedWorkflowAnalysisCount } = require("./core/workflow_analysis_tas
 const { analyzeResumeToPlan } = require("./core/profile_onboarding");
 const { processOnboardingRun } = require("./core/onboarding_run");
 const {
+  createOnboardingRun,
+  getLatestReusableOnboardingRunByContentHash,
+  getOnboardingRunContext,
+  retryOnboardingRun
+} = require("./storage/onboarding_store");
+const { closeAgentStdioTransport } = require("./adapters/models");
+const {
   CITY_CODES,
   cityToBossCode,
   profileToRuntimeConfigs,
@@ -77,6 +84,8 @@ const {
   markApplication,
   getCandidateProfile,
   getCandidateMatchingContext,
+  getMatchingCard,
+  confirmMatchingCard,
   getSearchPlan,
   getSearchPlanDependency,
   getLatestBatchId,
@@ -179,14 +188,17 @@ if (require.main === module) {
     } else {
       console.error(err.stack || err.message);
     }
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  }).finally(() => closeAgentStdioTransport());
 }
 
 async function main() {
   const [command = "help", ...argv] = process.argv.slice(2);
   const args = parseArgs(argv);
   if (["help", "--help", "-h"].includes(command) || args.help) return printHelp();
+  if (args.agent === true && args["force-mock"] === true) {
+    throw codedError("AGENT_MODE_CONFLICT", "--agent 不能与 --force-mock 同时使用。");
+  }
   runtimePaths = resolveRuntimePaths({
     appRoot: ROOT,
     ...(args["data-root"] !== undefined ? { dataRoot: args["data-root"] } : {})
@@ -214,6 +226,8 @@ async function main() {
   if (command === "refresh-details") return executeWithSiteScanLease(db, args, command, (signal, execution) => refreshDetails(db, args, { signal, execution }));
   if (command === "refresh-activity") return executeWithSiteScanLease(db, args, command, (signal, execution) => refreshDetails(db, { ...args, "activity-only": true }, { signal, execution }));
   if (command === "profile-create") return createProfile(db, args);
+  if (command === "agent-onboard") return agentOnboard(db, args);
+  if (command === "agent-confirm") return agentConfirm(db, args);
   if (command === "onboarding-process") return processOnboardingCommand(db, args);
   if (command === "bind-batch") return bindBatch(db, args);
   if (command === "reassess-batch") return reassessBatch(db, args);
@@ -855,6 +869,10 @@ async function scan(
     primaryState = { revision: "force-mock", concurrency: 1, modelConfig: offlineMockModelConfig() };
     backupState = null;
     configs.model = offlineMockModelConfig();
+  } else if (args.agent === true) {
+    primaryState = agentStdioModelState();
+    backupState = null;
+    configs.model = primaryState.modelConfig;
   } else {
     const modelSettingsContext = resolveContext(args);
     const runtime = resolveRuntime({
@@ -865,7 +883,8 @@ async function scan(
     backupState = runtime.backupState;
     configs.model = primaryState.modelConfig;
   }
-  if (args["force-mock"] !== true && !isModelReady(primaryState, { taskProfile: "batch_screening" })) {
+  if (args["force-mock"] !== true && args.agent !== true
+    && !isModelReady(primaryState, { taskProfile: "batch_screening" })) {
     throw codedError(
       "MODEL_CONFIGURATION_REQUIRED",
       "扫描前请先在模型设置中测试并保存批量筛选模型。"
@@ -1878,12 +1897,14 @@ async function refreshDetails(db, args, { signal = null, execution = null } = {}
   );
   if (!matchingContext) throw new Error(`Search Plan #${planId} 缺少已确认匹配偏好卡对应的画像版本。`);
   let configs = loadConfigs(ROOT);
-  const batchModelState = resolveRuntimeModelConfig({
-    root: runtimePaths.dataRoot,
-    fallbackModelConfig: configs.model,
-    taskProfile: "batch_screening"
-  });
-  if (!isModelReady(batchModelState, { taskProfile: "batch_screening" })) {
+  const batchModelState = args.agent === true
+    ? agentStdioModelState()
+    : resolveRuntimeModelConfig({
+        root: runtimePaths.dataRoot,
+        fallbackModelConfig: configs.model,
+        taskProfile: "batch_screening"
+      });
+  if (args.agent !== true && !isModelReady(batchModelState, { taskProfile: "batch_screening" })) {
     throw codedError(
       "MODEL_CONFIGURATION_REQUIRED",
       "补读岗位前请先在模型设置中测试并保存批量筛选模型。"
@@ -2588,13 +2609,15 @@ async function createProfile(db, args) {
   const buffer = require("fs").readFileSync(resumePath);
   const resume = await parseResumeUpload({ fileName, buffer, root: ROOT, runtimeRoot: runtimePaths.dataRoot });
   const configs = loadConfigs(ROOT);
-  configs.model = args["force-mock"] === true
-    ? offlineMockModelConfig()
-    : resolveRuntimeModelConfig({
-      root: runtimePaths.dataRoot,
-      fallbackModelConfig: configs.model,
-      taskProfile: "deep_analysis"
-    }).modelConfig;
+  configs.model = args.agent === true
+    ? agentStdioModelConfig()
+    : args["force-mock"] === true
+      ? offlineMockModelConfig()
+      : resolveRuntimeModelConfig({
+          root: runtimePaths.dataRoot,
+          fallbackModelConfig: configs.model,
+          taskProfile: "deep_analysis"
+        }).modelConfig;
   const { profile, plan } = await analyzeResumeToPlan({ modelConfig: configs.model, resume });
   const saved = saveProfileAnalysis(db, { profile, document: resume, searchPlan: plan });
   try {
@@ -2609,17 +2632,147 @@ async function createProfile(db, args) {
   console.log(`Keywords: ${planKeywords(plan).join("、")}`);
 }
 
+async function agentOnboard(db, args) {
+  if (args.agent !== true) throw codedError("AGENT_FLAG_REQUIRED", "agent-onboard 必须显式传入 --agent。");
+  if (!args.resume) throw new Error("需要 --resume <简历文件路径>");
+  const operationId = requireAgentOperationId(args);
+  const resumePath = path.resolve(String(args.resume));
+  const fileName = path.basename(resumePath);
+  const buffer = require("node:fs").readFileSync(resumePath);
+  const resume = await parseResumeUpload({ fileName, buffer, root: ROOT, runtimeRoot: runtimePaths.dataRoot });
+  const operationContext = getOnboardingRunContext(db, operationId);
+  const existing = operationContext?.run || null;
+  if (existing) {
+    if (operationContext.document?.contentHash !== resume.contentHash) {
+      throw codedError(
+        "AGENT_OPERATION_ID_CONFLICT",
+        `操作编号 ${operationId} 已用于另一份简历；新一轮请生成新的操作编号。`
+      );
+    }
+  }
+  if (existing?.status === "completed" && existing.profileId && existing.matchingCardId && existing.searchPlanId) {
+    writeAgentOnboardingResult(db, existing);
+    return existing;
+  }
+  if (existing?.status === "running") {
+    throw codedError("AGENT_ONBOARDING_ALREADY_RUNNING", `操作 ${existing.id} 正在运行，请等待当前进程完成。`);
+  }
+  const retryable = existing?.status === "failed"
+    || (existing?.status === "completed" && existing.matchingCardId && !existing.searchPlanId && existing.errorCode);
+  if (!existing && args["refresh-profile"] !== true) {
+    const reusable = getLatestReusableOnboardingRunByContentHash(db, resume.contentHash);
+    if (reusable) {
+      writeAgentOnboardingResult(db, reusable, { operationId, reused: true });
+      return reusable;
+    }
+  }
+  const created = existing
+    ? { created: false, run: retryable ? retryOnboardingRun(db, existing.id) : existing }
+    : createOnboardingRun(db, {
+        displayName: String(args.name || path.parse(fileName).name || "候选人").trim(),
+        document: resume,
+        operationId
+      });
+  if (created.created) {
+    try {
+      const storedFilePath = storeResumeSourceFile({
+        root: runtimePaths.dataRoot,
+        documentId: created.run.resumeDocumentId,
+        fileName,
+        buffer
+      });
+      attachResumeDocumentFile(db, created.run.resumeDocumentId, storedFilePath);
+    } catch (error) {
+      logger.warn("agent_resume_source_file_save_failed", {
+        documentId: created.run.resumeDocumentId,
+        error: errorMeta(error)
+      });
+    }
+  }
+  const result = await processOnboardingRun({
+    db,
+    runId: created.run.id,
+    modelConfig: agentStdioModelConfig(),
+    logger: logger.child({ runId: created.run.id, operation: "agent_onboarding" })
+  });
+  if (result.status !== "completed" || !result.profileId || !result.matchingCardId || !result.searchPlanId) {
+    const error = new Error(result.errorMessage || "Agent 首次使用流程没有生成完整结果。");
+    error.code = result.errorCode || "AGENT_ONBOARDING_INCOMPLETE";
+    throw error;
+  }
+  writeAgentOnboardingResult(db, result);
+  return result;
+}
+
+function writeAgentOnboardingResult(db, result, { operationId = result.id, reused = false } = {}) {
+  const matchingCard = getMatchingCard(db, result.matchingCardId);
+  const searchPlan = getSearchPlan(db, result.searchPlanId);
+  process.stdout.write(`${JSON.stringify({
+    protocol: "offergo.agent.stdio",
+    version: 1,
+    type: "command_result",
+    command: "agent-onboard",
+    result: {
+      operationId,
+      runId: result.id,
+      reused,
+      profileId: result.profileId,
+      profileVersionId: result.profileVersionId,
+      matchingCardId: result.matchingCardId,
+      matchingCard: matchingCard?.card || null,
+      searchPlanId: result.searchPlanId,
+      searchPlan: searchPlan?.plan || null
+    }
+  })}\n`);
+}
+
+function agentConfirm(db, args) {
+  if (args.agent !== true) throw codedError("AGENT_FLAG_REQUIRED", "agent-confirm 必须显式传入 --agent。");
+  const profileId = Number(args.profile);
+  const cardId = Number(args.card);
+  if (!Number.isInteger(profileId) || profileId <= 0) throw new Error("需要 --profile <Profile ID>");
+  if (!Number.isInteger(cardId) || cardId <= 0) throw new Error("需要 --card <Matching Card ID>");
+  const card = getMatchingCard(db, cardId);
+  if (!card || card.profileId !== profileId) throw codedError("MATCHING_CARD_NOT_FOUND", "匹配卡不存在或不属于该候选人。");
+  const confirmed = confirmMatchingCard(db, { profileId, cardId });
+  process.stdout.write(`${JSON.stringify({
+    protocol: "offergo.agent.stdio",
+    version: 1,
+    type: "command_result",
+    command: "agent-confirm",
+    result: {
+      profileId,
+      matchingCardId: confirmed.id,
+      status: confirmed.status
+    }
+  })}\n`);
+  return confirmed;
+}
+
+function requireAgentOperationId(args) {
+  const value = String(args["operation-id"] || "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw codedError(
+      "AGENT_OPERATION_ID_REQUIRED",
+      "agent-onboard 需要 --operation-id <UUID>；同一次命令重试沿用该 UUID，新的使用轮次生成新 UUID。"
+    );
+  }
+  return value.toLowerCase();
+}
+
 async function processOnboardingCommand(db, args) {
   const runId = String(args.run || "").trim();
   if (!runId) throw new Error("需要 --run <Onboarding Run ID>");
   const fallbackModelConfig = loadConfigs(ROOT).model;
-  const modelConfig = args["force-mock"] === true
-    ? offlineMockModelConfig()
-    : resolveRuntimeModelConfig({
-        root: runtimePaths.dataRoot,
-        fallbackModelConfig,
-        taskProfile: "deep_analysis"
-      }).modelConfig;
+  const modelConfig = args.agent === true
+    ? agentStdioModelConfig()
+    : args["force-mock"] === true
+      ? offlineMockModelConfig()
+      : resolveRuntimeModelConfig({
+          root: runtimePaths.dataRoot,
+          fallbackModelConfig,
+          taskProfile: "deep_analysis"
+        }).modelConfig;
   const result = await processOnboardingRun({
     db,
     runId,
@@ -2665,13 +2818,15 @@ async function reassessBatch(db, args) {
   if (!matchingContext) throw new Error(`Search Plan #${planId} 缺少已确认匹配偏好卡对应的画像版本。`);
 
   let configs = loadConfigs(ROOT);
-  configs.model = args["use-model"] === true
-    ? resolveRuntimeModelConfig({
-      root: runtimePaths.dataRoot,
-      fallbackModelConfig: configs.model,
-      taskProfile: "batch_screening"
-    }).modelConfig
-    : offlineMockModelConfig();
+  configs.model = args.agent === true
+    ? agentStdioModelConfig()
+    : args["use-model"] === true
+      ? resolveRuntimeModelConfig({
+          root: runtimePaths.dataRoot,
+          fallbackModelConfig: configs.model,
+          taskProfile: "batch_screening"
+        }).modelConfig
+      : offlineMockModelConfig();
   configs = profileToRuntimeConfigs(configs, matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard);
   const keywordPlan = (planRecord.plan.keywords || []).map((item) => ({ ...item }));
   const analyzeJob = createJobAnalysisRunner(configs, keywordPlan, { db, logger });
@@ -2682,8 +2837,9 @@ async function reassessBatch(db, args) {
     analyzeJob,
     cleanDescription: cleanDetailText
   });
-  logger.info("batch_reassessed", { ...result, planId, analysisMode: args["use-model"] === true ? "model" : "rules" });
-  console.log(`批次 #${result.batchId} 已重评估 ${result.reassessed} 条岗位（${args["use-model"] === true ? "模型" : "规则"}模式）。`);
+  const analysisMode = args.agent === true ? "agent" : args["use-model"] === true ? "model" : "rules";
+  logger.info("batch_reassessed", { ...result, planId, analysisMode });
+  console.log(`批次 #${result.batchId} 已重评估 ${result.reassessed} 条岗位（${analysisMode} 模式）。`);
 }
 
 function createBrowser(args) {
@@ -2700,6 +2856,26 @@ function offlineMockModelConfig() {
   return {
     provider: "mock",
     providers: { mock: { model: "offline-structured-mock" } }
+  };
+}
+
+function agentStdioModelConfig() {
+  return {
+    provider: "agent_stdio",
+    providers: {
+      agent_stdio: {
+        model: "current-agent",
+        timeoutMs: 30 * 60 * 1000
+      }
+    }
+  };
+}
+
+function agentStdioModelState() {
+  return {
+    revision: "agent-stdio-v1",
+    concurrency: 1,
+    modelConfig: agentStdioModelConfig()
   };
 }
 
@@ -2931,8 +3107,12 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`用法:
   run.ps1 init-db
+  run.ps1 agent-onboard --resume "D:\\resume.docx" --operation-id <UUID> --agent --data-root "D:\\OfferGoData"
+  run.ps1 agent-onboard --resume "D:\\resume.docx" --operation-id <新 UUID> --refresh-profile --agent --data-root "D:\\OfferGoData"
+  run.ps1 agent-confirm --profile <Profile ID> --card <Matching Card ID> --agent --data-root "D:\\OfferGoData"
   run.ps1 profile-create --resume "D:\\resume.docx"
   run.ps1 scan --plan <Search Plan ID> --browser portable --cdp-port 9222
+  run.ps1 scan --plan <Search Plan ID> --browser portable --cdp-port 9222 --agent
   run.ps1 bind-batch --batch <Batch ID> --plan <Search Plan ID>
   run.ps1 reassess-batch --batch <Batch ID> --plan <Search Plan ID>
   run.ps1 rescore-plan --plan <Search Plan ID>
@@ -2945,6 +3125,7 @@ function printHelp() {
   run.ps1 scan --site boss --browser edge --plan <Search Plan ID> --refresh-platform-filters
   run.ps1 scan --site boss --browser edge --plan <Search Plan ID> --analysis-concurrency 2
   run.ps1 refresh-details --browser edge --plan <Search Plan ID> --limit 8
+  run.ps1 refresh-details --browser edge --plan <Search Plan ID> --limit 8 --agent
   run.ps1 refresh-activity --browser edge --plan <Search Plan ID> --limit 8
   run.ps1 scan --input data\\sample_jobs.json --profile profiles\\guo_mingfu.json --resume-versions profiles\\resume_versions.json
   run.ps1 dashboard --port 8787

@@ -18,6 +18,15 @@
 - Ponytail must not simplify away account safety, input validation, data-loss prevention, error handling, accessibility, JD coverage, matching quality, or any explicitly requested requirement.
 - Use subagents only for genuinely independent work with separately verifiable outputs.
 
+## Agent-operated usage
+
+- When a user hands OfferGo to an Agent to run, use the headless CLI path. Do not open the Dashboard or ask the user to configure an Agent in the model-settings page.
+- The model-settings page is for ordinary users who provide an API Key. The headless Agent path does not save a Key or an Agent provider in OfferGo settings.
+- Start each use with `run.ps1 agent-onboard --resume <absolute-path> --operation-id <uuid> --agent --data-root <absolute-D-drive-path>`. Reuse the UUID only when retrying the same command and generate a new UUID for the next use. An unchanged resume reuses its saved profile, matching card, and search plan; use `--refresh-profile` only when the user explicitly wants the same resume analyzed again. Read any `offergo.agent.stdio` requests from the command output, produce the requested structured result yourself, and write the matching response JSON to the same process standard input.
+- Inspect the matching card and search plan returned by `agent-onboard`, then confirm the intended card with `run.ps1 agent-confirm --profile <id> --card <id> --agent --data-root <same-path>` before scanning.
+- Continue scans, detail refreshes, and reassessment with the existing CLI plus `--agent`. The current outer Agent is the model and orchestrator; never start a nested Codex, Claude Code, Kimi, or other Agent process.
+- Keep external action boundaries unchanged. Headless execution does not authorize communication, message sending, or applications. Obtain explicit authorization for the concrete immutable batch before any external write.
+
 ## BOSS safety boundary
 
 - Keep BOSS access read-only unless the user explicitly approves communication or application actions.

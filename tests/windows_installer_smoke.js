@@ -92,6 +92,7 @@ function runSuite() {
   assert.match(build, /Get-FileHash/);
   assert.match(build, /runtime\\node/);
   assert.match(build, /assets\\OfferGo\.ico/);
+  assert.match(build, /docs\\agent-operation\.md/);
   assert.match(build, /\[switch\]\$StageOnly/);
   assert.doesNotMatch(build, /vendor\\edge-control-bridge/i);
 

@@ -26,6 +26,7 @@
 - [`product_spec.md`](product_spec.md)：产品边界、用户流程和功能规格。
 - [`daily_workflow.md`](daily_workflow.md)：每日扫描、模型分析、清单确认和批量沟通逻辑。
 - [`onboarding_workflow.md`](onboarding_workflow.md)：模型配置、简历解析、画像与筛选方案首次使用流程。
+- [`agent-operation.md`](agent-operation.md)：Agent 不打开前端、不填写 Key，直接通过 CLI 和 stdio 协议运行项目。
 - [`llm_contracts.md`](llm_contracts.md)：简历、岗位理解、匹配和沟通草稿的模型契约。
 - [`operations.md`](operations.md)：日志、错误码、恢复和排错方法。
 - [`release_boundary.md`](release_boundary.md)：安装包、隐私数据和外部操作边界。
