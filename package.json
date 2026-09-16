@@ -17,6 +17,9 @@
     "cli": "node src/cli.js",
     "check": "node tests/run_all.js",
     "test": "node tests/run_all.js",
+    "test:fast": "node tests/run_group.js fast",
+    "test:integration": "node tests/run_group.js integration",
+    "test:package": "node tests/run_group.js package",
     "test:live-model": "node tests/job_match_benchmark.js --live"
   },
   "dependencies": {

@@ -25,6 +25,7 @@
 - [`releases/v1.0.0.md`](releases/v1.0.0.md)：已发布 v1.0.0 的历史版本说明；不代表当前 source candidate。
 - [`product_spec.md`](product_spec.md)：产品边界、用户流程和功能规格。
 - [`architecture.md`](architecture.md)：当前架构、普通用户与 Agent 共用流程、架构风险和分阶段改进顺序。
+- [`lifecycle.md`](lifecycle.md)：扫描、工作流、分析、沟通和消息发送的状态负责人、恢复结果与事务边界。
 - [`daily_workflow.md`](daily_workflow.md)：每日扫描、模型分析、清单确认和批量沟通逻辑。
 - [`onboarding_workflow.md`](onboarding_workflow.md)：模型配置、简历解析、画像与筛选方案首次使用流程。
 - [`agent-operation.md`](agent-operation.md)：Agent 不打开前端、不填写 Key，直接通过 CLI 和 stdio 协议运行项目。
