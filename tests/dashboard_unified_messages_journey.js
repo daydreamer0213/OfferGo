@@ -123,7 +123,7 @@ async function main() {
     assert.equal(await page.getByRole('link',{name:'发送记录',exact:true}).count(),1);const today=page.getByRole('link',{name:'今日任务',exact:true});assert.equal(new URL(await today.getAttribute('href'),base).searchParams.get('site'),'zhaopin');
     assert.equal(await page.locator('.message-workspace').count(),1);assert.equal(await page.locator('.message-unresolved:not(.message-workspace *)').count(),0);assert.equal(await page.locator('[data-message-detail-panel]:visible').count(),1);
     const zlCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({has:page.locator('[data-draft-text]')});assert.equal(await zlCard.locator('[data-send-single], [data-send-select], [data-sent-draft]').count(),0);assert.equal(await zlCard.locator('[data-copy-draft]').count(),2);
-    const manualCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({hasNot:page.locator('[data-draft-text]')});assert.match(await manualCard.textContent(),/HR 邀请你发送简历/);assert.match(await manualCard.textContent(),/智联原始会话/);assert.equal(await manualCard.locator('button:not([data-message-back]),form').count(),0);
+    const manualCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({hasNot:page.locator('[data-draft-text]')});assert.match(await manualCard.textContent(),/HR 邀请你发送简历/);assert.doesNotMatch(await manualCard.textContent(),/原始会话/);assert.equal(await manualCard.locator('button:not([data-message-back]),form').count(),0);
     assert.equal(await page.locator('[data-send-select]').count(),1,'only the BOSS draft enters the batch selection');
     assert.equal(await page.locator('[data-send-select]:checked').count(),0,'batch starts with no implicit selection');
     assert.equal(await page.locator('.message-send-choice:visible').count(),0,'send selection is available only after explicitly entering batch mode');
@@ -255,11 +255,11 @@ async function contactFiltersAndHistory(context, base, db) {
     assert.equal(await page.locator('[data-message-view]:checked').evaluate(node=>node===document.activeElement),true,'return restores keyboard focus to the selected row');
     await page.setViewportSize({width:1440,height:1000});
     assert.equal(await page.getByRole('heading',{name:/现在需要你处理/}).count(),1);
-    assert.equal(await page.getByRole('heading',{name:/系统暂时无法完成/}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:/系统正在补充资料/}).count(),1);
     assert.equal(await page.locator('details.message-action-group>summary',{hasText:'已经处理'}).count(),1,'completed history is collapsed instead of requiring a filter');
     await page.goto(base+'/messages?profileId='+profileId+'&source=boss&task=all&contact='+encodeURIComponent(history.key));
     assert.equal(await page.locator('.message-history:visible').count(),1);
-    assert.match(await page.locator('.message-history:visible').innerText(),/已记录这次联系，原文暂不可查看/);
+    assert.match(await page.locator('.message-history:visible').innerText(),/已记录这次联系，完整内容会在下次同步后显示/);
     assert.equal(await page.locator('.message-history [data-draft-text], .message-history [data-send-single]').count(),0,'history never reconstructs a draft or send action');
     await page.locator('.message-list-item[data-platform="zhaopin"]').waitFor({state:'visible'});
     await page.goto(base+'/messages?profileId='+profileId+'&source=zhaopin&task=all&contact='+encodeURIComponent(history.key));

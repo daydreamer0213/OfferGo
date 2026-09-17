@@ -188,6 +188,16 @@ h2{font-size:19px;font-weight:600}
 .message-inbound{margin:16px 0;padding:14px 16px;background:#f3f7f5;border-left:4px solid var(--rf-teal)}
 .message-inbound h3{margin:0 0 8px;font-size:14px}
 .message-inbound .line{white-space:pre-wrap}
+.message-timeline{margin:18px 0;padding:16px;border:1px solid var(--rf-rule);border-radius:14px;background:#f7f9f8}
+.message-timeline h3{margin:0 0 14px;font-size:15px}
+.message-timeline-body{display:flex;flex-direction:column;gap:10px}
+.message-bubble{max-width:min(78%,620px);padding:10px 13px;border-radius:14px;background:#fff;border:1px solid var(--rf-rule);box-shadow:0 1px 1px rgba(20,36,31,.04)}
+.message-bubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.message-bubble time{display:block;margin-top:5px;color:var(--rf-ink-soft);font-size:11px}
+.message-bubble--friend{align-self:flex-start;border-bottom-left-radius:4px}
+.message-bubble--self{align-self:flex-end;background:#dff0ea;border-color:#bad7cc;border-bottom-right-radius:4px}
+.message-bubble--self time{text-align:right}
+.message-bubble--platform{align-self:center;max-width:92%;background:#f0f1ed;color:var(--rf-ink-soft);font-size:13px;text-align:center}
 @media(max-width:760px){
   .message-state{display:block}
   .message-state h2{margin-bottom:6px;padding:0;border:0}

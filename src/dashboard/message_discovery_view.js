@@ -131,9 +131,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       return messageIndex === 0 ? card : `<details class="message-draft-alternatives"><summary>查看其他回复版本</summary>${card}</details>`;
     }).join("");
     const inboundMessages = Array.isArray(result.inboundMessages) ? result.inboundMessages : [];
-    const inboundSection = inboundMessages.length
+    const timelineSection = renderConversationTimeline(inboxItem?.timeline, { escapeHtml, escapeAttr });
+    const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
-      : "";
+      : "");
     const source = result.contextSource === "local_cache"
       ? "本地已有岗位资料"
       : result.contextSource === "message_discovery_detail"
@@ -151,7 +152,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         <p class="line"><strong>薪资：</strong>${escapeHtml(job.salary || "薪资未说明")}</p>
       </details>
     </section>`;
-    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="risk-text">${escapeHtml(action.instruction)}</p></div>`).join("");
+    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">OfferGo 已识别这项请求，可在本页确认处理。</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const nextSection = `${manualSection}${replySection}`
       || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
@@ -199,13 +200,13 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       actionGroup: "needs_review",
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform || "")}" data-task="pending" data-pending="true" data-resume="${Boolean(matchingContact?.resumeRequested)}" data-interview="${Boolean(matchingContact?.interviewInvited)}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small class="message-source">${escapeHtml(platformLabel)} · 待补岗位资料</small><small>${escapeHtml(company)}</small><em>${escapeHtml(messagePreview(item, "待补岗位资料"))}</em></span></label>`,
-      detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, escapeHtml, escapeAttr })
+      detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, escapeHtml, escapeAttr })
     };
   });
   const unresolvedIdentities = new Set(durableUnresolved.map((item) => `${item.platform}\0${item.conversationKey}`));
   const incomingViews = incomingContacts.filter((item) => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)
     && !unresolvedIdentities.has(`${item.platform}\0${item.conversationKey}`))
-    .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), escapeHtml, escapeAttr }));
+    .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, escapeHtml, escapeAttr }));
   const representedIdentities = new Set([...resultViews, ...unresolvedViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
   const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
     .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr }));
@@ -216,7 +217,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const messageGroups = [
     ["needs_action", "现在需要你处理", false],
     ["waiting", "等待对方回复", false],
-    ["needs_review", "系统暂时无法完成", false],
+    ["needs_review", "系统正在补充资料", false],
     ["done", "已经处理", true]
   ];
   const groupedLists = messageGroups.map(([group, label, collapsed]) => {
@@ -235,7 +236,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     : "";
   const counters = status.counters || {};
   const hasReadDetails = Boolean(status.startedAt || status.status === "running" || (status.platformRuns || []).length || Number(counters.visible) || Number(counters.newReplies));
-  const platformNotices =  `<details class="message-read-details"><summary>读取详情</summary><p class="line">BOSS 可确认发送；智联请复制后回到原会话处理。</p>${hasReadDetails ? `<p class="line">可见 ${Math.max(0, Number(counters.visible) || 0)} · 已分析回复 ${Math.max(0, Number(counters.newReplies) || 0)} · BOSS 已读 ${Math.max(0, Number(counters.currentRead) || 0)} · 送达 ${Math.max(0, Number(counters.currentDelivered) || 0)} · 未解决 ${Math.max(0, Number(status.unresolved) || 0)}</p>${retainedRecords}<p class="line">智联暂不提供已读/送达统计。</p>` : ""}${(status.platformRuns || []).map(entry => `<p class="line">${entry.platform === "zhaopin" ? "智联" : "BOSS"}：${escapeHtml(entry.reasonCode === "MESSAGE_DISCOVERY_WAITING_TURN" ? "等待前一平台读取完成" : ({ not_connected: "未连接消息页，本次未检查", running: "正在加载并读取消息，可随时安全停止", completed: "本次读取完成", stopped: "已安全停止", needs_user_action: "需要处理后重试" })[entry.status] || "等待读取")}${entry.reasonCode && entry.reasonCode !== "MESSAGE_DISCOVERY_WAITING_TURN" ? ` · ${escapeHtml(messageDiscoveryReasonText(entry.reasonCode))}` : ""}</p>`).join("")}</details>`;
+  const platformNotices =  `<details class="message-read-details"><summary>读取详情</summary><p class="line">BOSS 与智联消息统一在本页展示和处理。</p>${hasReadDetails ? `<p class="line">可见 ${Math.max(0, Number(counters.visible) || 0)} · 已分析回复 ${Math.max(0, Number(counters.newReplies) || 0)} · BOSS 已读 ${Math.max(0, Number(counters.currentRead) || 0)} · 送达 ${Math.max(0, Number(counters.currentDelivered) || 0)} · 未解决 ${Math.max(0, Number(status.unresolved) || 0)}</p>${retainedRecords}<p class="line">智联暂不提供已读/送达统计。</p>` : ""}${(status.platformRuns || []).map(entry => `<p class="line">${entry.platform === "zhaopin" ? "智联" : "BOSS"}：${escapeHtml(entry.reasonCode === "MESSAGE_DISCOVERY_WAITING_TURN" ? "等待前一平台读取完成" : ({ not_connected: "未连接消息页，本次未检查", running: "正在加载并读取消息，可随时安全停止", completed: "本次读取完成", stopped: "已安全停止", needs_user_action: "需要处理后重试" })[entry.status] || "等待读取")}${entry.reasonCode && entry.reasonCode !== "MESSAGE_DISCOVERY_WAITING_TURN" ? ` · ${escapeHtml(messageDiscoveryReasonText(entry.reasonCode))}` : ""}</p>`).join("")}</details>`;
   const freshness = `<section class="message-freshness" aria-label="消息同步状态">${["boss", "zhaopin"].map((platform) => {
     const value = inboxState.freshness?.[platform] || { label: "尚未同步", detail: "" };
     return `<div data-state="${escapeAttr(value.state || "idle")}"><strong>${platform === "zhaopin" ? "智联" : "BOSS"}</strong><span>${escapeHtml(value.label)}</span><small>${escapeHtml(value.detail || "")}</small></div>`;
@@ -282,7 +283,7 @@ function messageStatusLabel(result) {
   return "待人工判断";
 }
 
-function renderIncomingContactView(item, { selected, pending, escapeHtml, escapeAttr }) {
+function renderIncomingContactView(item, { selected, pending, timeline, escapeHtml, escapeAttr }) {
   const key = messageViewKey("incoming", [item.key]);
   const inputId = `message-view-${key}`;
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
@@ -294,7 +295,7 @@ function renderIncomingContactView(item, { selected, pending, escapeHtml, escape
     actionGroup: pending ? "needs_action" : "done",
     contactKey: item.key,
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p><section class="message-inbound"><h3>HR 消息原文</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，原文暂不可查看。</p>'}</section><p class="line">这条联系目前没有可编辑草稿；请在原会话核对后处理。</p></section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">当前没有需要你处理的操作。</p></section>`
   };
 }
 
@@ -315,8 +316,39 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr }) {
     actionGroup: item.actionGroup,
     contactKey: "",
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p><section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section><section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">无需切换到今日任务。下次同步时，OfferGo 会从这条记录继续补全。</p>' : ""}</section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">岗位资料正在后台补充，消息内容已保留。</p>' : ""}</section>`
   };
+}
+
+function renderConversationTimeline(events, { escapeHtml, escapeAttr }) {
+  if (!Array.isArray(events) || !events.length) return "";
+  const bubbles = events.map((event) => {
+    const side = event.direction === "myself" ? "self" : event.direction === "friend" ? "friend" : "platform";
+    const content = event.kind === "media_ignored"
+      ? mediaPlaceholder(event.metadata?.mediaKind)
+      : event.text || messageActionLabel(event.kind);
+    const time = event.occurredAt ? `<time datetime="${escapeAttr(event.occurredAt)}">${escapeHtml(messageTimeLabel(event.occurredAt))}</time>` : "";
+    return `<article class="message-bubble message-bubble--${side}" data-message-key="${escapeAttr(event.messageKey || "")}"><p>${escapeHtml(content)}</p>${time}</article>`;
+  }).join("");
+  return `<section class="message-timeline" aria-label="完整会话"><h3>完整会话</h3><div class="message-timeline-body">${bubbles}</div></section>`;
+}
+
+function mediaPlaceholder(kind) {
+  return ({
+    voice: "收到一条语音消息，本版本暂不读取内容",
+    image: "收到一张图片，本版本暂不读取内容",
+    attachment: "收到一个附件，本版本暂不读取内容"
+  })[String(kind || "")] || "收到一条媒体消息，本版本暂不读取内容";
+}
+
+function messageActionLabel(kind) {
+  return ({
+    resume_request: "HR 邀请你发送简历",
+    interview_invitation: "HR 发来了面试邀请",
+    contact_exchange: "HR 请求交换联系方式",
+    platform_notice: "平台状态更新",
+    unknown_card: "这条消息类型将在后续同步时继续识别"
+  })[String(kind || "")] || "消息内容待确认";
 }
 
 function messageTimeLabel(value) {
@@ -483,10 +515,10 @@ function messageDiscoveryClientScript(scriptState) {
   }());</script>`;
 }
 
-function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, escapeHtml, escapeAttr }) {
+function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, timeline = [], escapeHtml, escapeAttr }) {
   const attributes = embedded ? 'class="message-unresolved-context"' : `id="message-detail-${viewKey}" class="panel message-unresolved" data-platform="${escapeAttr(item.platform || "")}" data-message-detail-panel="${viewKey}"${hidden ? " hidden" : ""}`;
   const back = embedded ? "" : '<button type="button" class="message-back" data-message-back>返回列表</button>';
-  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${(item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">无需先去今日任务。下次同步时，OfferGo 会从这里继续补全岗位资料并生成草稿。</p></section>`;
+  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr }) || (item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位资料正在后台补充，消息内容已保留。</p></section>`;
   const complete = Boolean(String(item.positionTitle || "").trim() && String(item.company || "").trim());
   const matches = complete ? findExactIdentityCandidates(db, {
     profileId, title: item.positionTitle, company: item.company
@@ -501,7 +533,7 @@ function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded =
   const create = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button name="action" value="create"${complete ? "" : " disabled"}>保存为 HR 主动机会</button></form>`;
   const ignore = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button class="secondary" name="action" value="ignore">不纳入 OfferGo</button></form>`;
   const incomplete = complete ? "" : `<p class="risk-text">岗位身份仍不完整，请下次只读发现后再处理。</p>`;
-  return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "岗位名称待确认")}</h2><p class="message-source">BOSS</p><p class="line">${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(item.salary || "薪资待确认")} · ${escapeHtml(item.city || "地点待确认")}</p>${incomplete}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">以上仅为岗位身份字段；没有保存招聘方姓名或消息正文。</p><div class="message-controls">${link}${create}${ignore}</div></section>`;
+  return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "岗位名称待确认")}</h2><p class="message-source">BOSS</p><p class="line">${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(item.salary || "薪资待确认")} · ${escapeHtml(item.city || "地点待确认")}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr })}${incomplete}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><div class="message-controls">${link}${create}${ignore}</div></section>`;
 }
 
 function messageViewKey(type, parts) {
@@ -554,14 +586,14 @@ function messageDiscoveryRecoveryMessages() {
   const verifyIdentity = "无法确认本地岗位与会话是否一致。请在人工粘贴流程中核对后处理。";
   return {
     ZHAOPIN_MESSAGE_CONTENT_PENDING: "这条会话的消息还没有加载完成，已保留待重试。稍后可重新开始只读发现。",
-    ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED: "这条消息包含暂时无法读取的内容，已保留。请自行到智联原始会话查看。",
+    ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED: "这条消息包含暂时无法读取的内容，已保留并会在后续同步中继续识别。",
     ZHAOPIN_MESSAGE_STRUCTURE_CHANGED: "智联消息页面暂时无法可靠读取，已保留待重试。",
     ZHAOPIN_MESSAGE_TIMELINE_FAILED: "智联会话内容暂时未能加载，已保留待重试。",
     ZHAOPIN_MESSAGE_TAB_AMBIGUOUS: "连接了多个智联消息页，请只保留一个后重试。",
     ZHAOPIN_MESSAGE_LOGIN_REQUIRED: "智联登录已失效，请登录后重试。",
     ZHAOPIN_MESSAGE_RISK_CONTROL: "智联需要完成安全检查，请处理后重试。",
     ZHAOPIN_MESSAGE_PAGE_LOST: "智联消息页已变化，请恢复消息页后重试。",
-    ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED: "会话与岗位详情的公司名称暂时无法核对。消息已保留，未关联岗位或生成草稿；你可以到智联原始会话核对。",
+    ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED: "会话与岗位详情的公司名称暂时无法核对。消息已保留，系统会继续补充岗位资料。",
     ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH: "这条会话与岗位详情暂时无法确认，已保留待重试；其他消息会继续处理。",
     ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE: "这份岗位详情还不完整，消息已保留，暂不生成草稿。可稍后重新只读发现。",
     ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT: "这份岗位详情暂时读取超时，消息已保留；系统会继续处理其他消息，下次同步时可重试。",

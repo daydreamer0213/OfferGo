@@ -23,8 +23,10 @@ const {
   saveMessageInboundContext,
   getMessageInboundContext,
   closeMessageReplyDrafts,
-  saveWorkspacePlatformPreference
+  saveWorkspacePlatformPreference,
+  upsertMessageEvents
 } = require("../src/core/storage");
+const { upsertMessageInboxItem } = require("../src/application/message_inbox");
 const {
   ensureProgressCard,
   transitionProgressCard,
@@ -524,6 +526,40 @@ async function main() {
   await waitForLeaseRelease();
 
   scenarios.push(jobUnderstandingCompletedRun(fixture));
+  const timelineConversationKey = `sha256:${"8".repeat(64)}`;
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey: timelineConversationKey,
+    observedAt: "2026-07-31T01:05:00.000Z",
+    events: [
+      { messageKey: `sha256:${"1".repeat(64)}`, platformMessageId: "101", direction: "platform", kind: "platform_notice", text: "已建立沟通", occurredAt: "2026-07-31T01:00:00.000Z", metadata: {} },
+      { messageKey: `sha256:${"2".repeat(64)}`, platformMessageId: "102", direction: "friend", kind: "text", text: OPEN_HR_TEXT, occurredAt: "2026-07-31T01:01:00.000Z", metadata: {} },
+      { messageKey: `sha256:${"3".repeat(64)}`, platformMessageId: "103", direction: "myself", kind: "text", text: "您好，可以进一步了解。", occurredAt: "2026-07-31T01:02:00.000Z", metadata: {} },
+      { messageKey: `sha256:${"4".repeat(64)}`, platformMessageId: "104", direction: "friend", kind: "media_ignored", text: "", occurredAt: "2026-07-31T01:03:00.000Z", metadata: { mediaKind: "voice" } },
+      { messageKey: `sha256:${"5".repeat(64)}`, platformMessageId: "105", direction: "friend", kind: "resume_request", text: RESUME_REQUEST_SUMMARY, occurredAt: "2026-07-31T01:04:00.000Z", metadata: {} }
+    ]
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey: timelineConversationKey,
+    sourceJobId: "boss:dashboard-message-job",
+    jobId: fixture.jobId,
+    cardId: fixture.card.id,
+    jobSource: "boss",
+    lastMessageId: "105",
+    lastActivityAt: "2026-07-31T01:04:00.000Z",
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: "AI 应用开发工程师",
+    company: "示例科技",
+    latestExcerpt: RESUME_REQUEST_SUMMARY,
+    actionGroup: "needs_action",
+    actionCode: "resume_request",
+    reasonCode: "",
+    observedAt: "2026-07-31T01:05:00.000Z"
+  });
   await startAndWait(base, fixture.profileId, "completed");
   status = await getStatus(base, fixture.profileId);
   assertNoDraftMessagesInJson(status);
@@ -550,8 +586,8 @@ async function main() {
     "15-25K·13薪",
     "薪资未说明",
     "下一步",
-    "需要在 BOSS 人工处理附件简历请求",
-    "请在 BOSS 消息卡片中人工选择“同意”或“拒绝”。",
+    "HR 邀请你发送简历",
+    "OfferGo 已识别这项请求，可在本页确认处理。",
     "推荐回复",
     "HR 消息",
     OPEN_HR_TEXT,
@@ -561,13 +597,17 @@ async function main() {
     "您好，感谢邀请，请问面试时间和形式如何安排？",
     "JD 暂未说明公司的具体业务。"
   ]) assert(understoodPage.body.includes(expected), `missing user decision content: ${expected}`);
+  assert.match(understoodPage.body, /class="message-bubble message-bubble--friend"/);
+  assert.match(understoodPage.body, /class="message-bubble message-bubble--self"/);
+  assert.match(understoodPage.body, /收到一条语音消息，本版本暂不读取内容/);
+  assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
   assert(
-    understoodPage.body.indexOf("<h4>需要在 BOSS 人工处理附件简历请求</h4>")
+    understoodPage.body.indexOf("<h4>HR 邀请你发送简历</h4>")
       < understoodPage.body.indexOf("<h4>推荐回复</h4>"),
     "manual BOSS action must appear before the local reply drafts"
   );
   assertHeadingsInOrder(understoodPage.body, [
-    "<h3>HR 消息原文</h3>",
+    "<h3>完整会话</h3>",
     "沟通类型",
     "这份机会",
     "岗位主要做什么",
@@ -578,7 +618,7 @@ async function main() {
   assert.match(understoodPage.body, /<details class="message-job-details">/);
   assert.doesNotMatch(understoodPage.body, /<h3>岗位理解<\/h3>[\s\S]*?<h3>结论<\/h3>/, "compact cards must not repeat adjacent generic headings");
   assert(
-    understoodPage.body.indexOf('class="message-inbound"')
+    understoodPage.body.indexOf('class="message-timeline"')
       < understoodPage.body.indexOf('class="message-job-understanding"'),
     "HR message must appear before job understanding"
   );
@@ -656,7 +696,7 @@ async function main() {
   }
   assert.equal(
     messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED"),
-    "会话与岗位详情的公司名称暂时无法核对。消息已保留，未关联岗位或生成草稿；你可以到智联原始会话核对。"
+    "会话与岗位详情的公司名称暂时无法核对。消息已保留，系统会继续补充岗位资料。"
   );
   assert.equal(
     messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"),
@@ -1700,6 +1740,7 @@ function jobUnderstandingCompletedRun(fixture) {
       results: [{
         cardId: fixture.card.id,
         jobId: fixture.jobId,
+        conversationKey: `sha256:${"8".repeat(64)}`,
         stage: "reply_ready",
         messageIntent: "information_request",
         messageCategory: "qualification",

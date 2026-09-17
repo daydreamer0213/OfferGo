@@ -25,7 +25,7 @@ const {
   getActiveSearchPlan,
   closeMessageReplyDrafts
 } = require("../core/storage");
-const { listMessageInboxItems, getMessageInboxSyncState } = require("../application/message_inbox");
+const { listMessageInboxItems, getMessageInboxSyncState, listMessageEvents } = require("../application/message_inbox");
 const { getCandidateProfile } = require("../application/candidate_queries");
 const {
   getPersistedCardJobIdentity,
@@ -520,8 +520,8 @@ function createMessageDiscoveryController(deps = {}) {
     return Array.isArray(value) && value.some((item) => item?.kind === "resume_request")
       ? [{
         kind: "resume_request",
-        title: `需要在${platform === "zhaopin" ? "智联" : " BOSS "}人工处理附件简历请求`,
-        instruction: platform === "zhaopin" ? "请自行到智联原始会话处理这条简历请求。" : "请在 BOSS 消息卡片中人工选择“同意”或“拒绝”。"
+        title: "HR 邀请你发送简历",
+        instruction: "OfferGo 已识别这项请求，可在本页确认处理。"
       }]
       : [];
   }
@@ -1006,7 +1006,15 @@ function messageDiscoveryError(code, message, statusCode = 500) {
 function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = new Date() } = {}) {
   const current = now instanceof Date ? now : new Date(now);
   const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
-  const items = listMessageInboxItems(db, { profileId }).map((item) => presentInboxItem(item));
+  const items = listMessageInboxItems(db, { profileId }).map((item) => presentInboxItem({
+    ...item,
+    timeline: listMessageEvents(db, {
+      profileId,
+      platform: item.platform,
+      conversationKey: item.conversationKey,
+      limit: 500
+    })
+  }));
   const groups = {
     needsAction: items.filter((item) => item.actionGroup === "needs_action"),
     waiting: items.filter((item) => item.actionGroup === "waiting"),
@@ -1035,7 +1043,7 @@ function presentInboxItem(item) {
   const presentation = {
     needs_action: { statusText: "需要你处理", label: "查看建议回复" },
     waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
-    needs_review: { statusText: "资料暂时无法确认，系统会在下次同步时重试", label: "查看原因" },
+    needs_review: { statusText: "系统正在补充资料", label: "查看进度" },
     done: { statusText: "已经处理", label: "查看记录" }
   }[item.actionGroup];
   return {
