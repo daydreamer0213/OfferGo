@@ -415,6 +415,7 @@ async function assertCommunicationClient() {
         isBoss: true,
         isLoginPage: false,
         isRiskPage: false,
+        hasUserSurface: !search,
         loggedIn: true,
         isSearchPage: search,
         hasJobStructure: search,
@@ -653,7 +654,7 @@ async function assertCommunicationClient() {
   setCommunicationBatchStatus(db, { batchId: rebindBatch.body.batch.id, status: "running" });
   setCommunicationBatchStatus(db, { batchId: rebindBatch.body.batch.id, status: "paused" });
   const rebound = await postForm(baseUrl, "/api/communication-rebind", { batchId: rebindBatch.body.batch.id });
-  assert.strictEqual(rebound.status, 303);
+  assert.strictEqual(rebound.status, 303, rebound.body);
   assert.strictEqual(rebound.location, `/communication?batchId=${rebindBatch.body.batch.id}`);
   assert.deepStrictEqual(getCommunicationBatch(db, rebindBatch.body.batch.id).runtime.browser, {
     mode: "edge",
@@ -940,6 +941,7 @@ async function portableDashboardAuthoritySmoke() {
           isBoss: true,
           isLoginPage: false,
           isRiskPage: false,
+          hasUserSurface: !search,
           loggedIn: true,
           isSearchPage: search,
           hasJobStructure: search,

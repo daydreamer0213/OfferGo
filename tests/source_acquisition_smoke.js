@@ -239,6 +239,8 @@ async function preflightSmoke() {
           title: "登录",
           isBoss: true,
           isLoginPage: true,
+          isRiskPage: false,
+          hasUserSurface: false,
           loggedIn: false,
           isSearchPage: true,
           hasJobStructure: false
@@ -250,6 +252,7 @@ async function preflightSmoke() {
         isBoss: true,
         isLoginPage: false,
         isRiskPage: false,
+        hasUserSurface: tabId === activeChat.id,
         loggedIn: true,
         isSearchPage: tabId === usableSearch.id,
         hasJobStructure: tabId === usableSearch.id
@@ -299,6 +302,7 @@ async function inheritedPageInspectionSmoke() {
           isBoss: true,
           isLoginPage: false,
           isRiskPage: false,
+          hasUserSurface: false,
           loggedIn: true,
           isSearchPage: true,
           hasJobStructure: true
@@ -401,8 +405,8 @@ async function riskPreflightSmoke() {
       assert(expression.includes("403"));
       assert(expression.includes("访问受限"));
       assert(expression.includes("没有更多职位"));
-      if (tabId === "verify") return { isBoss: true, isRiskPage: true, isLoginPage: false, loggedIn: false, isSearchPage: false };
-      return { isBoss: true, isRiskPage: false, isLoginPage: false, loggedIn: true, isSearchPage: true, hasJobStructure: true };
+      if (tabId === "verify") return { url: "https://www.zhipin.com/web/passport/zp/verify", isBoss: true, isRiskPage: true, isLoginPage: false, hasUserSurface: false, hasJobStructure: false, loggedIn: false, isSearchPage: false };
+      return { url: activeBoss.url, isBoss: true, isRiskPage: false, isLoginPage: false, hasUserSurface: true, loggedIn: true, isSearchPage: true, hasJobStructure: true };
     }
   };
   const adapter = new BossSiteAdapter({ browser, sleepFn: async () => {} });

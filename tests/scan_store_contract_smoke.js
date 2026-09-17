@@ -8,6 +8,7 @@ const scanStore = require("../src/storage/scan_store");
 const candidateStore = require("../src/storage/candidate_store");
 const jobStore = require("../src/storage/job_store");
 const shared = require("../src/storage/storage_shared");
+const messageTimelineStore = require("../src/storage/message_timeline_store");
 
 const ROOT = path.join(__dirname, "..");
 const CHECKPOINT_TABLES = ["jobs", "job_observations", "scan_runs", "scan_target_results", "batches", "site_scan_leases"];
@@ -45,11 +46,14 @@ try {
 }
 
 function contract01ExportsAndReferences() {
-  assert.equal(Object.keys(storage).length, 193);
+  assert.equal(Object.keys(storage).length, 196);
   assert.equal(Object.keys(candidateStore).length, 32);
   assert.equal(Object.keys(jobStore).length, 35);
   assert.deepEqual(Object.keys(scanStore).sort(), [...SCAN_OPERATIONS, "SCAN_RUN_STATUSES", "normalizeBossPacing"].sort());
   assert.equal(storage.SCAN_RUN_STATUSES, scanStore.SCAN_RUN_STATUSES);
+  for (const name of ["upsertMessageEvents", "listMessageEvents", "latestMessageEvent"]) {
+    assert.equal(storage[name], messageTimelineStore[name]);
+  }
   for (const name of SCAN_OPERATIONS) assert.equal(storage[name], scanStore[name]);
   for (const name of Object.keys(candidateStore).filter((name) => ![
     "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"

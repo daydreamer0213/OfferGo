@@ -10,6 +10,7 @@ catch (error) {
 const {
   createZhaopinMessageReader,
   ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION,
+  ZHAOPIN_MESSAGE_LOAD_MORE_EXPRESSION,
   hasZhaopinOutgoingTextSnapshot,
   isZhaopinMessageUrl
 } = require("../src/adapters/sites/zhaopin_message_reader");
@@ -107,7 +108,9 @@ function readerFor(browser, options = {}) {
     conversationTimeoutMs: options.conversationTimeoutMs || options.timeoutMs || 30,
     pollIntervalMs: 1,
     nowFn: () => clock,
-    sleepFn: async () => { clock += 5; if (options.onSleep) await options.onSleep(); }
+    sleepFn: async () => { clock += 5; if (options.onSleep) await options.onSleep(); },
+    randomFn: options.randomFn || Math.random,
+    beforeLoadMore: options.beforeLoadMore || null
   });
 }
 
@@ -149,6 +152,32 @@ async function main() {
     assert(selected.messages.every(message => /^sha256:[a-f0-9]{64}$/.test(message.messageKey)));
     assert.strictEqual(selected.sourceJobId, "zhaopin:CCL1234567890J00123456789");
     assert.equal(selected.lastMessageId, "106", "the detail reader returns a real final meaningful ID");
+
+    const older = session({
+      sessionId: "d".repeat(32),
+      jobNumber: JOB_B,
+      text: "三天前的合成会话",
+      unreadCount: 0,
+      sendTime: Date.parse("2026-09-13T23:00:00.000Z")
+    });
+    await setFixture(page, { sessions: [first], active: first, timeline: richTimeline, loading: false });
+    const expandedBridge = fakeBrowser(page);
+    const evaluateExpanded = expandedBridge.evalValue.bind(expandedBridge);
+    expandedBridge.evalValue = async (tabId, expression) => {
+      if (expression === ZHAOPIN_MESSAGE_LOAD_MORE_EXPRESSION) {
+        await setFixture(page, { sessions: [first, older], active: first, timeline: richTimeline, loading: false });
+        return { state: "issued", reachedEnd: false };
+      }
+      return evaluateExpanded(tabId, expression);
+    };
+    let listReservations = 0;
+    const expanded = await readerFor(expandedBridge, {
+      randomFn: () => 0,
+      beforeLoadMore: async () => { listReservations += 1; }
+    }).scanConversationRows(undefined, { cutoffAt: "2026-09-14T02:00:00.000Z" });
+    assert.equal(expanded.rows.length, 2);
+    assert.equal(expanded.coverage.complete, true, "the first sync must load through the 72-hour cutoff");
+    assert.equal(listReservations, 1);
 
     await setFixture(page, { sessions: [], active: null, timeline: [], loading: false });
     let emptyMountWaits = 0;

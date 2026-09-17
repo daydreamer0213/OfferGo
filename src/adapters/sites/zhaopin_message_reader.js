@@ -124,6 +124,27 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
   }
 })()`;
 
+const ZHAOPIN_MESSAGE_LOAD_MORE_EXPRESSION = `(() => {
+  const container = document.querySelector(".im-side-panel__list");
+  if (!container) return { state: "unavailable" };
+  const beforeTop = container.scrollTop;
+  container.scrollTop = container.scrollHeight;
+  container.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return {
+    state: "issued",
+    beforeTop,
+    reachedEnd: container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+  };
+})()`;
+
+const ZHAOPIN_MESSAGE_RESTORE_LIST_EXPRESSION = `(() => {
+  const container = document.querySelector(".im-side-panel__list");
+  if (!container) return false;
+  container.scrollTop = 0;
+  container.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return true;
+})()`;
+
 function codedError(code, message) {
   const error = new Error(message);
   error.code = code;
@@ -423,6 +444,8 @@ function createZhaopinMessageReader({
   timeoutMs = 120000,
   conversationTimeoutMs = 30000,
   pollIntervalMs = 500,
+  randomFn = Math.random,
+  beforeLoadMore = null,
   expectedTabId = null
 } = {}) {
   assertBrowser(browser);
@@ -510,11 +533,19 @@ function createZhaopinMessageReader({
           if (nowFn() >= deadline) throw codedError("ZHAOPIN_MESSAGE_CONTENT_PENDING", "zhaopin conversation list is not ready");
           await sleepFn(pollIntervalMs, signal);
         }
-        const internalRows = snapshot.rows.map((row) => rowFromSnapshot(snapshot, row));
+        let endConfirmed = false;
+        let initialRows = snapshot.rows.map((row) => rowFromSnapshot(snapshot, row));
+        if (Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(initialRows, cutoffAt).complete) {
+          const expanded = await loadOlderRows(snapshot, signal, cutoffAt);
+          snapshot = expanded.snapshot;
+          endConfirmed = expanded.endConfirmed;
+          initialRows = snapshot.rows.map((row) => rowFromSnapshot(snapshot, row));
+        }
+        const internalRows = initialRows;
         const rows = internalRows.map(publicRow);
         binding = next;
         targetMap = new Map(internalRows.map((row) => [targetKey(next.tabId, row), row]));
-        return Object.freeze({ tabId: next.tabId, platform: "zhaopin", scope: "loaded_conversations", rows: Object.freeze(rows), coverage: coverageForRows(rows, cutoffAt) });
+        return Object.freeze({ tabId: next.tabId, platform: "zhaopin", scope: "loaded_conversations", rows: Object.freeze(rows), coverage: coverageForRows(rows, cutoffAt, endConfirmed) });
       });
     },
     assertActiveBindings(signal) { return exclusive(() => assertActiveBindings(signal)); },
@@ -576,14 +607,44 @@ function createZhaopinMessageReader({
       });
     }
   };
+
+  async function loadOlderRows(initial, signal, cutoffAt) {
+    let current = initial;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await assertActiveBindings(signal);
+      if (typeof beforeLoadMore === "function") {
+        await beforeLoadMore({ signal, assertTabBindings: () => assertActiveBindings(signal) });
+      } else {
+        await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+      }
+      const issued = await browser.evalValue(binding.tabId, ZHAOPIN_MESSAGE_LOAD_MORE_EXPRESSION);
+      if (issued?.state !== "issued") return { snapshot: current, endConfirmed: false };
+      await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+      await assertActiveBindings(signal);
+      const next = await readSnapshot(binding.tabId, signal);
+      const previousKeys = new Set(current.rows.map((row) => safeDigest(["zhaopin", String(row.sessionId || "")])));
+      const nextKeys = new Set(next.rows.map((row) => safeDigest(["zhaopin", String(row.sessionId || "")])));
+      if (![...previousKeys].every((key) => nextKeys.has(key))) {
+        await browser.evalValue(binding.tabId, ZHAOPIN_MESSAGE_RESTORE_LIST_EXPRESSION);
+        await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+        return { snapshot: await readSnapshot(binding.tabId, signal), endConfirmed: false };
+      }
+      const grew = next.rows.length > current.rows.length;
+      current = next;
+      const rows = current.rows.map((row) => rowFromSnapshot(current, row));
+      if (coverageForRows(rows, cutoffAt).complete) return { snapshot: current, endConfirmed: false };
+      if (issued.reachedEnd === true && !grew) return { snapshot: current, endConfirmed: true };
+    }
+    return { snapshot: current, endConfirmed: false };
+  }
 }
 
-function coverageForRows(rows, cutoffAt) {
+function coverageForRows(rows, cutoffAt, endConfirmed = false) {
   const cutoffMillis = Date.parse(String(cutoffAt || ""));
   const timestamps = rows.map((row) => Date.parse(String(row.lastActivityAt || ""))).filter(Number.isFinite);
   const oldestMillis = timestamps.length ? Math.min(...timestamps) : null;
   return Object.freeze({
-    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || (oldestMillis !== null && oldestMillis <= cutoffMillis),
+    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || endConfirmed || (oldestMillis !== null && oldestMillis <= cutoffMillis),
     oldestActivityAt: oldestMillis === null ? null : new Date(oldestMillis).toISOString(),
     cutoffAt: Number.isFinite(cutoffMillis) ? new Date(cutoffMillis).toISOString() : null
   });
@@ -594,5 +655,6 @@ module.exports = {
   ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION,
   hasZhaopinOutgoingTextSnapshot,
   isVisibleZhaopinLoginChallenge,
-  isZhaopinMessageUrl
+  isZhaopinMessageUrl,
+  ZHAOPIN_MESSAGE_LOAD_MORE_EXPRESSION
 };

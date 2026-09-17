@@ -11,7 +11,10 @@ const {
   getMessageReplyDraft,
   listMessageInboundContexts,
   listCandidateAnswerMemories,
-  withdrawCandidateAnswerMemory
+  withdrawCandidateAnswerMemory,
+  upsertMessageEvents,
+  listMessageEvents,
+  latestMessageEvent
 } = require("../src/core/storage");
 const {
   ensureProgressCard,
@@ -65,6 +68,7 @@ async function main() {
   await unmatchedRetentionSmoke();
   inboundLocalActionsSmoke();
   await messageSelectionSmoke();
+  await timelineBeforeJobContextSmoke();
   await messageGroupBoundarySmoke();
   await previewChannelSmoke();
   await unsupportedPreviewSmoke();
@@ -748,7 +752,9 @@ async function threadAndContextResolutionSmoke() {
     now: () => NOW,
     sleepFn: async () => {}
   });
-  assertStopped(summary, "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE");
+  assert.strictEqual(summary.status, "completed", "job enrichment gaps remain an automatic background retry");
+  assert.strictEqual(summary.reasonCode, "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE");
+  assert.strictEqual(summary.processed, 0);
   assert.strictEqual(summary.unresolved, 1);
   assert.strictEqual(modelCalls, 0);
   assert.strictEqual(listPreviewStates(db, { profileId: failed.profileId }).length, 0);
@@ -1362,6 +1368,50 @@ async function messageSelectionSmoke() {
   assert.strictEqual(summary.status, "completed");
   assert.strictEqual(summary.processed, 1);
   assert.strictEqual(modelCalls, 1);
+}
+
+async function timelineBeforeJobContextSmoke() {
+  const fixture = createFixture({ suffix: "timeline-before-context", title: "Timeline Engineer" });
+  const conversationKey = safeDigest(["conversation", "timeline-before-context"]);
+  const selected = selectedConversation({
+    title: fixture.title,
+    sourceJobId: "boss:message-fixture-timeline",
+    messages: [message("friend", "610000000000000", "岗位资料暂时缺失，但这条消息必须保留")]
+  });
+  const order = [];
+  const reader = {
+    async scanConversationRows() {
+      return { tabId: "timeline-tab", rows: [{
+        rowIndex: 0, unread: true, selected: false, recruiterLabel: "recruiter",
+        previewText: "岗位资料暂时缺失，但这条消息必须保留", recruiterKey: safeDigest(["recruiter", "timeline"]),
+        conversationKey, previewDigest: safeDigest(["preview", "timeline"]), previewKind: "possible_hr_reply",
+        transientSignature: safeDigest(["row", "timeline"]), sourceJobId: "boss:message-fixture-timeline",
+        lastMessageId: "610000000000000", lastMessageDirection: "friend", lastMessageStatus: "unknown", identityVerified: true
+      }] };
+    },
+    async openQueuedConversation() { order.push("open-conversation"); return selected; }
+  };
+  const messageTimeline = {
+    upsertMessageEvents(dbValue, input) { order.push("persist-events"); return upsertMessageEvents(dbValue, input); },
+    listMessageEvents,
+    latestMessageEvent
+  };
+  const summary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader,
+    messageTimeline,
+    resolveJobContext: async () => {
+      order.push("resolve-job-context");
+      throw Object.assign(new Error("synthetic missing detail"), { code: "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH" });
+    },
+    classifyMessageGroup: async () => { order.push("classify-and-draft"); return classification(); },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.deepStrictEqual(order, ["open-conversation", "persist-events", "resolve-job-context"]);
+  assert.equal(summary.status, "completed", "one unavailable job context must not stop the platform sync");
+  assert.equal(listMessageEvents(db, { profileId: fixture.profileId, platform: "boss", conversationKey })[0].text, "岗位资料暂时缺失，但这条消息必须保留");
 }
 
 async function messageGroupBoundarySmoke() {

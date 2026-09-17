@@ -2,7 +2,8 @@ const assert = require("node:assert");
 const vm = require("node:vm");
 const {
   createBossMessageReader,
-  buildGuardedConversationClickExpression
+  buildGuardedConversationClickExpression,
+  BOSS_MESSAGE_LOAD_MORE_EXPRESSION
 } = require("../src/adapters/sites/boss_message_reader");
 const { safeDigest } = require("../src/adapters/sites/boss_message_dom");
 
@@ -290,6 +291,24 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   assert.strictEqual(rowsScan.rows[0].lastActivityAt, "2026-09-17T01:59:00.000Z");
   assert.strictEqual(rowsScan.coverage.complete, false);
   assert(rowsBrowser.calls.some(([name]) => name === "reload"));
+
+  const olderRow = row(2, { recruiterLabel: "Older Example", lastActivityAt: "2026-09-13T23:00:00.000Z" });
+  const expandedBrowser = fakeBrowser({ snapshots: [
+    snapshot(),
+    { state: "issued", reachedEnd: false },
+    snapshot({ rows: [row(0, { unread: true }), row(1), olderRow] })
+  ] });
+  let listReservations = 0;
+  const expandedScan = await createBossMessageReader({
+    browser: expandedBrowser,
+    sleepFn: async () => {},
+    randomFn: () => 0,
+    beforeLoadMore: async () => { listReservations += 1; }
+  }).scanConversationRows(undefined, { cutoffAt: "2026-09-14T02:00:00.000Z" });
+  assert.equal(expandedScan.rows.length, 3);
+  assert.equal(expandedScan.coverage.complete, true, "the first sync must load until it crosses the 72-hour cutoff");
+  assert.equal(listReservations, 1);
+  assert(expandedBrowser.calls.some(([, , expression]) => expression === BOSS_MESSAGE_LOAD_MORE_EXPRESSION));
 
   const verifiedRow = row(0, {
     unread: true,

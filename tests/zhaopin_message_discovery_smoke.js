@@ -544,17 +544,17 @@ async function waitForControllerStop(controller, profileId) {
 }
 
 async function emptyTextPendingSmoke() {
-  await pendingContentSmoke("ZL880001", [{ direction: "friend", messageId: "880001", contentKind: "text", text: "  " }]);
+  await pendingContentSmoke("ZL880001", [{ direction: "friend", messageId: "880001", contentKind: "text", text: "  " }], "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED");
 }
 
 async function unsupportedSelfPendingSmoke() {
   await pendingContentSmoke("ZL880002", [
     { direction: "friend", messageId: "880001", contentKind: "text", text: "原先保留的 HR 问题" },
     { direction: "myself", messageId: "880002", contentKind: "unsupported", text: "" }
-  ]);
+  ], "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED");
 }
 
-async function pendingContentSmoke(id, messages) {
+async function pendingContentSmoke(id, messages, expectedReasonCode) {
   const fixture = createFixture({ id });
   const conversationKey = safeDigest(["pending-content", id]);
   const sourceJobId = `zhaopin:${id}`;
@@ -574,7 +574,7 @@ async function pendingContentSmoke(id, messages) {
   const pending = listUnresolvedMessageDiscoveryItems(db, { profileId: fixture.profileId, platform: "zhaopin" });
   assert.equal(pending.length, 1);
   assert.deepEqual(pending[0].inboundMessages, original);
-  assert.equal(pending[0].reasonCode, "ZHAOPIN_MESSAGE_CONTENT_PENDING");
+  assert.equal(pending[0].reasonCode, expectedReasonCode);
 }
 
 async function pendingPacingSmoke() {

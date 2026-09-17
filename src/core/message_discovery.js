@@ -91,6 +91,16 @@ const ITEM_LOCAL_CODES = new Set([
   "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
   "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
 ]);
+const BACKGROUND_JOB_CONTEXT_CODES = new Set([
+  "MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE",
+  "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE",
+  "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
+  "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+  "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE",
+  "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
+]);
 
 async function runBossMessageDiscovery({
   db,
@@ -105,7 +115,8 @@ async function runBossMessageDiscovery({
   sleepFn = abortableSleep,
   randomFn = Math.random,
   onStatus = () => {},
-  messageInbox
+  messageInbox,
+  messageTimeline
 }) {
   const {
     upsertMessageInboxItem,
@@ -113,6 +124,7 @@ async function runBossMessageDiscovery({
     saveMessageInboxSyncState,
     markMessageInboxItemDone
   } = messageInboxPort(messageInbox);
+  const timeline = messageTimelinePort(messageTimeline);
   const source = discoveryPlatform(platform);
   const candidates = listMessageDiscoveryCandidates(db, { profileId, platform: source });
   const storedProfile = getCandidateProfile(db, profileId);
@@ -286,6 +298,34 @@ async function runBossMessageDiscovery({
     }
 
     const selectedSnapshot = mutableSelectedSnapshot(selected);
+    const timelineObservedAt = now();
+    const persistedEvents = persistSelectedTimeline(timeline, db, {
+      profileId,
+      platform: source,
+      conversationKey: target.conversationKey,
+      observedAt: timelineObservedAt,
+      messages: selectedSnapshot?.messages
+    });
+    const latestPersisted = persistedEvents.at(-1) || null;
+    if (latestPersisted) {
+      upsertMessageInboxItem(db, {
+        profileId,
+        platform: source,
+        conversationKey: target.conversationKey,
+        sourceJobId: selectedSnapshot?.sourceJobId || target.sourceJobId,
+        lastMessageId: latestPersisted.platformMessageId,
+        lastActivityAt: latestPersisted.occurredAt || target.lastActivityAt || timelineObservedAt,
+        lastDirection: latestPersisted.direction,
+        unread: latestPersisted.direction === "friend",
+        positionTitle: selectedSnapshot?.positionName || target.positionTitle || "",
+        company: selectedSnapshot?.companyName || target.company || "",
+        latestExcerpt: timelineExcerpt(latestPersisted),
+        actionGroup: latestPersisted.direction === "myself" ? "waiting" : "needs_action",
+        actionCode: latestPersisted.direction === "myself" ? "wait" : "reply",
+        reasonCode: "",
+        observedAt: timelineObservedAt
+      });
+    }
     const selectedTarget = source === "zhaopin"
       ? { ...target, sourceJobId: String(selectedSnapshot?.sourceJobId || ""), lastMessageId: String(selectedSnapshot?.lastMessageId || "") }
       : target;
@@ -631,7 +671,9 @@ async function runBossMessageDiscovery({
     });
   }
   retained = unresolvedSummary(db, profileId, source);
-  const completed = safeStatus(retained.count ? "needs_user_action" : "completed", {
+  const backgroundRetryOnly = retained.count > 0 && continuedFailures.length > 0
+    && continuedFailures.every((item) => BACKGROUND_JOB_CONTEXT_CODES.has(item.reasonCode));
+  const completed = safeStatus(retained.count && !backgroundRetryOnly ? "needs_user_action" : "completed", {
     queued: queue.length,
     processed,
     unresolved: retained.count,
@@ -793,7 +835,8 @@ function contextFailureReason(error) {
 }
 
 function shouldStopAfterContextFailure(error) {
-  return isPlatformTerminalFailure(error);
+  const code = errorCode(error);
+  return !ITEM_LOCAL_CODES.has(code) && isPlatformTerminalFailure(error);
 }
 
 function isPlatformTerminalFailure(error) {
@@ -1480,6 +1523,63 @@ function messageInboxPort(value) {
     throw discoveryError("MESSAGE_INBOX_PORT_REQUIRED", "message discovery requires a message inbox persistence port");
   }
   return value;
+}
+
+function messageTimelinePort(value) {
+  if (!value || typeof value.upsertMessageEvents !== "function") {
+    throw discoveryError("MESSAGE_TIMELINE_PORT_REQUIRED", "message discovery requires a message timeline persistence port");
+  }
+  return value;
+}
+
+function persistSelectedTimeline(port, db, input) {
+  const kinds = new Set([
+    "text", "platform_notice", "resume_request", "interview_invitation",
+    "contact_exchange", "media_ignored", "unknown_card"
+  ]);
+  const events = (Array.isArray(input.messages) ? input.messages : []).map((item, index) => {
+    const messageId = String(item?.messageId || "").trim();
+    const rawKind = kinds.has(String(item?.contentKind || "")) ? String(item.contentKind) : "unknown_card";
+    const kind = rawKind === "text" && !String(item?.text || "").trim() ? "unknown_card" : rawKind;
+    const direction = ["friend", "myself", "platform", "unknown"].includes(String(item?.direction || ""))
+      ? String(item.direction) : String(item?.direction || "") === "system" ? "platform" : "unknown";
+    return {
+      messageKey: validDigest(item?.messageKey)
+        ? item.messageKey
+        : messageId
+          ? input.platform === "boss"
+            ? messageKey({ platform: "boss", threadKey: input.conversationKey, messageId })
+            : zhaopinMessageKey(input.conversationKey, messageId)
+          : safeDigest([input.platform, input.conversationKey, "unknown", index, direction, kind, item?.text]),
+      platformMessageId: messageId,
+      direction,
+      kind,
+      text: kind === "media_ignored" ? "" : String(item?.text || "").slice(0, 4000),
+      occurredAt: item?.occurredAt || null,
+      metadata: item?.metadata && typeof item.metadata === "object" ? item.metadata : {}
+    };
+  });
+  return port.upsertMessageEvents(db, {
+    profileId: input.profileId,
+    platform: input.platform,
+    conversationKey: input.conversationKey,
+    observedAt: input.observedAt,
+    events
+  });
+}
+
+function timelineExcerpt(event) {
+  if (event.text) return event.text;
+  if (event.kind === "media_ignored") {
+    return { voice: "[语音消息]", image: "[图片消息]", attachment: "[附件消息]" }[event.metadata?.mediaKind] || "[媒体消息]";
+  }
+  return {
+    resume_request: "HR 邀请你发送简历",
+    interview_invitation: "HR 发来面试邀请",
+    contact_exchange: "HR 发来联系方式交换请求",
+    platform_notice: "平台提示",
+    unknown_card: "暂不支持的消息卡片"
+  }[event.kind] || "新消息";
 }
 
 function emitStatus(status, logger, onStatus) {

@@ -13,7 +13,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-workspace-platforms
 const dbPath = path.join(root, "jobs.sqlite");
 const db = openDb(dbPath);
 try {
-  assert.strictEqual(SCHEMA_VERSION, 32);
+  assert.strictEqual(SCHEMA_VERSION, 33);
   assert.strictEqual(getWorkspacePlatformPreference(db), null, "fresh users must choose a platform");
   assert.throws(
     () => saveWorkspacePlatformPreference(db, []),

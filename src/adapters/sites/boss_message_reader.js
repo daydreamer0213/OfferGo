@@ -26,6 +26,25 @@ const GUARDED_REASONS = new Set([
   "preview_drifted",
   "row_not_clickable"
 ]);
+const BOSS_MESSAGE_LOAD_MORE_EXPRESSION = `(() => {
+  const container = document.querySelector(".user-list-content");
+  if (!container) return { state: "unavailable" };
+  const beforeTop = container.scrollTop;
+  container.scrollTop = container.scrollHeight;
+  container.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return {
+    state: "issued",
+    beforeTop,
+    reachedEnd: container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+  };
+})()`;
+const BOSS_MESSAGE_RESTORE_LIST_EXPRESSION = `(() => {
+  const container = document.querySelector(".user-list-content");
+  if (!container) return false;
+  container.scrollTop = 0;
+  container.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return true;
+})()`;
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -363,7 +382,7 @@ function assertBrowser(browser) {
   }
 }
 
-function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicationTabId } = {}) {
+function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.random, beforeLoadMore = null, expectedCommunicationTabId } = {}) {
   assertBrowser(browser);
   let activeTabId = null;
   let activeRowKeys = new Set();
@@ -484,15 +503,54 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
     await browser.reload(tabId);
     assertRestoredBaseline(await browser.listTabs(), binding);
     throwIfAborted(signal);
-    const snapshot = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
+    activeTabId = tabId;
+    activeBinding = binding;
+    let snapshot = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
     assertRestoredBaseline(await browser.listTabs(), binding);
+    let endConfirmed = false;
+    if (Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(snapshot.rows, cutoffAt).complete) {
+      const expanded = await loadOlderRows(snapshot, signal, cutoffAt);
+      snapshot = expanded.snapshot;
+      endConfirmed = expanded.endConfirmed;
+    }
     const rows = Object.freeze(snapshot.rows.map((row) => Object.freeze({ ...row })));
     activeTabId = tabId;
     activeBinding = binding;
     activeRowKeys = new Set(rows.map((row) => `${tabId}:${row.rowIndex}:${row.conversationKey}`));
     activeUnreadTargets = new Set();
     activeSelectedSnapshot = null;
-    return { tabId, path: snapshot.path, rows, coverage: coverageForRows(rows, cutoffAt) };
+    return { tabId, path: snapshot.path, rows, coverage: coverageForRows(rows, cutoffAt, endConfirmed) };
+  }
+
+  async function loadOlderRows(initial, signal, cutoffAt) {
+    let current = initial;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      throwIfAborted(signal);
+      await assertCurrentBinding();
+      if (typeof beforeLoadMore === "function") {
+        await beforeLoadMore({ signal, assertTabBindings: assertCurrentBinding });
+      } else {
+        await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+      }
+      const issued = await browser.evalValue(activeTabId, BOSS_MESSAGE_LOAD_MORE_EXPRESSION);
+      if (issued?.state !== "issued") return { snapshot: current, endConfirmed: false };
+      await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+      await assertCurrentBinding();
+      const next = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(activeTabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
+      const previousKeys = new Set(current.rows.map((row) => row.conversationKey));
+      const nextKeys = new Set(next.rows.map((row) => row.conversationKey));
+      if (![...previousKeys].every((key) => nextKeys.has(key))) {
+        await browser.evalValue(activeTabId, BOSS_MESSAGE_RESTORE_LIST_EXPRESSION);
+        await sleepFn(Math.floor(900 + randomFn() * 701), signal);
+        const restored = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(activeTabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
+        return { snapshot: restored, endConfirmed: false };
+      }
+      const grew = next.rows.length > current.rows.length;
+      current = next;
+      if (coverageForRows(current.rows, cutoffAt).complete) return { snapshot: current, endConfirmed: false };
+      if (issued.reachedEnd === true && !grew) return { snapshot: current, endConfirmed: true };
+    }
+    return { snapshot: current, endConfirmed: false };
   }
 
   async function assertCurrentBinding() {
@@ -503,12 +561,12 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
   }
 }
 
-function coverageForRows(rows, cutoffAt) {
+function coverageForRows(rows, cutoffAt, endConfirmed = false) {
   const cutoffMillis = Date.parse(String(cutoffAt || ""));
   const timestamps = rows.map((row) => Date.parse(String(row.lastActivityAt || ""))).filter(Number.isFinite);
   const oldestMillis = timestamps.length ? Math.min(...timestamps) : null;
   return Object.freeze({
-    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || (oldestMillis !== null && oldestMillis <= cutoffMillis),
+    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || endConfirmed || (oldestMillis !== null && oldestMillis <= cutoffMillis),
     oldestActivityAt: oldestMillis === null ? null : new Date(oldestMillis).toISOString(),
     cutoffAt: Number.isFinite(cutoffMillis) ? new Date(cutoffMillis).toISOString() : null
   });
@@ -516,5 +574,6 @@ function coverageForRows(rows, cutoffAt) {
 
 module.exports = {
   buildGuardedConversationClickExpression,
-  createBossMessageReader
+  createBossMessageReader,
+  BOSS_MESSAGE_LOAD_MORE_EXPRESSION
 };

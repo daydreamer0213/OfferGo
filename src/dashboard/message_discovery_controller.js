@@ -235,8 +235,8 @@ function createMessageDiscoveryController(deps = {}) {
           else assertMessageDiscoveryRuntimeAvailable(db, now, { platform });
           readingStarted = true;
           setDetailPhase(run, "reading_messages", now);
-          const reader = createReader({ browser, platform, tabId: entry.bindingTabId });
           const safety = createDetailSafety({ db, profileId, owner, run, logger, signal: abortController.signal, now, sleepFn: pacingSleepFn, randomFn: pacingRandomFn, platform });
+          const reader = createReader({ browser, platform, tabId: entry.bindingTabId, beforeLoadMore: safety.beforeListPage });
           const detailOptions = { browser, messageReader: reader, logger, beforeOpen: safety.beforeOpen, afterIssuedAttempt: safety.afterIssuedAttempt, sleepFn: detailSleepFn, platform };
           let actualDetailReader = platform === "boss" || Object.hasOwn(deps, "createDetailReader")
             ? createDetailReader(detailOptions)
@@ -830,6 +830,21 @@ function createMessageDiscoveryDetailSafety({
 
   return {
     pacing,
+    async beforeListPage({ signal: operationSignal = signal, assertTabBindings } = {}) {
+      assertActiveBindings = assertTabBindings;
+      setDetailPhase(run, "reading_messages", now);
+      try {
+        await pacing.waitWithPacing("list", {
+          signal: operationSignal,
+          assertTabBindings,
+          onWait
+        });
+        await pacing.reserveAccess("message_pane_detail_read", { phase: "message_list_page" });
+      } finally {
+        assertActiveBindings = null;
+        setDetailPhase(run, "reading_messages", now);
+      }
+    },
     async beforeOpen({ jobId, signal: operationSignal = signal, assertTabBindings } = {}) {
       assertActiveBindings = assertTabBindings;
       setDetailPhase(run, "reading_detail", now);
