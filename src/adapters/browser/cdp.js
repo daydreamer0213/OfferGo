@@ -30,7 +30,7 @@ class CdpBrowserAdapter {
     let firstError = null;
     const listedTabs = await Promise.all(pageTabs.map(async (page) => {
       try {
-        const windowId = await this.windowIdForTarget(page.id);
+        const { windowId, windowState } = await this.windowIdentityForTarget(page.id);
         const visibilityState = await this.visibilityStateForPage(page);
         return {
           id: page.id,
@@ -38,6 +38,7 @@ class CdpBrowserAdapter {
           url: page.url || "",
           active: visibilityState === "visible",
           windowId,
+          windowState,
           webSocketDebuggerUrl: page.webSocketDebuggerUrl
         };
       } catch (error) {
@@ -74,13 +75,21 @@ class CdpBrowserAdapter {
   }
 
   async windowIdForTarget(targetId) {
+    return (await this.windowIdentityForTarget(targetId)).windowId;
+  }
+
+  async windowIdentityForTarget(targetId) {
     const result = await this.browserCommand("Browser.getWindowForTarget", {
       targetId
     });
     if (!Number.isInteger(result?.windowId)) {
       throw browserError("BROWSER_COMMAND_FAILED", `CDP target has no reliable browser window identity: ${targetId}`);
     }
-    return result.windowId;
+    const windowState = String(result?.bounds?.windowState || "");
+    if (!new Set(["normal", "minimized", "maximized", "fullscreen"]).has(windowState)) {
+      throw browserError("BROWSER_COMMAND_FAILED", `CDP target has no reliable browser window state: ${targetId}`);
+    }
+    return { windowId: result.windowId, windowState };
   }
 
   async visibilityStateForPage(page) {

@@ -205,7 +205,14 @@ async function main() {
     assert.strictEqual(identifiedTabs.length, 1);
     assert.strictEqual(identifiedTabs[0].id, "cdp-tab");
     assert.strictEqual(identifiedTabs[0].windowId, 42);
+    assert.strictEqual(identifiedTabs[0].windowState, "normal");
     assert.strictEqual(countMethod(websocket.messages, "Browser.getWindowForTarget"), 1);
+
+    websocket.windowState = "minimized";
+    const minimizedTabs = await cdp.listTabs();
+    assert.strictEqual(minimizedTabs[0].windowState, "minimized",
+      "CDP tab identity must expose the browser window state independently of page visibility");
+    websocket.windowState = "normal";
 
     state.cdpExtraPage = true;
     websocket.messages.length = 0;
@@ -854,6 +861,7 @@ function installFakeWebSocket() {
     mode: "disconnect",
     messages: [],
     urls: [],
+    windowState: "normal",
     visibilityByTarget: {},
     responseBodies: {},
     bodyErrors: new Set(),
@@ -884,7 +892,7 @@ function installFakeWebSocket() {
         && payload.method === "Browser.getWindowForTarget"
         && payload.params.targetId === "cdp-tab") {
         setTimeout(() => this.emit("message", {
-          data: JSON.stringify({ id: payload.id, result: { windowId: 42 } })
+          data: JSON.stringify({ id: payload.id, result: { windowId: 42, bounds: { windowState: control.windowState } } })
         }), 25);
         return;
       }
@@ -919,8 +927,8 @@ function installFakeWebSocket() {
           else if (["created-window-identity-error-close-fails", "close-false-target-persists", "close-false-target-disappears", "close-false-target-list-invalid"].includes(control.mode)
             && payload.params.targetId === "cdp-created-tab") error = { message: "identity query failed" };
           else if (["created-window-mismatch", "created-window-mismatch-close-false"].includes(control.mode)
-            && payload.params.targetId === "cdp-created-tab") result = { windowId: 99 };
-          else result = { windowId: 42 };
+            && payload.params.targetId === "cdp-created-tab") result = { windowId: 99, bounds: { windowState: control.windowState } };
+          else result = { windowId: 42, bounds: { windowState: control.windowState } };
         } else if (payload.method === "Target.createTarget") {
           result = { targetId: "cdp-created-tab" };
           state.cdpCreatedTargetListed = true;

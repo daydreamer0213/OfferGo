@@ -38,7 +38,7 @@
 **Files:**
 - Modify: `src/adapters/browser/cdp.js`
 - Modify: `src/adapters/sites/boss_message_detail_reader.js`
-- Modify: `tests/cdp_browser_smoke.js`
+- Modify: `tests/browser_transport_smoke.js`
 - Modify: `tests/boss_message_detail_reader_smoke.js`
 
 **Interfaces:**
@@ -66,4 +66,3 @@
 - [ ] **Step 3: Run serial read-only acceptance** — 使用现有登录页先 BOSS 后智联，只读发现消息；验证无发送、无申请和无多余标签页。
 - [ ] **Step 4: Build the acceptance environment** — 生成新验收目录，使用可点击启动入口并隔离验收数据。
 - [ ] **Step 5: Verify the frozen build** — 对最终提交重新执行完整门禁和启动健康检查。
-

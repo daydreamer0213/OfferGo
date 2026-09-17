@@ -1,5 +1,9 @@
 const assert = require("node:assert/strict");
-const { createBossMessageDetailReader } = require("../src/adapters/sites/boss_message_detail_reader");
+const {
+  assertRestoredBaseline,
+  captureBinding,
+  createBossMessageDetailReader
+} = require("../src/adapters/sites/boss_message_detail_reader");
 
 const SEARCH_TAB_ID = "search-target-101";
 const COMMUNICATION_TAB_ID = "communication-target-102";
@@ -20,9 +24,9 @@ const selected = Object.freeze({
 
 function baseTabs() {
   return [
-    { id: SEARCH_TAB_ID, windowId: WINDOW_ID, active: false, url: "https://www.zhipin.com/web/geek/jobs" },
-    { id: COMMUNICATION_TAB_ID, windowId: WINDOW_ID, active: false, url: "https://www.zhipin.com/web/geek/chat" },
-    { id: DASHBOARD_TAB_ID, windowId: WINDOW_ID, active: true, url: "http://127.0.0.1:3000/messages" }
+    { id: SEARCH_TAB_ID, windowId: WINDOW_ID, windowState: "normal", active: false, url: "https://www.zhipin.com/web/geek/jobs" },
+    { id: COMMUNICATION_TAB_ID, windowId: WINDOW_ID, windowState: "normal", active: false, url: "https://www.zhipin.com/web/geek/chat" },
+    { id: DASHBOARD_TAB_ID, windowId: WINDOW_ID, windowState: "normal", active: true, url: "http://127.0.0.1:3000/messages" }
   ];
 }
 
@@ -102,7 +106,7 @@ function fakeBrowser({
   onEval = null
 } = {}) {
   const browser = {
-    tabs: baseTabs().map((tab) => minimized ? { ...tab, active: false } : tab),
+    tabs: baseTabs().map((tab) => minimized ? { ...tab, active: false, windowState: "minimized" } : tab),
     calls: [],
     listCallCount: 0,
     postCloseListCount: 0,
@@ -272,6 +276,32 @@ async function read(reader, signal = null) {
   );
   assert.strictEqual(browser.calls.some((call) => /bringToFront|focus/i.test(call.name)), false);
 
+  const visibleBinding = captureBinding(baseTabs(), COMMUNICATION_TAB_ID);
+  const sameTabsAfterMinimize = baseTabs().map((tab) => ({
+    ...tab,
+    active: false,
+    windowState: "minimized"
+  }));
+  assert.doesNotThrow(
+    () => assertRestoredBaseline(sameTabsAfterMinimize, visibleBinding),
+    "minimizing the same browser window must not be mistaken for a fixed-tab change"
+  );
+  assert.throws(
+    () => assertRestoredBaseline([
+      ...sameTabsAfterMinimize,
+      { id: "unknown-tab", windowId: WINDOW_ID, windowState: "minimized", active: false, url: "https://example.test" }
+    ], visibleBinding),
+    (error) => error.code === "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED",
+    "minimization must not hide an unknown extra tab"
+  );
+  const minimizedBinding = captureBinding(sameTabsAfterMinimize, COMMUNICATION_TAB_ID);
+  assert.throws(
+    () => assertRestoredBaseline(baseTabs(), minimizedBinding),
+    (error) => error.code === "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED"
+      && error.baselineMismatch === "visible_tabs",
+    "an unminimized window must re-establish the same visible tab instead of inventing one from an unobservable baseline"
+  );
+
   const settlingCloseBrowser = fakeBrowser({
     listErrorAfterCloseAtCall: 1,
     listErrorCode: "BROWSER_COMMAND_FAILED"
@@ -287,7 +317,10 @@ async function read(reader, signal = null) {
   );
 
   const cleanupVisibilityBrowser = fakeBrowser({ twoVisibleAfterClose: true });
-  const cleanupVisibility = makeReader(cleanupVisibilityBrowser);
+  const cleanupVisibilityEvents = [];
+  const cleanupVisibility = makeReader(cleanupVisibilityBrowser, {
+    logger: { warn(event, fields) { cleanupVisibilityEvents.push({ event, fields }); } }
+  });
   await assert.rejects(
     () => read(cleanupVisibility.reader),
     (error) => error.code === "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED"
@@ -300,6 +333,15 @@ async function read(reader, signal = null) {
   assert.strictEqual(cleanupVisibilityBrowser.calls.filter((call) => call.name === "createTab").length, 1);
   assert.strictEqual(cleanupVisibilityBrowser.calls.filter((call) => call.name === "closeTab").length, 1);
   assert.deepStrictEqual(cleanupVisibility.hooks, ["beforeOpen", "afterIssuedAttempt"]);
+  assert.deepStrictEqual(cleanupVisibilityEvents, [{
+    event: "boss_message_detail_read_failed",
+    fields: {
+      phase: "cleanup_list_tabs",
+      code: "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED",
+      causeCode: "BROWSER_UNKNOWN",
+      baselineMismatch: "visible_tabs"
+    }
+  }]);
 
   const minimizedBrowser = fakeBrowser({ minimized: true });
   const minimized = makeReader(minimizedBrowser);
@@ -310,7 +352,7 @@ async function read(reader, signal = null) {
   assert.strictEqual(minimizedBrowser.calls.filter((call) => call.name === "closeTab").length, 1);
   assert.deepStrictEqual(
     minimizedBrowser.tabs,
-    baseTabs().map((tab) => ({ ...tab, active: false })),
+    baseTabs().map((tab) => ({ ...tab, active: false, windowState: "minimized" })),
     "a zero-visible Edge window must restore the exact hidden typed baseline"
   );
 

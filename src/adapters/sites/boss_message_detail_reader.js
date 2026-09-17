@@ -93,25 +93,26 @@ function createBossMessageDetailReader({
         return await readSelectedJobDetail(input);
       } catch (error) {
         const sanitized = sanitizedDetailError(error);
-        if (sanitized.code === "BOSS_MESSAGE_DETAIL_BROWSER_FAILED") {
-          const fields = {
-            phase: detailFailurePhase(error),
-            code: sanitized.code,
-            causeCode: browserCauseCode(error)
-          };
-          if (error?.primaryPhase) {
-            fields.primaryPhase = detailFailurePhase({ detailPhase: error.primaryPhase });
-            fields.primaryCauseCode = /^BROWSER_[A-Z0-9_]+$/.test(String(error.primaryCauseCode || ""))
-              ? error.primaryCauseCode
-              : "BROWSER_UNKNOWN";
-          }
-          if (error?.scriptDiagnostic) {
-            fields.scriptErrorName = safeDiagnosticToken(error.scriptDiagnostic.errorName, "Error");
-            fields.scriptErrorKind = safeDiagnosticToken(error.scriptDiagnostic.errorKind, "unknown");
-            fields.scriptErrorMember = safeDiagnosticToken(error.scriptDiagnostic.errorMember, "");
-          }
-          logger?.warn("boss_message_detail_read_failed", fields);
+        const fields = {
+          phase: detailFailurePhase(error),
+          code: sanitized.code,
+          causeCode: browserCauseCode(error)
+        };
+        if (error?.baselineMismatch) {
+          fields.baselineMismatch = safeBaselineMismatch(error.baselineMismatch);
         }
+        if (error?.primaryPhase) {
+          fields.primaryPhase = detailFailurePhase({ detailPhase: error.primaryPhase });
+          fields.primaryCauseCode = /^BROWSER_[A-Z0-9_]+$/.test(String(error.primaryCauseCode || ""))
+            ? error.primaryCauseCode
+            : "BROWSER_UNKNOWN";
+        }
+        if (error?.scriptDiagnostic) {
+          fields.scriptErrorName = safeDiagnosticToken(error.scriptDiagnostic.errorName, "Error");
+          fields.scriptErrorKind = safeDiagnosticToken(error.scriptDiagnostic.errorKind, "unknown");
+          fields.scriptErrorMember = safeDiagnosticToken(error.scriptDiagnostic.errorMember, "");
+        }
+        logger?.warn("boss_message_detail_read_failed", fields);
         throw sanitized;
       } finally {
         busy = false;
@@ -126,8 +127,6 @@ function createBossMessageDetailReader({
     const beforeTabs = await browser.listTabs();
     const binding = captureBinding(beforeTabs, communicationTabId);
     const assertBaseline = async () => assertRestoredBaseline(await browser.listTabs(), binding);
-    phase = "before_open";
-    await beforeOpen({ jobId: target.jobId, signal, assertTabBindings: assertBaseline });
 
     let issued = false;
     let createReturned = false;
@@ -139,6 +138,8 @@ function createBossMessageDetailReader({
     let primaryPhase = phase;
 
     try {
+      phase = "before_open";
+      await beforeOpen({ jobId: target.jobId, signal, assertTabBindings: assertBaseline });
       throwIfAborted(signal);
       issued = true;
       phase = "create_tab";
@@ -348,6 +349,7 @@ function createBossMessageDetailReader({
 function phasedDetailError(error, phase) {
   const wrapped = detailError(String(error?.code || ""), "message detail read failed");
   wrapped.detailPhase = phase;
+  if (error?.baselineMismatch) wrapped.baselineMismatch = safeBaselineMismatch(error.baselineMismatch);
   if (error?.scriptDiagnostic) wrapped.scriptDiagnostic = safeScriptDiagnostic(error.scriptDiagnostic);
   return wrapped;
 }
@@ -378,6 +380,13 @@ function detailFailurePhase(error) {
 function browserCauseCode(error) {
   const code = String(error?.code || "");
   return /^BROWSER_[A-Z0-9_]+$/.test(code) ? code : "BROWSER_UNKNOWN";
+}
+
+function safeBaselineMismatch(value) {
+  const mismatch = String(value || "");
+  return new Set(["visible_tabs", "all_tabs", "boss_tabs", "window", "fixed_tabs"]).has(mismatch)
+    ? mismatch
+    : "unknown";
 }
 
 function assertDependencies(browser, messageReader, beforeOpen, afterIssuedAttempt, sleepFn) {
@@ -453,6 +462,7 @@ function captureBinding(tabs, communicationTabId) {
     searchTabId: fixed.searchTab.id,
     communicationTabId: fixed.communicationTab.id,
     windowId: fixed.windowId,
+    windowState: windowStateInWindow(tabs, fixed.windowId),
     visibleTabIds,
     bossTabIds: sortedBrowserTabIds(bossTabs.map((tab) => tab.id)),
     tabIds
@@ -468,16 +478,19 @@ function assertRestoredBaseline(tabs, binding) {
     const bossTabs = tabs.filter(isBossTab);
     const bossTabIds = sortedBrowserTabIds(bossTabs.map((tab) => tab.id));
     if (!sameBrowserTabId(fixed.searchTab.id, binding.searchTabId)
-      || !sameBrowserTabId(fixed.communicationTab.id, binding.communicationTabId)
-      || fixed.windowId !== binding.windowId
-      || !sameIds(visibleTabIdsInWindow(tabs, binding.windowId), binding.visibleTabIds)
-      || !sameIds(bossTabIds, binding.bossTabIds)
-      || !sameIds(sortedBrowserTabIds(tabs.map((tab) => tab.id)), binding.tabIds)) {
-      throw detailError("BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", "BOSS fixed-tab baseline was not restored");
+      || !sameBrowserTabId(fixed.communicationTab.id, binding.communicationTabId)) {
+      throw baselineError("fixed_tabs");
+    }
+    if (fixed.windowId !== binding.windowId) throw baselineError("window");
+    if (!visibleBaselineMatches(tabs, binding)) throw baselineError("visible_tabs");
+    if (!sameIds(bossTabIds, binding.bossTabIds)) throw baselineError("boss_tabs");
+    if (!sameIds(sortedBrowserTabIds(tabs.map((tab) => tab.id)), binding.tabIds)) {
+      throw baselineError("all_tabs");
     }
     return fixed;
-  } catch {
-    throw detailError("BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", "BOSS fixed-tab baseline was not restored");
+  } catch (error) {
+    if (error?.code === "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED" && error?.baselineMismatch) throw error;
+    throw baselineError("fixed_tabs");
   }
 }
 
@@ -490,7 +503,7 @@ function isOnlyLingeringClosedTarget(tabs, binding, detailTabId) {
       || extra[0].windowId !== binding.windowId
       || extra[0].active === true
       || !binding.tabIds.every((id) => tabs.some((tab) => sameBrowserTabId(id, tab.id)))
-      || !sameIds(visibleTabIdsInWindow(tabs, binding.windowId), binding.visibleTabIds)) return false;
+      || !visibleBaselineMatches(tabs, binding)) return false;
     assertFixedTabsPresent(tabs, binding);
     return true;
   } catch {
@@ -503,7 +516,7 @@ function optionalCreatedTargetTab(before, after, target) {
     && isBrowserTabId(tab.id)
     && isTargetDetailTab(tab, target));
   if (candidates.length > 1) {
-    throw detailError("BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", "background detail cleanup is ambiguous");
+    throw baselineError("all_tabs", "background detail cleanup is ambiguous");
   }
   return candidates[0] || null;
 }
@@ -518,7 +531,7 @@ function assertBackgroundCreation({ returnedTabId, beforeTabs, afterCreate, bind
     || typeof returnedTabId !== typeof binding.communicationTabId
     || created.windowId !== binding.windowId
     || created.active === true
-    || !sameIds(visibleTabIdsInWindow(afterCreate, binding.windowId), binding.visibleTabIds)) {
+    || !visibleBaselineMatches(afterCreate, binding)) {
     throw detailError("BOSS_MESSAGE_DETAIL_NOT_BACKGROUND", "background detail tab safety could not be proven");
   }
   assertFixedTabsPresent(afterCreate, binding);
@@ -531,7 +544,7 @@ function assertLiveDetailBinding(tabs, binding, detailTabId, target) {
     || !sameBrowserTabId(detailTabs[0].id, detailTabId)
     || detailTabs[0].windowId !== binding.windowId
     || detailTabs[0].active === true
-    || !sameIds(visibleTabIdsInWindow(tabs, binding.windowId), binding.visibleTabIds)) {
+    || !visibleBaselineMatches(tabs, binding)) {
     throw detailError("BOSS_MESSAGE_DETAIL_NOT_BACKGROUND", "background detail tab safety changed during read");
   }
   assertFixedTabsPresent(tabs, binding);
@@ -545,8 +558,35 @@ function assertFixedTabsPresent(tabs, binding) {
     || communication.windowId !== binding.windowId
     || bossPath(search) !== "/web/geek/jobs"
     || bossPath(communication) !== "/web/geek/chat") {
-    throw detailError("BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", "BOSS fixed tabs changed during detail read");
+    throw baselineError("fixed_tabs", "BOSS fixed tabs changed during detail read");
   }
+}
+
+function visibleBaselineMatches(tabs, binding) {
+  let currentVisible;
+  try {
+    currentVisible = visibleTabIdsInWindow(tabs, binding.windowId);
+  } catch (error) {
+    if (error?.code === "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND") throw baselineError("visible_tabs");
+    throw error;
+  }
+  if (sameIds(currentVisible, binding.visibleTabIds)) return true;
+  const currentWindowState = windowStateInWindow(tabs, binding.windowId);
+  return currentWindowState === "minimized";
+}
+
+function windowStateInWindow(tabs, windowId) {
+  const states = [...new Set((tabs || [])
+    .filter((tab) => tab.windowId === windowId)
+    .map((tab) => String(tab.windowState || ""))
+    .filter((state) => new Set(["normal", "minimized", "maximized", "fullscreen"]).has(state)))];
+  return states.length === 1 ? states[0] : "unknown";
+}
+
+function baselineError(mismatch, message = "BOSS fixed-tab baseline was not restored") {
+  const error = detailError("BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", message);
+  error.baselineMismatch = safeBaselineMismatch(mismatch);
+  return error;
 }
 
 function visibleTabIdsInWindow(tabs, windowId) {
