@@ -11,6 +11,7 @@ const {
   saveMessageInboxSyncState,
   markMessageInboxItemDone
 } = require("../src/storage/message_inbox_store");
+const { buildMessageInboxPageState } = require("../src/dashboard/message_discovery_controller");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "offergo-message-inbox-store-"));
 const db = openDb(path.join(root, "jobs.sqlite"));
@@ -88,6 +89,38 @@ try {
   item = listMessageInboxItems(db, { profileId })[0];
   assert.equal(item.actionGroup, "done");
   assert.equal(item.resolvedAt, "2026-09-17T02:12:00.000Z");
+
+  upsertMessageInboxItem(db, {
+    ...input,
+    conversationKey: digest("conversation-needs-action"),
+    observedAt: "2026-09-17T02:13:00.000Z"
+  });
+  upsertMessageInboxItem(db, {
+    ...input,
+    conversationKey: digest("conversation-waiting"),
+    lastDirection: "myself",
+    unread: false,
+    actionGroup: "waiting",
+    actionCode: "wait",
+    observedAt: "2026-09-17T02:14:00.000Z"
+  });
+  upsertMessageInboxItem(db, {
+    ...input,
+    conversationKey: digest("conversation-review"),
+    actionGroup: "needs_review",
+    actionCode: "retry",
+    reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE",
+    observedAt: "2026-09-17T02:15:00.000Z"
+  });
+  const pageState = buildMessageInboxPageState(db, {
+    profileId,
+    now: new Date("2026-09-17T02:10:30.000Z")
+  });
+  assert.equal(pageState.groups.needsAction[0].primaryAction.label, "查看建议回复");
+  assert.equal(pageState.groups.waiting[0].statusText, "已回复，等待对方消息");
+  assert.equal(pageState.groups.needsReview[0].technicalReason, undefined);
+  assert.equal(pageState.freshness.boss.label, "刚刚同步");
+  assert.equal(pageState.counts.total, 4);
 } finally {
   db.close();
   fs.rmSync(root, { recursive: true, force: true });

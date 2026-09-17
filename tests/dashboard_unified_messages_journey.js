@@ -138,7 +138,6 @@ async function main() {
     await page.setViewportSize({width:1440,height:1000});
     const filteredStart=await context.newPage();
     await filteredStart.goto(base+'/messages?profileId='+profileId+'&source=boss&task=all');
-    await filteredStart.getByLabel('消息来源').selectOption('all');
     await filteredStart.locator('.message-list-item[data-platform="zhaopin"]').first().waitFor({state:'visible'});
     await filteredStart.close();
     const unresolvedContact=listIncomingContacts(db,{profileId}).find(item=>item.platform==='zhaopin'&&item.conversationKey===zhaopinPendingConversationKey);
@@ -146,14 +145,12 @@ async function main() {
     const deepLink=await context.newPage();
     await deepLink.goto(base+'/messages?profileId='+profileId+'&source=zhaopin&task=all&contact='+encodeURIComponent(unresolvedContact.key));
     await deepLink.locator('[data-message-detail-panel].message-unresolved[data-platform="zhaopin"]',{hasText:'合成待处理原文'}).waitFor({state:'visible'});
-    await deepLink.getByLabel('消息来源').selectOption('all');
     await deepLink.locator('.message-list-item[data-platform="boss"]').first().waitFor({state:'visible'});
     await deepLink.close();
     const missingContact=await context.newPage();
     await missingContact.goto(base+'/messages?profileId='+profileId+'&source=boss&task=all&contact='+encodeURIComponent('sha256:'+ '0'.repeat(64)));
     await missingContact.locator('.message-not-found').waitFor({state:'visible'});
     assert.equal(await missingContact.locator('[data-message-detail-panel]:visible').count(),0,'a missing or cross-platform contact never borrows another editor');
-    await missingContact.getByLabel('消息来源').selectOption('all');
     assert.equal(await missingContact.locator('[data-message-detail-panel]:visible').count(),0,'changing filters must not clear a missing-contact selection lock');
     await missingContact.locator('.message-list-item:visible').first().click();
     await missingContact.locator('[data-message-detail-panel]:visible').waitFor();
@@ -163,42 +160,41 @@ async function main() {
     const pending=page.locator('.message-unresolved[data-platform="boss"]');assert.equal(await pending.count(),1);
     let zhaopinPendingRow=page.locator('.message-list-item[data-platform="zhaopin"]').filter({hasText:'待补岗位资料'});assert.equal(await zhaopinPendingRow.count(),1);
     await zhaopinPendingRow.click();await page.locator('[data-message-detail-panel].message-unresolved[data-platform="zhaopin"]', {hasText:'合成待处理原文'}).waitFor({state:'visible'});assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);
-    const filter=page.getByLabel('消息来源');await filter.selectOption('zhaopin');await page.waitForFunction(()=>document.querySelector('[data-source-filter]').value==='zhaopin'&&document.querySelector('.message-list-item[data-platform="boss"]').hidden);
-    const zlKey=await zlCard.getAttribute('data-message-detail-panel');const zlRow=page.locator('.message-list-item').filter({has:page.locator('[data-message-view="'+zlKey+'"]')});await zlRow.click();const fields=zlCard.locator('[data-draft-text]'),field=fields.first(),alternativeField=fields.nth(1);await field.fill('可以的，我们继续沟通。');await filter.selectOption('boss');await page.waitForFunction(()=>document.querySelector('.message-list-item[data-platform="zhaopin"]').hidden);
-    await page.reload();assert.equal(await filter.inputValue(),'boss');await filter.selectOption('zhaopin');await zlCard.waitFor({state:'visible'});assert.equal(await field.inputValue(),'可以的，我们继续沟通。');assert.equal(await page.locator('[data-send-batch-panel]').isVisible(),false);
+    assert.equal(await page.locator('[data-source-filter], [data-task-filter]').count(),0,'the unified inbox has no platform or task filters');
+    const zlKey=await zlCard.getAttribute('data-message-detail-panel');const zlRow=page.locator('.message-list-item').filter({has:page.locator('[data-message-view="'+zlKey+'"]')});await zlRow.click();const fields=zlCard.locator('[data-draft-text]'),field=fields.first(),alternativeField=fields.nth(1);await field.fill('可以的，我们继续沟通。');const bossDraftRow=page.locator('.message-list-item[data-platform="boss"]').filter({has:page.locator('[data-message-view^="result-"]')});await bossDraftRow.click();
+    await page.reload();await zlRow.click();await zlCard.waitFor({state:'visible'});assert.equal(await field.inputValue(),'可以的，我们继续沟通。');assert.equal(await page.locator('.message-list-item[data-platform="boss"]').count(),2);assert.equal(await page.locator('.message-list-item[data-platform="zhaopin"]').count(),3);assert.equal(await page.locator('[data-send-batch-panel]').isVisible(),false);
     await zlCard.locator('[data-copy-draft]').first().click();await page.waitForFunction(()=>document.querySelector('[data-discovery-feedback]').textContent.includes('记住')||document.querySelector('[data-discovery-feedback]').textContent.includes('已复制'));assert.equal(db.prepare('SELECT COUNT(*) n FROM candidate_progress_events').get().n,before);
-    const firstDraftId=Number(await field.getAttribute('data-draft-id')),secondDraftId=Number(await alternativeField.getAttribute('data-draft-id'));let saveMode='fail',failedSaveCount=0,finishFailedSaves;const failedSavesFinished=new Promise(resolve=>{finishFailedSaves=resolve;});let startSecondSave,secondSaveDeferred=false,releaseSecondSave=()=>{},finishLatestFailure;const secondSaveStarted=new Promise(resolve=>{startSecondSave=resolve;}),latestFailureFinished=new Promise(resolve=>{finishLatestFailure=resolve;});await page.route('**/api/message-reply-draft',async route=>{const body=route.request().postDataJSON();if(saveMode==='fail'){await route.fulfill({status:500,contentType:'application/json',body:'{"errorCode":"SAVE_FAILED"}'});failedSaveCount+=1;if(failedSaveCount===2)finishFailedSaves();return;}if(saveMode==='group-race'&&body.draftId===secondDraftId&&!secondSaveDeferred){secondSaveDeferred=true;startSecondSave();await new Promise(resolve=>{releaseSecondSave=resolve;});return route.continue();}if(saveMode==='group-race'&&body.draftId===firstDraftId&&body.text==='整组等待期间的第二版'){await route.fulfill({status:500,contentType:'application/json',body:'{"errorCode":"SAVE_FAILED"}'});finishLatestFailure();return;}return route.continue();});await field.fill('保存失败时保留的回答');await zhaopinPendingRow.click();await failedSavesFinished;await page.waitForFunction(()=>document.querySelector('[data-discovery-feedback]').textContent==='当前草稿未能保存，已保留当前消息，请稍后重试。'&&!document.querySelector('[data-source-filter]').disabled);assert.equal(await filter.inputValue(),'zhaopin');assert.equal(await field.inputValue(),'保存失败时保留的回答');assert.equal(await zlCard.isVisible(),true);assert.equal(await zlRow.locator('[data-message-view]').isChecked(),true);await page.setViewportSize({width:584,height:694});await page.locator('.message-detail [data-message-back]:visible').click();await page.waitForFunction(id=>document.querySelector('[data-discovery-feedback]').textContent==='当前草稿未能保存，已保留当前消息，请稍后重试。'&&document.querySelector('[data-draft-id="'+id+'"]')===document.activeElement,firstDraftId);assert.equal(await zlCard.isVisible(),true,'a failed narrow-screen return keeps the current detail visible');assert.equal(await field.evaluate(node=>node===document.activeElement),true,'a failed narrow-screen return restores focus to the unsaved draft');await page.setViewportSize({width:1440,height:1000});saveMode='pass';
-    await field.fill('整组保存的第一版');saveMode='group-race';await zhaopinPendingRow.click();await secondSaveStarted;for(let attempt=0;attempt<100&&storage.getMessageReplyDraft(db,{profileId,draftId:firstDraftId}).currentText!=='整组保存的第一版';attempt++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(storage.getMessageReplyDraft(db,{profileId,draftId:firstDraftId}).currentText,'整组保存的第一版');await field.fill('整组等待期间的第二版');releaseSecondSave();await latestFailureFinished;await page.waitForFunction(id=>document.querySelector('[data-draft-save-status="'+id+'"]').textContent==='保存失败，请重试'&&!document.querySelector('[data-source-filter]').disabled,firstDraftId);assert.equal(await field.inputValue(),'整组等待期间的第二版');assert.equal(await zlCard.isVisible(),true,'a failed edit made while another draft saves must keep the original message visible');assert.equal(await zlRow.locator('[data-message-view]').isChecked(),true);saveMode='pass';
+    const firstDraftId=Number(await field.getAttribute('data-draft-id')),secondDraftId=Number(await alternativeField.getAttribute('data-draft-id'));let saveMode='fail',failedSaveCount=0,finishFailedSaves;const failedSavesFinished=new Promise(resolve=>{finishFailedSaves=resolve;});let startSecondSave,secondSaveDeferred=false,releaseSecondSave=()=>{},finishLatestFailure;const secondSaveStarted=new Promise(resolve=>{startSecondSave=resolve;}),latestFailureFinished=new Promise(resolve=>{finishLatestFailure=resolve;});await page.route('**/api/message-reply-draft',async route=>{const body=route.request().postDataJSON();if(saveMode==='fail'){await route.fulfill({status:500,contentType:'application/json',body:'{"errorCode":"SAVE_FAILED"}'});failedSaveCount+=1;if(failedSaveCount===2)finishFailedSaves();return;}if(saveMode==='group-race'&&body.draftId===secondDraftId&&!secondSaveDeferred){secondSaveDeferred=true;startSecondSave();await new Promise(resolve=>{releaseSecondSave=resolve;});return route.continue();}if(saveMode==='group-race'&&body.draftId===firstDraftId&&body.text==='整组等待期间的第二版'){await route.fulfill({status:500,contentType:'application/json',body:'{"errorCode":"SAVE_FAILED"}'});finishLatestFailure();return;}return route.continue();});await field.fill('保存失败时保留的回答');await zhaopinPendingRow.click();await failedSavesFinished;await page.waitForFunction(()=>document.querySelector('[data-discovery-feedback]').textContent==='当前草稿未能保存，已保留当前消息，请稍后重试。');assert.equal(await field.inputValue(),'保存失败时保留的回答');assert.equal(await zlCard.isVisible(),true);assert.equal(await zlRow.locator('[data-message-view]').isChecked(),true);await page.setViewportSize({width:584,height:694});await page.locator('.message-detail [data-message-back]:visible').click();await page.waitForFunction(id=>document.querySelector('[data-discovery-feedback]').textContent==='当前草稿未能保存，已保留当前消息，请稍后重试。'&&document.querySelector('[data-draft-id="'+id+'"]')===document.activeElement,firstDraftId);assert.equal(await zlCard.isVisible(),true,'a failed narrow-screen return keeps the current detail visible');assert.equal(await field.evaluate(node=>node===document.activeElement),true,'a failed narrow-screen return restores focus to the unsaved draft');await page.setViewportSize({width:1440,height:1000});saveMode='pass';
+    await field.fill('整组保存的第一版');saveMode='group-race';await zhaopinPendingRow.click();await secondSaveStarted;for(let attempt=0;attempt<100&&storage.getMessageReplyDraft(db,{profileId,draftId:firstDraftId}).currentText!=='整组保存的第一版';attempt++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(storage.getMessageReplyDraft(db,{profileId,draftId:firstDraftId}).currentText,'整组保存的第一版');await field.fill('整组等待期间的第二版');releaseSecondSave();await latestFailureFinished;await page.waitForFunction(id=>document.querySelector('[data-draft-save-status="'+id+'"]').textContent==='保存失败，请重试',firstDraftId);assert.equal(await field.inputValue(),'整组等待期间的第二版');assert.equal(await zlCard.isVisible(),true,'a failed edit made while another draft saves must keep the original message visible');assert.equal(await zlRow.locator('[data-message-view]').isChecked(),true);saveMode='pass';
     await zhaopinPendingRow.click();await page.locator('[data-message-detail-panel].message-unresolved[data-platform="zhaopin"]', {hasText:'合成待处理原文'}).waitFor({state:'visible'});
-    const selectedPendingKey=await zhaopinPendingRow.locator('[data-message-view]').getAttribute('data-message-view');await page.reload();assert.equal(await filter.inputValue(),'zhaopin');assert.equal(await page.locator('[data-message-view="'+selectedPendingKey+'"]').isChecked(),true);assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);
+    const selectedPendingKey=await zhaopinPendingRow.locator('[data-message-view]').getAttribute('data-message-view');await page.reload();assert.equal(await page.locator('[data-message-view="'+selectedPendingKey+'"]').isChecked(),true);assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);
     recordUnresolvedMessageDiscoveryItem(db,{profileId,platform:'zhaopin',conversationKey:digest('newer-zhaopin-pending'),previewDigest:digest('newer-zhaopin-preview'),previewKind:'possible_hr_reply',observedAt:'2026-09-08T03:00:00.000Z',sourceJobId:'zhaopin:CCL1234567890J0088888888',lastMessageId:'202609080300',reasonCode:'MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE',identity:{positionTitle:'后来新增的待处理岗位',company:'另一合成公司'},inboundMessages:[{kind:'text',text:'后来新增的合成原文'}]});
     await page.reload();zhaopinPendingRow=page.locator('.message-list-item').filter({has:page.locator('[data-message-view="'+selectedPendingKey+'"]')});assert.equal(await page.locator('[data-message-view="'+selectedPendingKey+'"]').isChecked(),true);assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);assert.doesNotMatch(await page.locator('[data-message-detail-panel]:visible').innerText(),/后来新增/);
-    await filter.selectOption('all');await zlRow.click();await field.fill('快速切换前保存的回答');const bossResultRow=page.locator('.message-list-item[data-platform="boss"]').filter({has:page.locator('[data-message-view^="result-"]')});await bossResultRow.click();await zhaopinPendingRow.click();await page.waitForFunction(()=>{const checked=document.querySelector('[data-message-view]:checked');const visible=document.querySelector('[data-message-detail-panel]:not([hidden])');return checked&&visible&&checked.dataset.messageView===visible.dataset.messageDetailPanel&&visible.textContent.includes('合成待处理原文');});for(let attempt=0;attempt<100&&storage.getMessageReplyDraft(db,{profileId,draftId:zl.drafts[0].id}).currentText!=='快速切换前保存的回答';attempt++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(storage.getMessageReplyDraft(db,{profileId,draftId:zl.drafts[0].id}).currentText,'快速切换前保存的回答');
-    await filter.selectOption('boss');await page.reload();assert.equal(await filter.inputValue(),'boss');const selectedBossKey=await page.locator('[data-message-view]:checked').getAttribute('data-message-view');assert.equal(await page.locator('[data-message-detail-panel="'+selectedBossKey+'"]').isVisible(),true);await page.locator('.message-list-item[data-platform="boss"]').filter({hasText:'历史待核对岗位'}).click();assert.equal(await pending.locator('form[action="/api/message-discovery-unresolved"]').count(),2);assert.equal(await pending.getByRole('button',{name:'保存为 HR 主动机会',exact:true}).isEnabled(),true);
+    await zlRow.click();await field.fill('快速切换前保存的回答');const bossResultRow=page.locator('.message-list-item[data-platform="boss"]').filter({has:page.locator('[data-message-view^="result-"]')});await bossResultRow.click();await zhaopinPendingRow.click();await page.waitForFunction(()=>{const checked=document.querySelector('[data-message-view]:checked');const visible=document.querySelector('[data-message-detail-panel]:not([hidden])');return checked&&visible&&checked.dataset.messageView===visible.dataset.messageDetailPanel&&visible.textContent.includes('合成待处理原文');});for(let attempt=0;attempt<100&&storage.getMessageReplyDraft(db,{profileId,draftId:zl.drafts[0].id}).currentText!=='快速切换前保存的回答';attempt++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(storage.getMessageReplyDraft(db,{profileId,draftId:zl.drafts[0].id}).currentText,'快速切换前保存的回答');
+    await page.reload();const selectedBossKey=await page.locator('[data-message-view]:checked').getAttribute('data-message-view');assert.equal(await page.locator('[data-message-detail-panel="'+selectedBossKey+'"]').isVisible(),true);await page.locator('.message-list-item[data-platform="boss"]').filter({hasText:'历史待核对岗位'}).click();assert.equal(await pending.locator('form[action="/api/message-discovery-unresolved"]').count(),2);assert.equal(await pending.getByRole('button',{name:'保存为 HR 主动机会',exact:true}).isEnabled(),true);
     const evidence='D:/DevData/RoleFlow-zhaopin-messages-20260908';fs.mkdirSync(evidence,{recursive:true});for(const width of [1440,390]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(evidence,'unified-messages-'+width+'.png'),fullPage:true});}
-    await filter.focus();assert.equal(await filter.evaluate(e=>e===document.activeElement),true);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+    assert.equal(await page.locator('[data-source-filter], [data-task-filter]').count(),0);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM candidate_answer_memories WHERE profile_id=? AND final_text=? AND completion_kind='copied'").get(profileId,'可以的，我们继续沟通。').n,1,'edited copy teaches the answer without sent progress');
-    assert.equal(httpBrowserCalls,0,'source filtering and copying cannot start discovery');
+    assert.equal(httpBrowserCalls,0,'inbox navigation and copying cannot start discovery');
     db.prepare("UPDATE candidate_progress_cards SET source='unknown' WHERE id=?").run(boss.cardId);
     const unknownPage=await context.newPage();await unknownPage.goto(base+'/messages?profileId='+profileId);const unknownCard=unknownPage.locator('[data-message-detail-panel][data-platform=""]');assert.equal(await unknownCard.count(),1);assert.equal(await unknownCard.locator('[data-send-single], [data-send-select], [data-sent-draft]').count(),0);await unknownPage.close();db.prepare("UPDATE candidate_progress_cards SET source='boss' WHERE id=?").run(boss.cardId);
     await today.click();await page.waitForURL('**/plan?**');assert.equal(new URL(page.url()).searchParams.get('site'),'zhaopin');
     const dismiss=await fetch(base+'/api/message-discovery',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'dismiss',profileId})});assert.equal(dismiss.status,200);
     const cleared=createMessageDiscoveryController({db});assert.equal(cleared.pageState(profileId).results.length,0);assert.equal(storage.listMessageInboundContexts(db,{profileId}).length,0);assert.equal(cleared.pageState(profileId).unresolved,3,'dismiss preserves every unprocessed pending message');await cleared.close();
-    await page.getByRole('link',{name:'消息与回复',exact:true}).click();await page.locator('.message-workspace').waitFor();assert.equal(await page.locator('.message-workspace').count(),1);await page.getByLabel('消息来源').selectOption('zhaopin');await page.locator('.message-list-item').filter({has:page.locator('[data-message-view="'+selectedPendingKey+'"]')}).click();await page.locator('[data-message-detail-panel="'+selectedPendingKey+'"]').waitFor({state:'visible'});assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);
-    db.prepare("DELETE FROM message_discovery_unresolved_items WHERE profile_id=? AND platform='zhaopin'").run(profileId);await page.reload();await page.getByLabel('消息来源').selectOption('zhaopin');await page.locator('[data-source-empty]').waitFor({state:'visible'});assert.equal(await page.locator('[data-message-view]:checked').count(),0);assert.equal(await page.locator('[data-message-detail-panel]:visible').count(),0);assert.equal(await pending.isVisible(),false);
-    await page.getByRole('button',{name:'读取新消息',exact:true}).click();
+    await page.getByRole('link',{name:'消息与回复',exact:true}).click();await page.locator('.message-workspace').waitFor();assert.equal(await page.locator('.message-workspace').count(),1);await page.locator('.message-list-item').filter({has:page.locator('[data-message-view="'+selectedPendingKey+'"]')}).click();await page.locator('[data-message-detail-panel="'+selectedPendingKey+'"]').waitFor({state:'visible'});assert.match(await page.locator('[data-message-detail-panel]:visible').innerText(),/合成待处理原文/);
+    db.prepare("DELETE FROM message_discovery_unresolved_items WHERE profile_id=? AND platform='zhaopin'").run(profileId);await page.reload();assert.equal(await page.locator('.message-list-item[data-platform="zhaopin"]').count(),0);assert.equal(await page.locator('.message-list-item[data-platform="boss"]').count(),1);assert.equal(await page.locator('[data-message-view]:checked').count(),1);
+    await page.getByRole('button',{name:'同步最新消息',exact:true}).click();
     let completedStatus;for(let attempt=0;attempt<100;attempt++){completedStatus=await (await fetch(base+'/api/message-discovery-status?profileId='+profileId)).json();if(completedStatus.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,5));}
     assert.equal(completedStatus.status,'completed');assert.equal(completedStatus.unresolved,0);assert.equal(completedStatus.reasonCode,'');assert(completedStatus.startedAt);
     await page.locator('.message-read-details').waitFor({state:'visible'});
     const completedState=await page.locator('.message-read-details').textContent();assert.match(completedState,/未解决 0/);assert.match(completedState,/保留记录 1/);assert.doesNotMatch(completedState,/无法确认本地岗位与会话是否一致/);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM message_discovery_unresolved_items WHERE profile_id=? AND conversation_key=?').get(profileId,historicalConversationKey).n,1,'the successful current run must retain the old BOSS row');
     const historicalRow=page.locator('.message-list-item[data-platform="boss"]',{hasText:'历史待核对岗位'});
-    await page.getByLabel('消息来源').selectOption('all');await historicalRow.waitFor({state:'visible'});assert.match(await pending.textContent(),/BOSS/);assert.match(await pending.textContent(),/无法确认本地岗位与会话是否一致/);
-    await page.getByLabel('消息来源').selectOption('zhaopin');await historicalRow.waitFor({state:'hidden'});
-    await page.getByLabel('消息来源').selectOption('boss');await historicalRow.waitFor({state:'visible'});
-    await page.reload();assert.equal(await page.getByLabel('消息来源').inputValue(),'boss');await historicalRow.waitFor({state:'visible'});assert.equal(db.prepare('SELECT COUNT(*) n FROM message_discovery_unresolved_items WHERE profile_id=? AND conversation_key=?').get(profileId,historicalConversationKey).n,1);
+    await historicalRow.waitFor({state:'visible'});assert.match(await pending.textContent(),/BOSS/);assert.match(await pending.textContent(),/无法确认本地岗位与会话是否一致/);
+    assert.equal(await page.locator('[data-source-filter], [data-task-filter]').count(),0);
+    await page.reload();await historicalRow.waitFor({state:'visible'});assert.equal(db.prepare('SELECT COUNT(*) n FROM message_discovery_unresolved_items WHERE profile_id=? AND conversation_key=?').get(profileId,historicalConversationKey).n,1);
     httpReaderShouldWait=true;
-    await page.getByRole('button',{name:'读取新消息',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('button[data-page-primary]')||document.querySelector('button[data-page-primary]').disabled);await page.getByRole('button',{name:'安全停止',exact:true}).waitFor({state:'visible'});
+    await page.getByRole('button',{name:'同步最新消息',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('button[data-page-primary]')||document.querySelector('button[data-page-primary]').disabled);await page.getByRole('button',{name:'安全停止',exact:true}).waitFor({state:'visible'});
     await page.waitForFunction(()=>Array.from(document.querySelectorAll('form[data-discovery-form]')).find(form=>form.querySelector('[name=action]').value==='stop').querySelector('button').disabled===false);
     assert.match(await page.locator('main').innerText(),/正在加载并读取消息/);assert.equal(httpBossCalls,0);assert.equal(httpReaderCalls,2);
     await page.getByRole('button',{name:'安全停止',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.message-state h2')?.textContent==='已安全停止');assert.equal(httpBrowserCalls,2);
@@ -206,8 +202,8 @@ async function main() {
     const stoppedState=await page.locator('.message-state').innerText();assert.match(stoppedState,/已按你的操作安全停止/);assert.doesNotMatch(stoppedState,/无法确认本地岗位与会话是否一致/);assert.match(await pending.innerText(),/无法确认本地岗位与会话是否一致/);
     assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
     await contactFiltersAndHistory(context, base, db);
-    await activeBatchRemainsStoppableUnderZhaopinFilter(chromium);
-    console.log('dashboard_unified_messages_journey ok: serial discovery, restore, source-safe HTTP/UI, autosave, navigation, 1440/390, active BOSS stop under ZL filter/reload');
+    await activeBatchRemainsStoppableInUnifiedInbox(chromium);
+    console.log('dashboard_unified_messages_journey ok: serial discovery, restore, source-safe HTTP/UI, autosave, unified inbox navigation, 1440/390, active BOSS stop after reload');
   }finally{if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));for(const controller of controllers)await controller.close();db.close();fs.rmSync(root,{recursive:true,force:true});}
 }
 async function contactFiltersAndHistory(context, base, db) {
@@ -232,10 +228,12 @@ async function contactFiltersAndHistory(context, base, db) {
   try {
     await page.setViewportSize({width:390,height:694});
     await page.goto(base+'/messages?profileId='+profileId+'&source=all&task=pending');
-    assert.equal(await page.locator('.message-list-item:visible').count(),2,'pending includes an open draft and a manual request, excluding completed history');
+    assert.equal(await page.locator('.message-list-item').count(),3,'the unified inbox keeps pending work and completed history in one page');
+    assert.equal(await page.locator('.message-list-item:visible').count(),2,'completed history stays collapsed until the user opens it');
     const firstRow = page.locator('.message-list-item:visible').first();
     assert((await firstRow.boundingBox()).y+100<=694,'390px viewport exposes the first message and HR preview');
-    await firstRow.locator('[data-message-view]').focus();await page.keyboard.press('Space');
+    const draftRow = page.locator('.message-list-item[data-platform="boss"]:visible').filter({has:page.locator('[data-message-view^="result-"]')});
+    await draftRow.locator('[data-message-view]').focus();await page.keyboard.press('Space');
     // A prechecked radio does not emit change; keyboard activation must still open it.
     await page.locator('.message-detail').waitFor({state:'visible'});
     assert.equal(await page.locator('[data-message-detail-panel]:visible [data-draft-text]').count(),1,'merged contact preserves its open draft');
@@ -247,26 +245,21 @@ async function contactFiltersAndHistory(context, base, db) {
     await page.waitForFunction(()=>document.querySelector('.message-workspace').dataset.mobileList==='true');
     assert.equal(await page.locator('[data-message-view]:checked').evaluate(node=>node===document.activeElement),true,'return restores keyboard focus to the selected row');
     await page.setViewportSize({width:1440,height:1000});
-    const task = page.getByLabel('要处理什么');
-    await task.selectOption('resume');
-    await page.waitForFunction(()=>document.querySelector('[data-task-filter]').disabled===false);
-    assert.equal(await page.locator('.message-list-item:visible').count(),2,'resume filter shows live and historical requests');
-    await task.selectOption('interview');
-    await page.waitForFunction(()=>document.querySelector('[data-task-filter]').disabled===false);
-    assert.equal(await page.locator('.message-list-item:visible').count(),2,'the same contacts may also match interview without losing resume facts');
+    assert.equal(await page.getByRole('heading',{name:/现在需要你处理/}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:/系统暂时无法完成/}).count(),1);
+    assert.equal(await page.locator('details.message-action-group>summary',{hasText:'已经处理'}).count(),1,'completed history is collapsed instead of requiring a filter');
     await page.goto(base+'/messages?profileId='+profileId+'&source=boss&task=all&contact='+encodeURIComponent(history.key));
     assert.equal(await page.locator('.message-history:visible').count(),1);
     assert.match(await page.locator('.message-history:visible').innerText(),/已记录这次联系，原文暂不可查看/);
     assert.equal(await page.locator('.message-history [data-draft-text], .message-history [data-send-single]').count(),0,'history never reconstructs a draft or send action');
-    await page.getByLabel('消息来源').selectOption('zhaopin');
     await page.locator('.message-list-item[data-platform="zhaopin"]').waitFor({state:'visible'});
     await page.goto(base+'/messages?profileId='+profileId+'&source=zhaopin&task=all&contact='+encodeURIComponent(history.key));
-    assert.equal(await page.locator('[data-message-detail-panel]:visible').count(),0,'wrong-platform contact cannot select an unrelated editor');
+    assert.equal(await page.locator('.message-history:visible').count(),1,'platform query parameters no longer hide a known conversation from the unified inbox');
     await page.goto(base+'/messages?profileId=1&source=all&task=all&contact='+encodeURIComponent(history.key));
     assert.equal(await page.locator('[data-message-detail-panel]:visible').count(),0,'a foreign-profile contact cannot select an unrelated editor');
   } finally { await page.close(); }
 }
-async function activeBatchRemainsStoppableUnderZhaopinFilter(chromium) {
+async function activeBatchRemainsStoppableInUnifiedInbox(chromium) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'roleflow-unified-active-send-'));
   const dbPath = path.join(root, 'fixture.sqlite');
   const db = storage.openDb(dbPath);
@@ -324,23 +317,18 @@ async function activeBatchRemainsStoppableUnderZhaopinFilter(chromium) {
     await page.waitForFunction(() => document.querySelector('[data-send-batch-panel]').dataset.state === 'running');
     batchId = db.prepare('SELECT id FROM message_reply_send_batches').get().id;
     assert.deepEqual(db.prepare('SELECT status FROM message_reply_send_items ORDER BY id').all().map(item => item.status), ['selecting', 'pending', 'pending']);
-    const filter = page.getByLabel('消息来源');
-    await filter.selectOption('zhaopin');
-    await page.waitForFunction(() => document.querySelector('.message-list-item[data-platform="boss"]').hidden);
-    assert.equal(await page.locator('[data-send-stop]').isVisible(), true, 'switching to ZL must retain the active BOSS stop control');
+    assert.equal(await page.locator('[data-send-stop]').isVisible(), true, 'the unified inbox must retain the active BOSS stop control');
     assert.equal(await page.locator('[data-send-stop]').isEnabled(), true);
-    assert.equal(await page.locator('[data-send-batch]').isVisible(), false, 'ZL filter hides only new batch initiation');
+    assert.equal(await page.locator('[data-send-batch]').isVisible(), false, 'an active batch cannot start another batch');
     assert.match(await page.locator('[data-send-batch-title]').innerText(), /0 \/ 3/);
     const field = page.locator('[data-message-detail-panel][data-platform="zhaopin"] [data-draft-text]');
-    await field.fill('切换筛选仍保存智联草稿');
-    await filter.selectOption('all');
-    await page.waitForFunction(() => !document.querySelector('.message-list-item[data-platform="boss"]').hidden);
-    await filter.selectOption('zhaopin');
-    await page.waitForFunction(() => document.querySelector('.message-list-item[data-platform="boss"]').hidden);
+    const zhaopinRow = page.locator('.message-list-item[data-platform="zhaopin"]').filter({has:page.locator('[data-message-view^="result-"]')});
+    await zhaopinRow.click();
+    await field.fill('统一收件箱仍保存智联草稿');
+    await bossRows.first().click();
     await page.reload();
-    assert.equal(await filter.inputValue(), 'zhaopin');
-    assert.equal(await field.inputValue(), '切换筛选仍保存智联草稿');
-    assert.equal(await page.locator('[data-send-stop]').isVisible(), true, 'reload with saved ZL filter must retain the restored active stop control');
+    assert.equal(await field.inputValue(), '统一收件箱仍保存智联草稿');
+    assert.equal(await page.locator('[data-send-stop]').isVisible(), true, 'reload must retain the restored active stop control');
     assert.equal(await page.locator('[data-send-stop]').isEnabled(), true);
     const stopContrast = await page.locator('[data-send-stop]').evaluate(button => {
       const style = getComputedStyle(button);
@@ -350,7 +338,7 @@ async function activeBatchRemainsStoppableUnderZhaopinFilter(chromium) {
     });
     assert(stopContrast >= 4.5, 'the restored stop label must be readable against its button background');
     assert.equal(await page.locator('[data-send-batch]').isVisible(), false);
-    assert.equal(db.prepare('SELECT COUNT(*) n FROM message_reply_send_batches').get().n, 1, 'filter/reload cannot authorize another batch');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM message_reply_send_batches').get().n, 1, 'inbox navigation and reload cannot authorize another batch');
     assert.equal(inspections, 1);
     assert.equal(writes, 0);
     assert.deepEqual(mutations.filter(route => route !== '/api/message-reply-draft'), ['/api/message-reply-send-batch']);
@@ -364,11 +352,8 @@ async function activeBatchRemainsStoppableUnderZhaopinFilter(chromium) {
     assert.equal(browserCreations, 1);
     assert.deepEqual(mutations.filter(route => route !== '/api/message-reply-draft'), ['/api/message-reply-send-batch', '/api/message-reply-send-control']);
     for (const table of ['candidate_progress_events', 'candidate_answer_memories', 'candidate_funnel_entries']) assert.equal(db.prepare('SELECT COUNT(*) n FROM ' + table).get().n, 0);
-    assert.equal(storage.getMessageReplyDraft(db, { profileId, draftId: zl.drafts[0].id }).currentText, '切换筛选仍保存智联草稿');
-    assert.equal(await filter.inputValue(), 'zhaopin');
-    assert.equal(await page.locator('[data-send-batch-panel]').isVisible(), false, 'terminal ZL view has no new send action');
-    await filter.selectOption('boss');
-    await page.waitForFunction(() => !document.querySelector('.message-list-item[data-platform="boss"]').hidden);
+    assert.equal(storage.getMessageReplyDraft(db, { profileId, draftId: zl.drafts[0].id }).currentText, '统一收件箱仍保存智联草稿');
+    assert.equal(await page.locator('[data-send-batch-panel]').isVisible(), false, 'a terminal batch returns to the compact inbox state');
     await page.locator('[data-send-batch-enter]').waitFor({state:'visible'});
     assert.equal(await page.locator('[data-send-batch-panel]').isVisible(), false, 'after a terminal batch, BOSS returns to the compact explicit entry instead of an idle status panel');
     assert.equal(await page.locator('[data-send-stop]').isVisible(), false);

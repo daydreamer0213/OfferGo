@@ -24,7 +24,9 @@ const {
   listMessageInboundContexts,
   deleteMessageInboundContext,
   getActiveSearchPlan,
-  closeMessageReplyDrafts
+  closeMessageReplyDrafts,
+  listMessageInboxItems,
+  getMessageInboxSyncState
 } = require("../core/storage");
 const { getCandidateProfile } = require("../application/candidate_queries");
 const {
@@ -353,7 +355,15 @@ function createMessageDiscoveryController(deps = {}) {
     const profileId = messageDiscoveryProfileId(profileIdValue);
     clearExpiredRun(profileId);
     const run = runs.get(profileId);
-    return run ? pageRun(run) : durableStatus(profileId);
+    const state = run ? pageRun(run) : durableStatus(profileId);
+    return {
+      ...state,
+      inbox: buildMessageInboxPageState(db, {
+        profileId,
+        platformRuns: state.platformRuns || [],
+        now: nowDate()
+      })
+    };
   }
 
   function clearDraftForCard(profileIdValue, cardIdValue) {
@@ -970,6 +980,79 @@ function messageDiscoveryError(code, message, statusCode = 500) {
   return error;
 }
 
+function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = new Date() } = {}) {
+  const current = now instanceof Date ? now : new Date(now);
+  const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
+  const items = listMessageInboxItems(db, { profileId }).map((item) => presentInboxItem(item));
+  const groups = {
+    needsAction: items.filter((item) => item.actionGroup === "needs_action"),
+    waiting: items.filter((item) => item.actionGroup === "waiting"),
+    needsReview: items.filter((item) => item.actionGroup === "needs_review"),
+    done: items.filter((item) => item.actionGroup === "done")
+  };
+  const freshness = Object.fromEntries(["boss", "zhaopin"].map((platform) => {
+    const run = runningByPlatform.get(platform);
+    const sync = getMessageInboxSyncState(db, { profileId, platform });
+    return [platform, presentFreshness(platform, run, sync, current)];
+  }));
+  return {
+    groups,
+    freshness,
+    counts: {
+      needsAction: groups.needsAction.length,
+      waiting: groups.waiting.length,
+      needsReview: groups.needsReview.length,
+      done: groups.done.length,
+      total: items.length
+    }
+  };
+}
+
+function presentInboxItem(item) {
+  const presentation = {
+    needs_action: { statusText: "需要你处理", label: "查看建议回复" },
+    waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
+    needs_review: { statusText: "资料暂时无法确认，系统会在下次同步时重试", label: "查看原因" },
+    done: { statusText: "已经处理", label: "查看记录" }
+  }[item.actionGroup];
+  return {
+    ...item,
+    statusText: presentation.statusText,
+    primaryAction: { label: presentation.label }
+  };
+}
+
+function presentFreshness(platform, run, sync, now) {
+  const platformLabel = platform === "zhaopin" ? "智联" : "BOSS";
+  if (run?.status === "running" || run?.status === "pending") {
+    return { platform, label: "正在同步", detail: `${platformLabel} 正在读取最新消息`, state: "running" };
+  }
+  if (run?.status === "not_connected") {
+    return { platform, label: "尚未连接", detail: `请保持 ${platformLabel} 消息页打开`, state: "needs_user_action" };
+  }
+  if (run?.reasonCode) {
+    const state = /LOGIN_REQUIRED|RISK_CONTROL|TAB_|PAGE_LOST|BROWSER/.test(run.reasonCode) ? "needs_user_action" : "partial";
+    return { platform, label: state === "partial" ? "部分同步" : "需要处理", detail: messageDiscoveryFreshnessText(run.reasonCode), state };
+  }
+  if (!sync) return { platform, label: "尚未同步", detail: `首次同步将衔接 ${platformLabel} 最近 3 天消息`, state: "idle" };
+  if (!sync.coverageComplete) {
+    return { platform, label: "部分同步", detail: "已保留当前结果，下次会从检查点继续", state: "partial" };
+  }
+  const successfulAt = Date.parse(String(sync.lastSuccessfulAt || ""));
+  const minutes = Number.isFinite(successfulAt) && Number.isFinite(now.getTime())
+    ? Math.max(0, Math.floor((now.getTime() - successfulAt) / 60000)) : null;
+  const label = minutes === null ? "已同步" : minutes < 1 ? "刚刚同步" : minutes < 60 ? `${minutes} 分钟前同步` : "已同步";
+  return { platform, label, detail: "最近 3 天范围已确认", state: "complete" };
+}
+
+function messageDiscoveryFreshnessText(code) {
+  if (/LOGIN_REQUIRED/.test(code)) return "登录已失效，请登录后重试";
+  if (/RISK_CONTROL/.test(code)) return "平台需要完成安全检查";
+  if (/TAB_|PAGE_LOST/.test(code)) return "消息页已变化，请恢复后重试";
+  if (/BROWSER/.test(code)) return "暂时无法连接浏览器";
+  return "部分消息暂时无法完成，已保留待重试";
+}
+
 function assertMessageDiscoveryRuntimeAvailable(db, now, { platform = "boss" } = {}) {
   const nowValue = typeof now === "function" ? now() : new Date();
   const nowMs = nowValue instanceof Date ? nowValue.getTime() : Date.parse(nowValue);
@@ -1046,5 +1129,6 @@ function stableMessageTab(tabs) {
 
 module.exports = {
   createMessageDiscoveryController,
-  createMessageDiscoveryDetailSafety
+  createMessageDiscoveryDetailSafety,
+  buildMessageInboxPageState
 };

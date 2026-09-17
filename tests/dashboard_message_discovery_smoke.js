@@ -173,7 +173,9 @@ async function main() {
 
   const page = await request(base, `/messages?profileId=${fixture.profileId}`);
   assert.strictEqual(page.status, 200);
-  assert(page.body.includes("读取新消息"));
+  assert(page.body.includes("同步最新消息"));
+  assert(page.body.includes("行动收件箱"));
+  assert(!page.body.includes('class="message-filters"'));
   assert(page.body.includes("人工粘贴"));
   assert(!page.body.includes("自动发送"));
   assert(!page.body.includes(".chat-input"));
@@ -658,7 +660,7 @@ async function main() {
   );
   assert.equal(
     messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"),
-    "会话与岗位详情不一致，本次只读发现已停止。请核对智联当前会话后再重试。"
+    "这条会话与岗位详情暂时无法确认，已保留待重试；其他消息会继续处理。"
   );
   assert.equal(
     messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE"),

@@ -31,6 +31,9 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   if (!profile) return renderErrorPage("候选人画像不存在。", "/onboarding", { code: "MESSAGE_DISCOVERY_PROFILE_NOT_FOUND" });
   const initialReplySend = replySendController?.latest?.({ profileId }) || null;
   const pageState = controller.pageState(profileId);
+  const inboxState = pageState.inbox || { groups: { needsAction: [], waiting: [], needsReview: [], done: [] }, freshness: {}, counts: { total: 0 } };
+  const inboxItems = Object.values(inboxState.groups || {}).flat();
+  const inboxByConversation = new Map(inboxItems.map((item) => [`${item.platform}\0${item.conversationKey}`, item]));
   const durableUnresolved = listUnresolvedMessageDiscoveryItems(db, { profileId, platform: null });
   const status = durableUnresolved.length && !pageState.startedAt && !pageState.reasonCode
     ? {
@@ -63,7 +66,9 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "BOSS_MESSAGE_GROUP_LIMIT",
     "BOSS_MESSAGE_GROUP_TEXT_LIMIT", "BOSS_MESSAGE_CONTENT_UNSUPPORTED",
     "ZHAOPIN_MESSAGE_CONTENT_PENDING", "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED",
-    "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED", "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE"
+    "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED", "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+    "ZHAOPIN_MESSAGE_TARGET_MISMATCH", "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH",
+    "BOSS_MESSAGE_TARGET_MISMATCH", "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH"
   ]);
   const pageReasonCodes = [status.reasonCode, ...(status.platformRuns || [])
     .filter(entry => ["needs_user_action", "stopped"].includes(entry.status)).map(entry => entry.reasonCode)]
@@ -71,21 +76,15 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const reason = [...new Set(pageReasonCodes)].map(messageDiscoveryReasonText).join(" ");
   const showPageReason = Boolean(reason);
   const phaseNotice = messageDiscoveryPhaseText(status);
-  const selectedSource = ["all", "boss", "zhaopin"].includes(searchParams.get("source"))
-    ? searchParams.get("source") : "all";
-  const selectedTask = ["pending", "all", "resume", "interview"].includes(searchParams.get("task"))
-    ? searchParams.get("task") : "pending";
   const contactKey = String(searchParams.get("contact") || "").trim();
   const incomingContacts = listIncomingContacts(db, { profileId });
   const requestedContact = contactKey ? incomingContacts.find((item) => item.key === contactKey) : null;
-  const contactMatchesScope = Boolean(requestedContact
-    && (selectedSource === "all" || requestedContact.platform === selectedSource));
+  const contactMatchesScope = Boolean(requestedContact);
   const resultPending = (result) => Boolean((result.drafts || []).some((draft) => Number(draft?.id) > 0)
     || (result.manualActions || []).length || result.missingFactKey || result.messageIntent === "manual_review");
   const allResults = status.results.filter((result) => result?.messageIntent !== "follow_up");
-  // Keep this collection complete. The browser applies the same source/task model
-  // after first paint, so changing a filter can reveal a contact instead of requiring
-  // a reload with a different server-side subset.
+  // Keep every durable result in the DOM so the unified inbox can preserve the
+  // selected conversation without a server round trip.
   const displayResults = allResults;
   const resultViews = displayResults.map((result, resultIndex) => {
     const viewKey = messageViewKey("result", [result.platform, result.cardId, result.conversationKey || result.messageGroupKey]);
@@ -98,6 +97,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       && item.conversationKey === result.conversationKey);
     const retainedItem = /^sha256:[a-f0-9]{64}$/.test(result.conversationKey || "")
       ? durableUnresolved.find(item => item.platform === result.platform && item.conversationKey === result.conversationKey) : null;
+    const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
     const pending = resultPending(result) || Boolean(retainedItem);
     const retainedWork = retainedItem ? `<details class="message-retained-work"><summary>这条会话还有待核对事项</summary>${renderUnresolvedItem(db, retainedItem, { profileId, embedded: true, escapeHtml, escapeAttr })}</details>` : "";
     const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
@@ -162,8 +162,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const preview = messagePreview(result);
     return {
       key: viewKey,
+      identity: `${result.platform}\0${result.conversationKey}`,
+      actionGroup: retainedItem ? "needs_review" : inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
-      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small class="message-source">${escapeHtml(platformLabel)} · ${escapeHtml(messageStatusLabel(result))}</small><small>${escapeHtml(company)}</small><em>${escapeHtml(preview)}</em></span></label>`,
+      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
       detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)} · 阶段：${escapeHtml(progressStageLabel(result.stage))}</p>${inboundSection}${retainedWork}${decisionCard}<h3>下一步</h3>${nextSection}${sentForm}</section>`
     };
   });
@@ -171,7 +173,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     + (Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0).length : 0), 0);
   const activeReplyBatch = initialReplySend?.batch && !["completed", "stopped", "interrupted"].includes(initialReplySend.batch.status);
   const controls = `<section class="message-controls" aria-label="消息发现操作">
-    <form data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="start"><input type="hidden" name="profileId" value="${profileId}"><button data-page-primary="true"${status.status === "running" ? " disabled" : ""}>读取新消息</button></form>
+    <form data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="start"><input type="hidden" name="profileId" value="${profileId}"><button data-page-primary="true"${status.status === "running" ? " disabled" : ""}>同步最新消息</button></form>
     ${status.status === "running" ? `<form data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="stop"><input type="hidden" name="profileId" value="${profileId}"><button class="secondary">安全停止</button></form>` : ""}
     ${status.status !== "running" && status.results.length ? `<details class="message-result-actions"><summary>本次读取操作</summary><form data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="dismiss"><input type="hidden" name="profileId" value="${profileId}"><button class="secondary">清除本次结果</button></form></details>` : ""}
     ${sendableDraftCount > 0 ? `<button type="button" class="secondary message-batch-entry" data-send-batch-enter>进入批量发送</button>` : ""}
@@ -191,6 +193,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       && contact.conversationKey === item.conversationKey);
     return {
       key: viewKey,
+      identity: `${item.platform}\0${item.conversationKey}`,
+      actionGroup: "needs_review",
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform || "")}" data-task="pending" data-pending="true" data-resume="${Boolean(matchingContact?.resumeRequested)}" data-interview="${Boolean(matchingContact?.interviewInvited)}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small class="message-source">${escapeHtml(platformLabel)} · 待补岗位资料</small><small>${escapeHtml(company)}</small><em>${escapeHtml(messagePreview(item, "待补岗位资料"))}</em></span></label>`,
       detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, escapeHtml, escapeAttr })
@@ -200,12 +204,29 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const incomingViews = incomingContacts.filter((item) => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)
     && !unresolvedIdentities.has(`${item.platform}\0${item.conversationKey}`))
     .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), escapeHtml, escapeAttr }));
-  const allViews = [...resultViews, ...unresolvedViews, ...incomingViews];
+  const representedIdentities = new Set([...resultViews, ...unresolvedViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
+  const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
+    .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr }));
+  const allViews = [...resultViews, ...unresolvedViews, ...incomingViews, ...inboxOnlyViews];
   const requestedView = contactMatchesScope ? allViews.find((view) => view.contactKey === requestedContact.key) : null;
   const selectionLocked = Boolean(contactKey && !requestedView);
   const views = allViews;
+  const messageGroups = [
+    ["needs_action", "现在需要你处理", false],
+    ["waiting", "等待对方回复", false],
+    ["needs_review", "系统暂时无法完成", false],
+    ["done", "已经处理", true]
+  ];
+  const groupedLists = messageGroups.map(([group, label, collapsed]) => {
+    const groupViews = views.filter((view) => view.actionGroup === group);
+    if (!groupViews.length && group === "done") return "";
+    const content = groupViews.length ? groupViews.map((view) => view.list).join("") : '<p class="message-group-empty">当前没有这类消息</p>';
+    return collapsed
+      ? `<details class="message-action-group"><summary>${label}<span>${groupViews.length}</span></summary>${content}</details>`
+      : `<section class="message-action-group" data-action-group="${group}"><h2>${label}<span>${groupViews.length}</span></h2>${content}</section>`;
+  }).join("");
   const messageWorkspace = views.length
-    ? `<section class="message-workspace" aria-label="新消息与回复"><aside class="message-list" aria-label="联系消息"><h2>联系消息</h2>${views.map((view) => view.list).join("")}</aside><div class="message-detail">${views.map((view) => view.detail).join("")}</div></section>`
+    ? `<section class="message-workspace" aria-label="消息行动收件箱"><aside class="message-list" aria-label="行动消息">${groupedLists}</aside><div class="message-detail">${views.map((view) => view.detail).join("")}</div></section>`
     : "";
   const retainedRecords = durableUnresolved.length
     ? `<p class="line">保留记录 ${durableUnresolved.length}</p>`
@@ -213,15 +234,16 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const counters = status.counters || {};
   const hasReadDetails = Boolean(status.startedAt || status.status === "running" || (status.platformRuns || []).length || Number(counters.visible) || Number(counters.newReplies));
   const platformNotices =  `<details class="message-read-details"><summary>读取详情</summary><p class="line">BOSS 可确认发送；智联请复制后回到原会话处理。</p>${hasReadDetails ? `<p class="line">可见 ${Math.max(0, Number(counters.visible) || 0)} · 已分析回复 ${Math.max(0, Number(counters.newReplies) || 0)} · BOSS 已读 ${Math.max(0, Number(counters.currentRead) || 0)} · 送达 ${Math.max(0, Number(counters.currentDelivered) || 0)} · 未解决 ${Math.max(0, Number(status.unresolved) || 0)}</p>${retainedRecords}<p class="line">智联暂不提供已读/送达统计。</p>` : ""}${(status.platformRuns || []).map(entry => `<p class="line">${entry.platform === "zhaopin" ? "智联" : "BOSS"}：${escapeHtml(entry.reasonCode === "MESSAGE_DISCOVERY_WAITING_TURN" ? "等待前一平台读取完成" : ({ not_connected: "未连接消息页，本次未检查", running: "正在加载并读取消息，可随时安全停止", completed: "本次读取完成", stopped: "已安全停止", needs_user_action: "需要处理后重试" })[entry.status] || "等待读取")}${entry.reasonCode && entry.reasonCode !== "MESSAGE_DISCOVERY_WAITING_TURN" ? ` · ${escapeHtml(messageDiscoveryReasonText(entry.reasonCode))}` : ""}</p>`).join("")}</details>`;
+  const freshness = `<section class="message-freshness" aria-label="消息同步状态">${["boss", "zhaopin"].map((platform) => {
+    const value = inboxState.freshness?.[platform] || { label: "尚未同步", detail: "" };
+    return `<div data-state="${escapeAttr(value.state || "idle")}"><strong>${platform === "zhaopin" ? "智联" : "BOSS"}</strong><span>${escapeHtml(value.label)}</span><small>${escapeHtml(value.detail || "")}</small></div>`;
+  }).join("")}</section>`;
   const scriptState = JSON.stringify({
     profileId,
     status: status.status,
-    selectedSource,
-    selectedTask,
     initialSelectedKey: requestedView?.key || "",
     selectionLocked,
     directContact: Boolean(requestedView),
-    sourceFromQuery: searchParams.has("source"),
     recoveryMessages,
     initialReplySend,
     messageReplyActionToken: String(messageReplyActionToken || "")
@@ -233,7 +255,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     planId: plan?.id || "",
     stage: "消息",
     brandHref: todayPath,
-    content: `<main id="main-content" class="message-layout"><header class="page-heading message-heading"><p class="eyebrow">消息工作台</p><h1>处理当前联系</h1><p class="lede">先看 HR 原话，再确认岗位判断和当前草稿。</p></header>${controls}<p class="message-feedback" data-discovery-feedback role="status" aria-live="polite" aria-busy="false"></p>${status.status === "running" || showPageReason ? `<section class="panel message-state"><h2>${escapeHtml(statusLabel)}</h2>${phaseNotice ? `<p class="line">${escapeHtml(phaseNotice)}</p>` : ""}${reason ? `<p class="risk-text">${escapeHtml(reason)}</p>` : ""}</section>` : ""}${platformNotices}<section class="message-filters"><label for="message-task-filter">要处理什么</label><select id="message-task-filter" data-task-filter><option value="pending">待处理</option><option value="all">全部联系</option><option value="resume">索要简历</option><option value="interview">面试邀请</option></select><label for="message-source-filter">消息来源</label><select id="message-source-filter" data-source-filter><option value="all">全部平台</option><option value="boss">BOSS</option><option value="zhaopin">智联</option></select></section>${selectionLocked ? '<section class="panel message-not-found"><h2>没有找到这条联系</h2><p>它可能已不存在，或不属于当前用户或所选平台。请从列表重新选择。</p></section>' : ''}<p data-source-empty hidden role="status">这个范围暂时没有消息。</p>${messageWorkspace || (!contactKey ? '<section class="panel"><p class="line">当前没有待处理联系。点击“读取新消息”开始检查。</p></section>' : '')}${sendBatchPanel}<p class="button-row"><a class="button-link secondary" data-flush-drafts href="/communication-profile?profileId=${encodeURIComponent(profileId)}">管理我的沟通资料</a><a class="button-link secondary" data-flush-drafts href="${escapeAttr(manualPath)}">返回人工粘贴流程</a></p></main>`,
+    content: `<main id="main-content" class="message-layout"><header class="page-heading message-heading"><p class="eyebrow">消息工作台</p><h1>行动收件箱</h1><p class="lede">OfferGo 已按下一步整理消息，你只需要打开需要处理的内容。</p></header>${controls}<p class="message-feedback" data-discovery-feedback role="status" aria-live="polite" aria-busy="false"></p>${status.status === "running" || showPageReason ? `<section class="panel message-state"><h2>${escapeHtml(statusLabel)}</h2>${phaseNotice ? `<p class="line">${escapeHtml(phaseNotice)}</p>` : ""}${reason ? `<p class="risk-text">${escapeHtml(reason)}</p>` : ""}</section>` : ""}${freshness}${platformNotices}${selectionLocked ? '<section class="panel message-not-found"><h2>没有找到这条联系</h2><p>它可能已经处理完成，请从列表重新选择。</p></section>' : ''}<p data-source-empty hidden role="status">当前没有消息。</p>${messageWorkspace || (!contactKey ? '<section class="panel"><p class="line">当前没有需要处理的消息。点击“同步最新消息”开始检查。</p></section>' : '')}${sendBatchPanel}<p class="button-row"><a class="button-link secondary" data-flush-drafts href="/communication-profile?profileId=${encodeURIComponent(profileId)}">管理我的沟通资料</a><a class="button-link secondary" data-flush-drafts href="${escapeAttr(manualPath)}">返回人工粘贴流程</a></p></main>`,
     scripts: [messageDiscoveryClientScript(scriptState)]
   });
 }
@@ -266,10 +288,46 @@ function renderIncomingContactView(item, { selected, pending, escapeHtml, escape
   const original = (item.inboundMessages || []).map((message) => message.text).filter(Boolean);
   return {
     key,
+    identity: `${item.platform}\0${item.conversationKey}`,
+    actionGroup: pending ? "needs_action" : "done",
     contactKey: item.key,
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
     detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p><section class="message-inbound"><h3>HR 消息原文</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，原文暂不可查看。</p>'}</section><p class="line">这条联系目前没有可编辑草稿；请在原会话核对后处理。</p></section>`
   };
+}
+
+function renderInboxOnlyView(item, { escapeHtml, escapeAttr }) {
+  const key = messageViewKey("inbox", [item.platform, item.conversationKey]);
+  const inputId = `message-view-${key}`;
+  const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
+  const title = item.positionTitle || "岗位名称待确认";
+  const company = item.company || "公司待确认";
+  const statusText = item.statusText || (item.actionGroup === "waiting" ? "已回复，等待对方消息" : "查看这条消息");
+  const excerpt = item.latestExcerpt || statusText;
+  const reason = item.actionGroup === "needs_review"
+    ? messageDiscoveryReasonText(item.reasonCode)
+    : item.actionGroup === "waiting" ? "你已经回复过这条会话，新的对方消息出现后会自动移回待处理。" : statusText;
+  return {
+    key,
+    identity: `${item.platform}\0${item.conversationKey}`,
+    actionGroup: item.actionGroup,
+    contactKey: "",
+    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p><section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section><section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">无需切换到今日任务。下次同步时，OfferGo 会从这条记录继续补全。</p>' : ""}</section>`
+  };
+}
+
+function messageTimeLabel(value) {
+  const timestamp = Date.parse(String(value || ""));
+  if (!Number.isFinite(timestamp)) return "时间待确认";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Shanghai"
+  }).format(new Date(timestamp));
 }
 
 function messageDiscoveryClientScript(scriptState) {
@@ -314,14 +372,9 @@ function messageDiscoveryClientScript(scriptState) {
     const sendBatchTitle=document.querySelector("[data-send-batch-title]");
     const sendBatchStatus=document.querySelector("[data-send-batch-status]");
     const sendChoices=Array.from(document.querySelectorAll("[data-send-select]"));
-    const sourceFilter=document.querySelector("[data-source-filter]");
-    const taskFilter=document.querySelector("[data-task-filter]");
     const messageChoices=Array.from(document.querySelectorAll("[data-message-view]"));
     const messagePanels=Array.from(document.querySelectorAll("[data-message-detail-panel]"));
     const workspace=document.querySelector(".message-workspace");
-    let selectedSource=initial.selectedSource;
-    if(!initial.sourceFromQuery)try{const saved=localStorage.getItem("message-source-"+initial.profileId);if(["all","boss","zhaopin"].includes(saved))selectedSource=saved;}catch{}
-    let selectedTask=initial.selectedTask;
     const selectedKeyStorage="message-selection-"+initial.profileId;
     let selectedKey=initial.initialSelectedKey||"";
     let selectionLocked=Boolean(initial.selectionLocked);
@@ -343,9 +396,9 @@ function messageDiscoveryClientScript(scriptState) {
       MESSAGE_REPLY_SEND_ACTION_REQUIRED:"请从当前消息页面重新点击确认发送。"
     }[String(code||"")]||"发送没有开始，请刷新页面后重试。");
     const fieldForDraft=(draftId)=>document.querySelector('[data-draft-text][data-draft-id="'+Number(draftId)+'"]');
-    const selectedFields=()=>sendChoices.filter((choice)=>batchMode&&choice.checked&&!choice.disabled&&(selectedSource==="all"||selectedSource==="boss")).map((choice)=>fieldForDraft(choice.dataset.sendSelect)).filter(Boolean);
+    const selectedFields=()=>sendChoices.filter((choice)=>batchMode&&choice.checked&&!choice.disabled).map((choice)=>fieldForDraft(choice.dataset.sendSelect)).filter(Boolean);
     const clearBatchSelection=()=>{for(const choice of sendChoices)choice.checked=false;};
-    const updateSelection=()=>{for(const choice of sendChoices){const label=choice.closest(".message-send-choice");if(label)label.hidden=!batchMode||activeBatchId>0;}if(!sendBatchButton)return;const count=selectedFields().length;const batchVisible=batchMode&&selectedSource!=="zhaopin";sendBatchButton.hidden=!batchVisible;sendBatchButton.disabled=sendPending||count===0||activeBatchId>0;sendBatchButton.textContent="确认并串行发送 "+count+" 条";if(sendBatchEnterButton)sendBatchEnterButton.hidden=batchMode||activeBatchId>0||selectedSource==="zhaopin";if(sendBatchExitButton)sendBatchExitButton.hidden=!batchMode||activeBatchId>0;if(sendPanel)sendPanel.hidden=!batchMode&&!activeBatchId&&!sendPending;if(sendBatchTitle&&!activeBatchId)sendBatchTitle.textContent=batchMode?"已选择 "+count+" 条草稿":"批量发送尚未开始";};
+    const updateSelection=()=>{for(const choice of sendChoices){const label=choice.closest(".message-send-choice");if(label)label.hidden=!batchMode||activeBatchId>0;}if(!sendBatchButton)return;const count=selectedFields().length;const batchVisible=batchMode;sendBatchButton.hidden=!batchVisible||activeBatchId>0;sendBatchButton.disabled=sendPending||count===0||activeBatchId>0;sendBatchButton.textContent="确认并串行发送 "+count+" 条";if(sendBatchEnterButton)sendBatchEnterButton.hidden=batchMode||activeBatchId>0;if(sendBatchExitButton)sendBatchExitButton.hidden=!batchMode||activeBatchId>0;if(sendPanel)sendPanel.hidden=!batchMode&&!activeBatchId&&!sendPending;if(sendBatchTitle&&!activeBatchId)sendBatchTitle.textContent=batchMode?"已选择 "+count+" 条草稿":"批量发送尚未开始";};
     const setDiscoveryLocked=(locked)=>{for(const form of forms)for(const button of form.querySelectorAll("button")){if(!("sendBaseDisabled" in button.dataset))button.dataset.sendBaseDisabled=String(button.disabled);button.disabled=locked||button.dataset.sendBaseDisabled==="true";}};
     const setDraftPending=(fields,locked)=>{for(const field of fields){const card=field.closest("[data-draft-card]");if(!card||ownedDraftCards.has(card))continue;for(const control of card.querySelectorAll("button,input,textarea")){if(!("sendPendingBaseDisabled" in control.dataset))control.dataset.sendPendingBaseDisabled=String(control.disabled);control.disabled=locked||control.dataset.sendPendingBaseDisabled==="true";}}};
     const setOwned=(fields)=>{for(const field of fields){field.disabled=true;const card=field.closest("[data-draft-card]");if(!card)continue;ownedDraftCards.add(card);for(const control of card.querySelectorAll("button,input,textarea")){if(!("sendPendingBaseDisabled" in control.dataset))control.dataset.sendPendingBaseDisabled=String(control.disabled);control.disabled=true;}}};
@@ -365,12 +418,10 @@ function messageDiscoveryClientScript(scriptState) {
     sendStopButton?.addEventListener("click",async()=>{if(!activeBatchId||sendStopButton.disabled)return;sendStopButton.disabled=true;try{const state=await readSendResponse(await fetch("/api/message-reply-send-control",{method:"POST",headers:{"content-type":"application/json","x-roleflow-action":initial.messageReplyActionToken},body:JSON.stringify({profileId:initial.profileId,batchId:activeBatchId,action:"stop"})}));applySendState(state);feedback.textContent="已停止后续发送。";}catch(error){sendStopButton.disabled=false;feedback.textContent=sendMessage(error.message);}});
     updateSelection();
     if(initial.initialReplySend)applySendState(initial.initialReplySend);
-    const applySourceFilter=(preferredKey=selectedKey,persist=true)=>{
-      if(!sourceFilter)return;
-      sourceFilter.value=selectedSource;if(taskFilter)taskFilter.value=selectedTask;
+    const applySelection=(preferredKey=selectedKey,persist=true)=>{
       const rows=Array.from(document.querySelectorAll(".message-list-item[data-platform]"));
-      for(const row of rows){const matchesTask=selectedTask==="all"||(selectedTask==="pending"&&row.dataset.pending==="true")||(selectedTask==="resume"&&row.dataset.resume==="true")||(selectedTask==="interview"&&row.dataset.interview==="true");row.hidden=(selectedSource!=="all"&&row.dataset.platform!==selectedSource)||!matchesTask;}
-      const visibleChoices=messageChoices.filter(choice=>!choice.closest(".message-list-item")?.hidden);
+      for(const row of rows)row.hidden=false;
+      const visibleChoices=messageChoices;
       const next=selectionLocked?null:(visibleChoices.find(choice=>choice.dataset.messageView===preferredKey)||visibleChoices.find(choice=>choice.dataset.messageView===selectedKey)||visibleChoices[0]||null);
       selectedKey=next?.dataset.messageView||"";
       for(const choice of messageChoices)choice.checked=choice===next;
@@ -383,11 +434,11 @@ function messageDiscoveryClientScript(scriptState) {
     let pendingTransition=null;
     let pendingChoiceKey="";
     let transitionRunning=false;
-    const requestTransition=(transition)=>{pendingTransition=transition;applySourceFilter(selectedKey,false);runTransitions();};
+    const requestTransition=(transition)=>{pendingTransition=transition;applySelection(selectedKey,false);runTransitions();};
     const focusDetail=()=>messagePanels.find(panel=>panel.dataset.messageDetailPanel===selectedKey)?.querySelector("[data-message-back], [data-draft-text], button, input")?.focus();
     const runTransitions=async()=>{
       if(transitionRunning)return;
-      transitionRunning=true;if(sourceFilter)sourceFilter.disabled=true;if(taskFilter)taskFilter.disabled=true;
+      transitionRunning=true;
       while(pendingTransition){
         let next=pendingTransition;pendingTransition=null;
         const current=messagePanels.find(panel=>panel.dataset.messageDetailPanel===selectedKey);
@@ -395,7 +446,7 @@ function messageDiscoveryClientScript(scriptState) {
         try{await saveStableDrafts(fields);}catch{
           pendingTransition=null;pendingChoiceKey="";
           feedback.textContent="当前草稿未能保存，已保留当前消息，请稍后重试。";
-          applySourceFilter(selectedKey,false);
+          applySelection(selectedKey,false);
           const failed=fields.find(field=>draftSaveStatus(field)?.textContent.includes("失败"))||fields[0];
           // A hidden alternative remains a real draft: reveal its editor when its save fails.
           if(failed&&workspace?.dataset.mobileList!=="true"){const disclosure=failed.closest("details");if(disclosure)disclosure.open=true;failed.focus();}
@@ -403,15 +454,13 @@ function messageDiscoveryClientScript(scriptState) {
           break;
         }
         if(pendingTransition){next=pendingTransition;pendingTransition=null;}
-        if(next.source){selectedSource=next.source;clearBatchSelection();try{localStorage.setItem("message-source-"+initial.profileId,selectedSource);}catch{}}
-        if(next.task){selectedTask=next.task;clearBatchSelection();}
         if(next.key)selectionLocked=false;
-        applySourceFilter(next.key||selectedKey);
+        applySelection(next.key||selectedKey);
         pendingChoiceKey="";
         if(next.key){detailChosen=true;if(workspace)delete workspace.dataset.mobileList;if(mobileList())focusDetail();}
         if(next.back&&mobileList()&&workspace){detailChosen=false;workspace.dataset.mobileList="true";messageChoices.find(choice=>choice.dataset.messageView===selectedKey)?.focus();}
       }
-      transitionRunning=false;if(sourceFilter)sourceFilter.disabled=false;if(taskFilter)taskFilter.disabled=false;
+      transitionRunning=false;
       if(pendingTransition)runTransitions();
     };
     const mobileList=()=>Boolean(typeof window!=="undefined"&&window.matchMedia&&window.matchMedia("(max-width: 760px)").matches);
@@ -424,9 +473,7 @@ function messageDiscoveryClientScript(scriptState) {
     for(const choice of messageChoices){choice.addEventListener("change",()=>openChoice(choice));choice.closest(".message-list-item")?.addEventListener("click",()=>queueMicrotask(()=>openChoice(choice)));}
     for(const choice of messageChoices)choice.addEventListener("keydown",event=>{if(event.key===" "||event.key==="Enter"){event.preventDefault();choice.checked=true;openChoice(choice);}});
     for(const button of document.querySelectorAll("[data-message-back]"))button.addEventListener("click",()=>{if(mobileList())requestTransition({back:true});});
-    sourceFilter?.addEventListener("change",()=>{const source=["all","boss","zhaopin"].includes(sourceFilter.value)?sourceFilter.value:"all";requestTransition({source});});
-    taskFilter?.addEventListener("change",()=>{const task=["pending","all","resume","interview"].includes(taskFilter.value)?taskFilter.value:"pending";requestTransition({task});});
-    applySourceFilter();
+    applySelection();
     for(const link of document.querySelectorAll("[data-flush-drafts], .primary-nav a"))link.addEventListener("click",async(event)=>{const fields=Array.from(document.querySelectorAll("[data-draft-text]")).filter(field=>!field.disabled);if(!fields.length)return;event.preventDefault();try{await saveStableDrafts(fields);location.href=link.href;}catch{feedback.textContent="当前草稿未能保存，请稍后重试。";}});
     const poll=async()=>{pollTimer=null;if(reloadPending||pollPending||actionPending)return;pollPending=true;const version=actionVersion;try{const response=await fetch("/api/message-discovery-status?profileId="+encodeURIComponent(initial.profileId));const parsed=await read(response);if(reloadPending||actionPending||version!==actionVersion)return;if(!accepted(response,parsed,pollStatuses)){show(rejectedCode(parsed));return;}currentStatus=parsed.body.status;if(currentStatus==="running")schedulePoll();else requestReload();}catch{if(!reloadPending&&!actionPending&&version===actionVersion)show("MESSAGE_DISCOVERY_BROWSER_UNAVAILABLE");}finally{pollPending=false;if(!reloadPending&&!actionPending&&version!==actionVersion&&currentStatus==="running")schedulePoll();}};
     if(currentStatus==="running")schedulePoll();
@@ -436,7 +483,7 @@ function messageDiscoveryClientScript(scriptState) {
 function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, escapeHtml, escapeAttr }) {
   const attributes = embedded ? 'class="message-unresolved-context"' : `id="message-detail-${viewKey}" class="panel message-unresolved" data-platform="${escapeAttr(item.platform || "")}" data-message-detail-panel="${viewKey}"${hidden ? " hidden" : ""}`;
   const back = embedded ? "" : '<button type="button" class="message-back" data-message-back>返回列表</button>';
-  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${(item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位分析尚未完成。可重新开始只读发现，或自行到智联原始会话处理。</p></section>`;
+  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${(item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">无需先去今日任务。下次同步时，OfferGo 会从这里继续补全岗位资料并生成草稿。</p></section>`;
   const complete = Boolean(String(item.positionTitle || "").trim() && String(item.company || "").trim());
   const matches = complete ? findExactIdentityCandidates(db, {
     profileId, title: item.positionTitle, company: item.company
@@ -511,9 +558,9 @@ function messageDiscoveryRecoveryMessages() {
     ZHAOPIN_MESSAGE_RISK_CONTROL: "智联需要完成安全检查，请处理后重试。",
     ZHAOPIN_MESSAGE_PAGE_LOST: "智联消息页已变化，请恢复消息页后重试。",
     ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED: "会话与岗位详情的公司名称暂时无法核对。消息已保留，未关联岗位或生成草稿；你可以到智联原始会话核对。",
-    ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH: "会话与岗位详情不一致，本次只读发现已停止。请核对智联当前会话后再重试。",
+    ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH: "这条会话与岗位详情暂时无法确认，已保留待重试；其他消息会继续处理。",
     ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE: "这份岗位详情还不完整，消息已保留，暂不生成草稿。可稍后重新只读发现。",
-    MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE: "本地还没有这份智联岗位的完整分析。请先在智联今日任务中完成岗位发现和分析，再重新读取消息。",
+    MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE: "这份岗位资料暂时还不完整，已保留待重试。下次同步时会继续补全，无需先去今日任务。",
     MESSAGE_DISCOVERY_STOPPED: "已按你的操作安全停止。需要继续时重新开始只读发现。",
     MESSAGE_DISCOVERY_ALREADY_RUNNING: "消息发现正在运行。请等待完成或使用安全停止。",
     MESSAGE_DISCOVERY_RUNNING: "消息发现正在运行。请先安全停止，再放弃草稿。",
