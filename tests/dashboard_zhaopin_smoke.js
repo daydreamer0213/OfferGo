@@ -422,6 +422,7 @@ async function journey() {
   reports.renderReports = originalReport;
   try {
     const saved = seed(db);
+    storage.saveWorkspacePlatformPreference(db, ["boss", "zhaopin"]);
     const historicalBoss = storage.createWorkflowRun(db, {
       id: 'historical-boss-interrupted', site: 'boss', profileId: saved.profileId, planId: saved.planId,
       localDay: '2026-09-03', sequence: 1, scanNeeded: false
