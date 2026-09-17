@@ -28,6 +28,9 @@ function verifiedRow(overrides = {}) {
     lastMessageId: EXPECTED_MESSAGE_ID,
     lastMessageDirection: "friend",
     lastMessageStatus: "unknown",
+    lastActivityAt: null,
+    positionTitle: "内容运营",
+    company: "示例公司",
     identityVerified: true,
     ...overrides
   };
@@ -170,6 +173,9 @@ function fakeBrowser({
     async listTabs() {
       calls.push(["listTabs"]);
       return tabs;
+    },
+    async reload(tabId) {
+      calls.push(["reload", tabId]);
     },
     async setPageLifecycleActive(tabId) {
       calls.push(["setPageLifecycleActive", tabId]);
