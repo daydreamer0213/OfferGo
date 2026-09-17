@@ -117,6 +117,7 @@ function createMessageDiscoveryController(deps = {}) {
       );
     }
     const modelConfig = getModelConfig();
+    const draftModelConfig = boundedMessageDraftModelConfig(modelConfig);
     const enabledPlatforms = normalizeEnabledPlatforms(getEnabledPlatforms());
     if (!enabledPlatforms.length) {
       throw messageDiscoveryError("WORKSPACE_PLATFORM_SELECTION_REQUIRED", "请先选择要读取消息的招聘平台。", 409);
@@ -250,7 +251,7 @@ function createMessageDiscoveryController(deps = {}) {
           }
           const resolveJobContext = createJobContextResolver(resolverOptions);
           const summary = await runDiscovery({ platform, db, profileId, reader, signal: abortController.signal, logger,
-            classifyMessageGroup: createAnalyzer({ modelConfig, logger }), resolveJobContext, onStatus: checkpoint });
+            classifyMessageGroup: createAnalyzer({ modelConfig: draftModelConfig, logger }), resolveJobContext, onStatus: checkpoint });
           checkpoint(summary);
           if (isPlatformRiskControl(platform, summary?.reasonCode)) {
             recordRiskOnce(run, platform, summary.reasonCode, `${platform} requires security verification`);
@@ -937,6 +938,7 @@ function safePhase(value) {
     "starting",
     "reading_messages",
     "reading_detail",
+    "analyzing_messages",
     "cooldown",
     "analyzing_job",
     "completed",
@@ -1123,6 +1125,30 @@ function isDashboardMessageWorkspaceTab(tab) {
   } catch {
     return false;
   }
+}
+
+function boundedMessageDraftModelConfig(modelConfig) {
+  if (!modelConfig || modelConfig.provider !== "openai_compatible") return modelConfig;
+  const providers = modelConfig.providers && typeof modelConfig.providers === "object"
+    ? modelConfig.providers
+    : {};
+  const current = providers.openai_compatible && typeof providers.openai_compatible === "object"
+    ? providers.openai_compatible
+    : {};
+  const configuredTimeout = Number(current.timeoutMs);
+  return {
+    ...modelConfig,
+    providers: {
+      ...providers,
+      openai_compatible: {
+        ...current,
+        timeoutMs: Number.isFinite(configuredTimeout) && configuredTimeout > 0
+          ? Math.min(60000, configuredTimeout)
+          : 60000,
+        maxRetries: 0
+      }
+    }
+  };
 }
 
 function isBossRiskControlUrl(value) {

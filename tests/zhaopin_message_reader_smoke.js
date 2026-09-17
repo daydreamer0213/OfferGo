@@ -103,6 +103,7 @@ function readerFor(browser, options = {}) {
   return createZhaopinMessageReader({
     browser,
     timeoutMs: options.timeoutMs || 30,
+    conversationTimeoutMs: options.conversationTimeoutMs || options.timeoutMs || 30,
     pollIntervalMs: 1,
     nowFn: () => clock,
     sleepFn: async () => { clock += 5; if (options.onSleep) await options.onSleep(); }
@@ -143,6 +144,19 @@ async function main() {
     assert.strictEqual(selected.messages.filter(m => m.contentKind === "text").length, 2);
     assert.strictEqual(selected.sourceJobId, "zhaopin:CCL1234567890J00123456789");
     assert.equal(selected.lastMessageId, "104", "the detail reader returns a real final meaningful ID");
+
+    await setFixture(page, { sessions: [], active: null, timeline: [], loading: false });
+    let emptyMountWaits = 0;
+    const delayedListReader = readerFor(fakeBrowser(page), {
+      onSleep: async () => {
+        emptyMountWaits += 1;
+        await setFixture(page, { sessions: [first, second], active: first, timeline: richTimeline, loading: false });
+      }
+    });
+    const delayedList = await delayedListReader.scanConversationRows();
+    assert.equal(delayedList.rows.length, 2, "an initially empty ready frame must not erase conversations that mount moments later");
+    assert(emptyMountWaits > 0, "an initially empty ready frame must be stabilized before it is accepted");
+
     assert.deepStrictEqual(await reader.readSelectedJobTarget(selected), {
       jobId: JOB_A,
       navigationUrl: `https://www.zhaopin.com/jobdetail/${JOB_A}.html`,
@@ -258,6 +272,11 @@ async function main() {
     const pendingReader = readerFor(fakeBrowser(page), { timeoutMs: 10 });
     const pendingScan = await pendingReader.scanConversationRows();
     await assert.rejects(() => pendingReader.openQueuedConversation({ ...pendingScan.rows[0], tabId: IM_TAB_ID }), error => error.code === "ZHAOPIN_MESSAGE_CONTENT_PENDING");
+
+    assert.throws(() => createZhaopinMessageReader({
+      browser: fakeBrowser(page),
+      conversationTimeoutMs: 0
+    }), (error) => error.code === "ZHAOPIN_MESSAGE_OPTIONS_INVALID");
 
     await setFixture(page, { sessions: [first], active: first, timeline: richTimeline, loading: false });
     const abortReader = readerFor(fakeBrowser(page));

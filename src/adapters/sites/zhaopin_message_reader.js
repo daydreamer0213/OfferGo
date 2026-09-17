@@ -396,9 +396,20 @@ function selectedJobTarget(snapshot, target) {
   });
 }
 
-function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = Date.now, timeoutMs = 120000, pollIntervalMs = 500, expectedTabId = null } = {}) {
+function createZhaopinMessageReader({
+  browser,
+  sleepFn = defaultSleep,
+  nowFn = Date.now,
+  timeoutMs = 120000,
+  conversationTimeoutMs = 30000,
+  pollIntervalMs = 500,
+  expectedTabId = null
+} = {}) {
   assertBrowser(browser);
-  if (typeof sleepFn !== "function" || typeof nowFn !== "function" || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
+  if (typeof sleepFn !== "function" || typeof nowFn !== "function"
+    || !Number.isFinite(timeoutMs) || timeoutMs <= 0
+    || !Number.isFinite(conversationTimeoutMs) || conversationTimeoutMs <= 0
+    || !Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
     throw codedError("ZHAOPIN_MESSAGE_OPTIONS_INVALID", "zhaopin message reader options are invalid");
   }
   let binding = null;
@@ -458,6 +469,7 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
         const deadline = nowFn() + timeoutMs;
         const mountDeadline = Math.min(deadline, nowFn() + 15000);
         let snapshot;
+        let emptyReadySamples = 0;
         while (true) {
           await assertActiveBindings(signal);
           try {
@@ -468,7 +480,13 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
             continue;
           }
           if (snapshot.listError) throw codedError("ZHAOPIN_MESSAGE_LIST_FAILED", "zhaopin conversation list failed");
-          if (!snapshot.listLoading) break;
+          if (!snapshot.listLoading && snapshot.rows.length > 0) break;
+          if (!snapshot.listLoading) {
+            emptyReadySamples += 1;
+            if (emptyReadySamples >= 6 || nowFn() >= mountDeadline) break;
+          } else {
+            emptyReadySamples = 0;
+          }
           if (nowFn() >= deadline) throw codedError("ZHAOPIN_MESSAGE_CONTENT_PENDING", "zhaopin conversation list is not ready");
           await sleepFn(pollIntervalMs, signal);
         }
@@ -514,7 +532,7 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
         const guarded = await browser.evalValue(binding.tabId, buildSelectionExpression(internal._raw));
         throwIfAborted(signal);
         if (!guarded || guarded.clicked !== true) throw guardedSelectionError(guarded?.reason);
-        const deadline = nowFn() + timeoutMs;
+        const deadline = nowFn() + conversationTimeoutMs;
         let identityMismatch = false;
         while (true) {
           throwIfAborted(signal);

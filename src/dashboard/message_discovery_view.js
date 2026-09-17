@@ -67,6 +67,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     "BOSS_MESSAGE_GROUP_TEXT_LIMIT", "BOSS_MESSAGE_CONTENT_UNSUPPORTED",
     "ZHAOPIN_MESSAGE_CONTENT_PENDING", "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED",
     "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED", "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+    "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT",
+    "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE",
     "ZHAOPIN_MESSAGE_TARGET_MISMATCH", "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH",
     "BOSS_MESSAGE_TARGET_MISMATCH", "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH"
   ]);
@@ -347,14 +349,14 @@ function messageDiscoveryClientScript(scriptState) {
     const draftWrites=new Map();
     const messageFor=(code)=>initial.recoveryMessages[String(code||"")]||initial.recoveryMessages.default;
     const show=(code)=>{if(reloadPending)return;feedback.textContent=messageFor(code);feedback.dataset.errorCode=String(code||"");};
-    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const unresolved=Math.max(0,Number(status?.unresolved)||0);const counts=queued?"已发现 "+queued+" 条消息"+(unresolved?"，其中 "+unresolved+" 条待补岗位资料":"")+"。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
-    const requestReload=()=>{reloadPending=true;location.reload();};
+    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const unresolved=Math.max(0,Number(status?.unresolved)||0);const counts=queued?"已发现 "+queued+" 条消息"+(unresolved?"，其中 "+unresolved+" 条待补岗位资料":"")+"。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
+    const requestReload=(resetSelection=false)=>{if(resetSelection)try{localStorage.removeItem(selectedKeyStorage);}catch{}reloadPending=true;location.reload();};
     const setPending=(pending)=>{feedback.setAttribute("aria-busy",String(pending));if(pending)feedback.textContent="正在处理，请稍候。";for(const form of forms)for(const button of form.querySelectorAll("button")){if(!("discoveryBaseDisabled" in button.dataset))button.dataset.discoveryBaseDisabled=String(button.disabled);button.disabled=pending||button.dataset.discoveryBaseDisabled==="true";}};
     const read=async(response)=>{const text=await response.text();try{return {json:true,body:JSON.parse(text)}}catch{return {json:false,body:null}}};
     const accepted=(response,parsed,statuses)=>Boolean(response.ok&&parsed.json&&parsed.body&&typeof parsed.body==="object"&&!Array.isArray(parsed.body)&&!Object.prototype.hasOwnProperty.call(parsed.body,"errorCode")&&statuses.includes(parsed.body.status));
     const rejectedCode=(parsed)=>parsed.body?.errorCode||"MESSAGE_DISCOVERY_FAILED";
     const schedulePoll=()=>{if(!reloadPending&&!actionPending&&pollTimer===null)pollTimer=setTimeout(poll,2000);};
-    for(const form of forms)form.addEventListener("submit",async(event)=>{event.preventDefault();if(actionPending||reloadPending)return;actionPending=true;actionVersion+=1;setPending(true);let succeeded=false;try{const response=await fetch(form.getAttribute("action"),{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(form))});const parsed=await read(response);if(accepted(response,parsed,postStatuses)){succeeded=true;requestReload();return;}show(rejectedCode(parsed));}catch{show("MESSAGE_DISCOVERY_SERVICE_UNAVAILABLE");}finally{actionPending=false;setPending(false);if(!reloadPending&&!succeeded&&currentStatus==="running")schedulePoll();}});
+    for(const form of forms)form.addEventListener("submit",async(event)=>{event.preventDefault();if(actionPending||reloadPending)return;actionPending=true;actionVersion+=1;setPending(true);let succeeded=false;try{const response=await fetch(form.getAttribute("action"),{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(form))});const parsed=await read(response);if(accepted(response,parsed,postStatuses)){succeeded=true;requestReload(parsed.body.status!=="running");return;}show(rejectedCode(parsed));}catch{show("MESSAGE_DISCOVERY_SERVICE_UNAVAILABLE");}finally{actionPending=false;setPending(false);if(!reloadPending&&!succeeded&&currentStatus==="running")schedulePoll();}});
     const cancelDraftSave=(field)=>{const timer=draftTimers.get(field);if(timer!==undefined){clearTimeout(timer);draftTimers.delete(field);}};
     const postDraft=async(field,text,action,completionKind="")=>{const response=await fetch("/api/message-reply-draft",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,profileId:initial.profileId,draftId:Number(field.dataset.draftId),text,completionKind})});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.ok)throw new Error(rejectedCode(parsed));return parsed.body;};
     const draftSaveStatus=(field)=>field.closest("[data-draft-card]")?.querySelector("[data-draft-save-status]");
@@ -476,7 +478,7 @@ function messageDiscoveryClientScript(scriptState) {
     for(const button of document.querySelectorAll("[data-message-back]"))button.addEventListener("click",()=>{if(mobileList())requestTransition({back:true});});
     applySelection();
     for(const link of document.querySelectorAll("[data-flush-drafts], .primary-nav a"))link.addEventListener("click",async(event)=>{const fields=Array.from(document.querySelectorAll("[data-draft-text]")).filter(field=>!field.disabled);if(!fields.length)return;event.preventDefault();try{await saveStableDrafts(fields);location.href=link.href;}catch{feedback.textContent="当前草稿未能保存，请稍后重试。";}});
-    const poll=async()=>{pollTimer=null;if(reloadPending||pollPending||actionPending)return;pollPending=true;const version=actionVersion;try{const response=await fetch("/api/message-discovery-status?profileId="+encodeURIComponent(initial.profileId));const parsed=await read(response);if(reloadPending||actionPending||version!==actionVersion)return;if(!accepted(response,parsed,pollStatuses)){show(rejectedCode(parsed));return;}currentStatus=parsed.body.status;if(currentStatus==="running"){feedback.textContent=liveStatusText(parsed.body);feedback.dataset.errorCode="";schedulePoll();}else requestReload();}catch{if(!reloadPending&&!actionPending&&version===actionVersion)show("MESSAGE_DISCOVERY_SERVICE_UNAVAILABLE");}finally{pollPending=false;if(!reloadPending&&!actionPending&&version!==actionVersion&&currentStatus==="running")schedulePoll();}};
+    const poll=async()=>{pollTimer=null;if(reloadPending||pollPending||actionPending)return;pollPending=true;const version=actionVersion;try{const response=await fetch("/api/message-discovery-status?profileId="+encodeURIComponent(initial.profileId));const parsed=await read(response);if(reloadPending||actionPending||version!==actionVersion)return;if(!accepted(response,parsed,pollStatuses)){show(rejectedCode(parsed));return;}currentStatus=parsed.body.status;if(currentStatus==="running"){feedback.textContent=liveStatusText(parsed.body);feedback.dataset.errorCode="";schedulePoll();}else requestReload(true);}catch{if(!reloadPending&&!actionPending&&version===actionVersion)show("MESSAGE_DISCOVERY_SERVICE_UNAVAILABLE");}finally{pollPending=false;if(!reloadPending&&!actionPending&&version!==actionVersion&&currentStatus==="running")schedulePoll();}};
     if(currentStatus==="running")schedulePoll();
   }());</script>`;
 }
@@ -537,6 +539,7 @@ function messageDiscoveryPhaseText(status) {
       : "正在按安全节奏冷却，稍后继续。";
   }
   if (status?.phase === "reading_detail") return "正在后台读取当前岗位详情，不会抢占前台。";
+  if (status?.phase === "analyzing_messages") return "正在整理消息并生成回复建议，模型响应可能需要一些时间。";
   if (status?.phase === "reading_messages") return "正在加载并读取消息，可随时安全停止。";
   if (status?.phase === "starting") return "正在准备只读消息检查。";
   return "";
@@ -561,6 +564,8 @@ function messageDiscoveryRecoveryMessages() {
     ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED: "会话与岗位详情的公司名称暂时无法核对。消息已保留，未关联岗位或生成草稿；你可以到智联原始会话核对。",
     ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH: "这条会话与岗位详情暂时无法确认，已保留待重试；其他消息会继续处理。",
     ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE: "这份岗位详情还不完整，消息已保留，暂不生成草稿。可稍后重新只读发现。",
+    ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT: "这份岗位详情暂时读取超时，消息已保留；系统会继续处理其他消息，下次同步时可重试。",
+    ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE: "这份岗位详情已跳转或暂时不可用，消息已保留；系统会继续处理其他消息。",
     MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE: "这份岗位资料暂时还不完整，已保留待重试。下次同步时会继续补全，无需先去今日任务。",
     MESSAGE_DISCOVERY_STOPPED: "已按你的操作安全停止。需要继续时重新开始只读发现。",
     MESSAGE_DISCOVERY_ALREADY_RUNNING: "消息发现正在运行。请等待完成或使用安全停止。",

@@ -795,7 +795,13 @@ function listMessageDiscoveryCandidates(db, { profileId, platform = "boss" } = {
         AND context_batches.search_plan_id = cards.plan_id
         AND length(trim(COALESCE(observations.description, ''))) >= 120
         AND json_valid(observations.analysis_json) = 1
-        AND json_extract(observations.analysis_json, '$.semanticStatus') = 'complete'
+        AND (
+          json_extract(observations.analysis_json, '$.semanticStatus') = 'complete'
+          OR (
+            json_extract(observations.analysis_json, '$.provider') = 'message-discovery-detail'
+            AND json_extract(observations.analysis_json, '$.semanticStatus') = 'pending'
+          )
+        )
       ORDER BY observations.seen_at DESC, observations.id DESC
       LIMIT 1
     )
@@ -854,7 +860,13 @@ function findMessageDiscoveryJobContext(db, { profileId, planId, sourceId, platf
       AND context_batches.search_plan_id = ?
       AND length(trim(COALESCE(context.description, ''))) >= 120
       AND json_valid(context.analysis_json) = 1
-      AND json_extract(context.analysis_json, '$.semanticStatus') = 'complete'
+      AND (
+        json_extract(context.analysis_json, '$.semanticStatus') = 'complete'
+        OR (
+          json_extract(context.analysis_json, '$.provider') = 'message-discovery-detail'
+          AND json_extract(context.analysis_json, '$.semanticStatus') = 'pending'
+        )
+      )
     ORDER BY context.seen_at DESC, context.id DESC
     LIMIT 1`).get(source, normalizedSourceId, normalizedProfileId, normalizedPlanId);
   return row ? mapDiscoveryCandidate(row) : null;

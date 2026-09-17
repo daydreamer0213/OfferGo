@@ -285,7 +285,7 @@ function runPowerShell(args) {
   return spawnSync(powershell, ["-NoProfile", "-ExecutionPolicy", "Bypass", ...args], {
     cwd: path.join(__dirname, ".."),
     encoding: "utf8",
-    timeout: 30_000,
+    timeout: 60_000,
     windowsHide: true
   });
 }

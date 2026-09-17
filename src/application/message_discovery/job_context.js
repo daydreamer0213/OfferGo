@@ -9,18 +9,12 @@ const {
   findMessageDiscoveryJobContext
 } = require("../../core/candidate_progress");
 const { canonicalBossJobSourceId } = require("../../core/boss_job_identity");
-const { retryOneJobAnalysis } = require("../analysis");
 
 function createMessageDiscoveryJobContextResolver({
   db,
   profileId,
   messageReader,
   detailReader,
-  analyzeJob = retryOneJobAnalysis,
-  modelConfig = null,
-  root = process.cwd(),
-  logger = null,
-  analysisDeps = {},
   now = () => new Date().toISOString()
 } = {}) {
   const normalizedProfileId = positiveInteger(profileId, "profileId");
@@ -34,7 +28,6 @@ function createMessageDiscoveryJobContextResolver({
   if (typeof detailReader?.readSelectedJobDetail !== "function") {
     throw new TypeError("detailReader.readSelectedJobDetail is required");
   }
-  if (typeof analyzeJob !== "function") throw new TypeError("analyzeJob is required");
 
   return async function resolveMessageDiscoveryJobContext({ target, selected, candidate = null, signal = null } = {}) {
     const plan = getActiveSearchPlan(db, normalizedProfileId);
@@ -83,26 +76,13 @@ function createMessageDiscoveryJobContextResolver({
         recommendation: null
       }
     }, batchId);
-    await analyzeJob({
-      db,
-      input: { planId: plan.id, jobId },
-      deps: {
-        root,
-        logger,
-        modelReady: Boolean(modelConfig),
-        modelConfig,
-        ...analysisDeps,
-        messageContextAnalysis: true,
-        signal
-      }
-    });
     const complete = findMessageDiscoveryJobContext(db, {
       profileId: normalizedProfileId,
       planId: plan.id,
       sourceId: detail.sourceId
     });
     if (!complete?.contextComplete) {
-      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "job analysis is incomplete");
+      throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "job context is incomplete");
     }
     return bindContext(complete, target?.conversationKey, "message_discovery_detail", now());
   };

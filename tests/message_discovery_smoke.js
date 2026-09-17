@@ -1908,7 +1908,8 @@ async function classificationOutcomeSmoke() {
     "MODEL_EMPTY_RESPONSE",
     "MODEL_INVALID_RESPONSE",
     "MODEL_OUTPUT_TRUNCATED",
-    "MODEL_INVALID_JSON"
+    "MODEL_INVALID_JSON",
+    "MODEL_TIMEOUT"
   ].entries()) {
     const invalidModel = createFixture({ suffix: `invalid-model-${index}`, title: `Invalid Model ${index} Engineer` });
     const invalidSummary = await runBossMessageDiscovery({
@@ -1938,7 +1939,7 @@ async function classificationOutcomeSmoke() {
     assert(!invalidSummary.results[0].messageSummary.includes(PRIVATE_BODY));
   }
 
-  for (const [index, code] of ["MODEL_AUTH_FAILED", "MODEL_TIMEOUT"].entries()) {
+  for (const [index, code] of ["MODEL_AUTH_FAILED"].entries()) {
     const infrastructureFailure = createFixture({
       suffix: `model-infrastructure-${index}`,
       title: `Model Infrastructure ${index} Engineer`

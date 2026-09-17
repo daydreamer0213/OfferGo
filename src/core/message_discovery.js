@@ -39,7 +39,8 @@ const TERMINAL_MODEL_OUTPUT_CODES = new Set([
   "MODEL_EMPTY_RESPONSE",
   "MODEL_INVALID_RESPONSE",
   "MODEL_OUTPUT_TRUNCATED",
-  "MODEL_INVALID_JSON"
+  "MODEL_INVALID_JSON",
+  "MODEL_TIMEOUT"
 ]);
 const PLATFORM_TERMINAL_CODES = new Set([
   "BOSS_LOGIN_REQUIRED",
@@ -84,6 +85,9 @@ const ITEM_LOCAL_CODES = new Set([
   "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED",
   "ZHAOPIN_MESSAGE_TIMELINE_FAILED",
   "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
+  "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+  "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE",
   "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
   "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
 ]);
@@ -204,6 +208,15 @@ async function runBossMessageDiscovery({
   for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
     const target = queue[queueIndex];
     throwIfAborted(signal);
+    emitStatus(safeStatus("running", {
+      queued: queue.length,
+      processed,
+      unresolved: retained.count,
+      reasonCode: retained.reasonCode,
+      counters,
+      results,
+      phase: "reading_messages"
+    }), logger, onStatus);
     if (target.previewKind === "unsupported") {
       const code = source === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED" : "BOSS_MESSAGE_CONTENT_UNSUPPORTED";
       recordUnresolvedMessageDiscoveryItem(db, {
@@ -219,6 +232,15 @@ async function runBossMessageDiscovery({
       recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now(), upsertMessageInboxItem });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: code });
       retained = unresolvedSummary(db, profileId, source);
+      emitStatus(safeStatus("running", {
+        queued: queue.length,
+        processed,
+        unresolved: retained.count,
+        reasonCode: retained.reasonCode,
+        counters,
+        results,
+        phase: "reading_messages"
+      }), logger, onStatus);
       continue;
     }
     let selected;
@@ -237,6 +259,15 @@ async function runBossMessageDiscovery({
         recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now(), upsertMessageInboxItem });
         continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: localReasonCode });
         retained = unresolvedSummary(db, profileId, source);
+        emitStatus(safeStatus("running", {
+          queued: queue.length,
+          processed,
+          unresolved: retained.count,
+          reasonCode: retained.reasonCode,
+          counters,
+          results,
+          phase: "reading_messages"
+        }), logger, onStatus);
         await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
         continue;
       }
@@ -417,6 +448,15 @@ async function runBossMessageDiscovery({
         })
         : [];
       if (incoming.messages.length) {
+        emitStatus(safeStatus("running", {
+          queued: queue.length,
+          processed,
+          unresolved: retained.count,
+          reasonCode: retained.reasonCode,
+          counters,
+          results,
+          phase: "analyzing_messages"
+        }), logger, onStatus);
         const baseInput = {
           profile,
           card: resolved.card,
@@ -699,8 +739,11 @@ function resolveUniqueCandidate(candidates, selected, canonicalThreadKey, source
 }
 
 function hasCompleteJobContext(job) {
+  const analysis = job?.analysis || {};
+  const trustedMessageDetail = analysis.provider === "message-discovery-detail"
+    && analysis.semanticStatus === "pending";
   return String(job?.description || "").trim().length >= 120
-    && job?.analysis?.semanticStatus === "complete";
+    && (analysis.semanticStatus === "complete" || trustedMessageDetail);
 }
 
 function validResolvedContext(value, canonicalThreadKey, platform) {
@@ -737,6 +780,8 @@ function contextFailureReason(error) {
     "MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE",
     "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE",
     "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+    "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT",
+    "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE",
     "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
     "BOSS_MESSAGE_TARGET_MISMATCH",
     "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
@@ -1203,6 +1248,8 @@ function abortableSleep(ms, signal) {
 function safeStatus(status, value = {}) {
   return {
     status,
+    phase: String(value.phase || ""),
+    waitUntil: String(value.waitUntil || ""),
     queued: Number(value.queued || 0),
     processed: Number(value.processed || 0),
     unresolved: Number(value.unresolved || 0),

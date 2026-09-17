@@ -4,11 +4,9 @@ const { createBatch } = require("../../storage/scan_store");
 const { upsertJob, setZhaopinJobAvailability } = require("../../storage/job_store");
 const { getActiveSearchPlan } = require("../../storage/candidate_store");
 const { ensureProgressCard, bindProgressCardThread, findMessageDiscoveryJobContext } = require("../../core/candidate_progress");
-const { retryOneJobAnalysis } = require("../analysis");
 
 function createZhaopinMessageJobContextResolver({
-  db, profileId, messageReader = null, detailReader = null, analyzeJob = retryOneJobAnalysis,
-  modelConfig = null, root = process.cwd(), logger = null, analysisDeps = {}, now = () => new Date().toISOString()
+  db, profileId, messageReader = null, detailReader = null, now = () => new Date().toISOString()
 } = {}) {
   const normalizedProfileId = positiveInteger(profileId, "profileId");
   if (!db) throw new TypeError("db is required");
@@ -17,7 +15,6 @@ function createZhaopinMessageJobContextResolver({
     || typeof detailReader?.readSelectedJobDetail !== "function")) {
     throw new TypeError("zhaopin message and detail readers are required together");
   }
-  if (typeof analyzeJob !== "function") throw new TypeError("analyzeJob is required");
 
   return async function resolveZhaopinMessageJobContext({ target, selected, signal = null } = {}) {
     const plan = activePlan();
@@ -67,11 +64,6 @@ function createZhaopinMessageJobContextResolver({
       }
     }, batchId);
     throwIfAborted(signal);
-    await analyzeJob({
-      db,
-      input: { planId: plan.id, jobId },
-      deps: { root, logger, modelReady: Boolean(modelConfig), modelConfig, ...analysisDeps, messageContextAnalysis: true, signal }
-    });
     throwIfAborted(signal);
     assertSameActivePlan(plan.id);
     jobTarget = await verifySelectedTarget(sourceId, selected, signal);
@@ -79,7 +71,7 @@ function createZhaopinMessageJobContextResolver({
     throwIfAborted(signal);
     context = findContext(plan.id, detail.sourceId);
     if (!context?.contextComplete || context.source !== "zhaopin") {
-      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "zhaopin job analysis is incomplete");
+      throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "zhaopin job context is incomplete");
     }
     annotateAvailability(context, availability === "offline" || jobTarget.availability === "offline" ? "offline" : "unknown");
     context = findContext(plan.id, detail.sourceId);

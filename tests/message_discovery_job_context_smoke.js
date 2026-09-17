@@ -162,7 +162,10 @@ async function fetchedContextSmoke() {
         return detail("fetched-job");
       }
     },
-    analyzeJob: completeAnalysisAdapter(calls, controller.signal),
+    async analyzeJob() {
+      calls.push("analyze");
+      throw new Error("message discovery must not run full job matching");
+    },
     modelConfig: { provider: "fixture" },
     root,
     logger: captureLogger(logs)
@@ -177,12 +180,12 @@ async function fetchedContextSmoke() {
     candidate,
     signal: controller.signal
   });
-  assert.deepStrictEqual(calls, ["target", "binding", "detail", "analyze"]);
+  assert.deepStrictEqual(calls, ["target", "binding", "detail"]);
   assert.strictEqual(result.cardId, card.id);
   assert.strictEqual(result.card.threadKey, conversationKey);
   assert.strictEqual(result.job.description, detail("fetched-job").description.trim());
   assert.strictEqual(result.job.sourceId, "boss:fetched-job");
-  assert.strictEqual(result.job.analysis.semanticStatus, "complete");
+  assert.strictEqual(result.job.analysis.semanticStatus, "pending");
   assert.strictEqual(result.contextSource, "message_discovery_detail");
   assert.strictEqual(
     db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE source = ? AND source_id IN (?, ?)")
@@ -216,16 +219,18 @@ async function incompleteContextSmoke() {
       async assertActiveBindings() {}
     },
     detailReader: { async readSelectedJobDetail() { calls.push("detail"); return detail("incomplete-job"); } },
-    analyzeJob: partialAnalysisAdapter(calls)
+    async analyzeJob() {
+      calls.push("analyze");
+      throw new Error("message discovery must not run full job matching");
+    }
   });
-  await assert.rejects(
-    () => resolver({
-      target: { tabId: 44, conversationKey: digest("incomplete-thread") },
-      selected: { marker: "selected-incomplete" }
-    }),
-    (error) => error.code === "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE"
-  );
-  assert.deepStrictEqual(calls, ["detail", "analyze"]);
+  const result = await resolver({
+    target: { tabId: 44, conversationKey: digest("incomplete-thread") },
+    selected: { marker: "selected-incomplete" }
+  });
+  assert.strictEqual(result.contextSource, "message_discovery_detail");
+  assert.strictEqual(result.job.analysis.semanticStatus, "pending");
+  assert.deepStrictEqual(calls, ["detail"]);
 
   const shortFixture = seedProfilePlan("short");
   const shortJobId = seedJob(shortFixture, "short-job");

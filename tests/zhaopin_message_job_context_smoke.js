@@ -6,8 +6,6 @@ const {
   saveProfileAnalysis,
   createMatchingCardDraft,
   confirmMatchingCard,
-  createBatch,
-  upsertJob,
   listReportJobs
 } = require("../src/core/storage");
 const { listOpenMessageReplyDrafts } = require("../src/core/storage");
@@ -41,8 +39,6 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
           return detail("offline");
         }
       },
-      modelConfig: { provider: "mock", providers: { mock: { model: "offline" } } },
-      analysisDeps: { createJobAnalysisRunner: () => async () => analysis() },
       root,
       now: () => NOW
     });
@@ -50,7 +46,8 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(result.contextSource, "message_discovery_detail");
     assert.equal(result.job.source, "zhaopin");
     assert.equal(result.job.sourceId, JOB_ID);
-    assert.equal(result.job.analysis.semanticStatus, "complete");
+    assert.equal(result.job.analysis.semanticStatus, "pending");
+    assert.equal(result.job.analysis.provider, "message-discovery-detail");
     assert.equal(result.job.analysis.sourceAvailability, "offline");
     assert.equal(result.job.availability, "offline");
     assert.equal(result.card.threadKey, target.conversationKey);
@@ -58,7 +55,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert(calls.filter((item) => item === "target").length >= 2, "selection is revalidated before persistence/binding");
 
     const stored = listReportJobs(db, { planId: fixture.planId, site: "zhaopin", batch: "all", limit: 20 })
-      .find((job) => job.sourceId === JOB_ID && job.analysis.semanticStatus === "complete");
+      .find((job) => job.sourceId === JOB_ID);
     assert.equal(stored.analysis.sourceAvailability, "offline", "existing analysis write preserves source evidence, not model output");
 
     const cacheCalls = [];
@@ -74,7 +71,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(cached.contextSource, "local_cache");
     assert.equal(cached.job.availability, "unknown");
     assert.equal(cached.job.analysis.sourceAvailability, "unknown");
-    assert.equal(cached.job.analysis.semanticStatus, "complete");
+    assert.equal(cached.job.analysis.semanticStatus, "pending");
     assert.equal(cacheCalls.includes("detail"), false);
 
     const restored = await createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId, now: () => NOW })({ target });
@@ -104,14 +101,12 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
       db,
       profileId: switched.profileId,
       messageReader: messageReader([], selected, "unknown"),
-      detailReader: { async readSelectedJobDetail() { return detail(); } },
-      analyzeJob: async ({ input }) => {
-        persistAnalysis(switched, input.jobId, analysis());
+      detailReader: { async readSelectedJobDetail() {
         db.prepare("UPDATE search_plans SET is_active = 0 WHERE profile_id = ?").run(switched.profileId);
         db.prepare(`INSERT INTO search_plans(profile_id, name, plan_json, is_active, created_at, updated_at)
           VALUES (?, 'replacement', '{}', 1, ?, ?)`).run(switched.profileId, NOW, NOW);
-      },
-      modelConfig: { provider: "fixture" }
+        return detail();
+      } }
     });
     await assert.rejects(() => switchedResolver({ target: switchedTarget, selected }), (error) => error.code === "MESSAGE_DISCOVERY_ACTIVE_PLAN_CHANGED");
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_progress_cards WHERE profile_id = ? AND thread_key <> ''").get(switched.profileId).n, 0);
@@ -143,8 +138,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     const pipelineResolver = createZhaopinMessageJobContextResolver({
       db, profileId: pipeline.profileId, messageReader: pipelineReader,
       detailReader: { async readSelectedJobDetail() { return detail(); } },
-      modelConfig: { provider: "mock", providers: { mock: { model: "offline" } } },
-      analysisDeps: { createJobAnalysisRunner: () => async () => analysis() }, root, now: () => NOW
+      root, now: () => NOW
     });
     const pipelineSummary = await runBossMessageDiscovery({
       db, profileId: pipeline.profileId, platform: "zhaopin", reader: pipelineReader, resolveJobContext: pipelineResolver,
@@ -154,7 +148,6 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     });
     assert.equal(pipelineSummary.processed, 1, JSON.stringify(pipelineSummary));
     assert.equal(pipelineSummary.results[0].contextSource, "message_discovery_detail");
-    assert.equal(pipelineSummary.results[0].job.opportunityVerdict, "值得继续聊");
     assert.equal(listOpenMessageReplyDrafts(db, { profileId: pipeline.profileId }).length, 1);
 
     console.log("zhaopin_message_job_context_smoke ok");
@@ -204,25 +197,6 @@ function detail(availability = "unknown") {
     title: "合成软件工程师", company: "合成科技有限公司", location: "北京", salary: "20-30K",
     experience: "3-5年", education: "本科", tags: ["Node.js"], description: DESCRIPTION, availability
   };
-}
-
-function analysis() {
-  return {
-    provider: "fixture", model: "offline", semanticStatus: "complete", decisionStatus: "ready",
-    recommendation: "apply", fitLevel: "A", fitReasons: ["技能匹配"], roleSummary: "负责软件系统研发与交付",
-    evidence: { jd: ["合成岗位说明"], resume: ["合成履历证据"] }
-  };
-}
-
-function persistAnalysis(fixture, jobId, value) {
-  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId);
-  const batchId = createBatch(db, "zhaopin", "analysis-retry", "fixture", { profileId: fixture.profileId, searchPlanId: fixture.planId });
-  upsertJob(db, {
-    source: row.source, sourceId: row.source_id, keyword: row.keyword, title: row.title, company: row.company,
-    location: row.location, salary: row.salary, experience: row.experience, education: row.education,
-    url: row.url, tags: JSON.parse(row.tags_json), description: row.description,
-    qualityTags: JSON.parse(row.quality_tags_json), analysis: value
-  }, batchId);
 }
 
 function digest(value) {

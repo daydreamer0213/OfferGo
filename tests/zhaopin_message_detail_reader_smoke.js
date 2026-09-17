@@ -46,7 +46,7 @@ function baselineTabs(extra = []) {
   ];
 }
 
-function fakeBrowser({ samples = [snapshot(), snapshot()], created = {}, returnedId = DETAIL_TAB_ID, createError = null, createErrorAfterInsert = false, baselineExtra = [], closeError = null } = {}) {
+function fakeBrowser({ samples = [snapshot(), snapshot()], created = {}, returnedId = DETAIL_TAB_ID, createError = null, createErrorAfterInsert = false, baselineExtra = [], closeError = null, afterEval = null } = {}) {
   const calls = [];
   const tabs = baselineTabs(baselineExtra);
   let sampleIndex = 0;
@@ -66,7 +66,9 @@ function fakeBrowser({ samples = [snapshot(), snapshot()], created = {}, returne
     async evalValue(tabId, expression) {
       calls.push(["evalValue", tabId, expression]);
       assert.equal(tabId, DETAIL_TAB_ID);
-      return samples[Math.min(sampleIndex++, samples.length - 1)];
+      const value = samples[Math.min(sampleIndex++, samples.length - 1)];
+      afterEval?.({ tabs, sampleIndex });
+      return value;
     },
     async closeTab(tabId) {
       calls.push(["closeTab", tabId]);
@@ -94,7 +96,10 @@ function makeReader(browser, options = {}) {
         return JOB_TARGET;
       }
     },
-    beforeOpen: async () => hooks.push("beforeOpen"),
+    beforeOpen: async () => {
+      hooks.push("beforeOpen");
+      await options.beforeOpen?.();
+    },
     afterIssuedAttempt: async () => hooks.push("afterIssuedAttempt"),
     nowFn: () => clock,
     timeoutMs: options.timeoutMs || 30,
@@ -185,6 +190,13 @@ let companyUnverifiedSnapshot;
   assert.equal(browser.calls.filter(([name]) => name === "createTab").length, 1);
   assert.equal(browser.calls.some(([name]) => name === "bringToFront"), false);
 
+  const dashboardReload = fakeBrowser();
+  await read(makeReader(dashboardReload, {
+    beforeOpen() {
+      dashboardReload.tabs[0].url = "http://127.0.0.1:3000/messages?reloaded=1";
+    }
+  }).reader);
+
   const stringReturn = fakeBrowser({ returnedId: String(DETAIL_TAB_ID) });
   await read(makeReader(stringReturn).reader);
   assert.equal(stringReturn.calls.find(([name]) => name === "closeTab")[1], DETAIL_TAB_ID, "cleanup uses the typed id from listTabs");
@@ -214,6 +226,17 @@ let companyUnverifiedSnapshot;
     (await read(makeReader(mountingOldContent).reader)).sourceId,
     JOB_ID,
     "same-job navigation must wait through transient old mounted content before checking title and company"
+  );
+
+  const mountingBlankDocument = fakeBrowser({ samples: [
+    snapshot({ currentJobId: "", title: "", company: "", description: "", loading: false }),
+    snapshot(),
+    snapshot()
+  ] });
+  assert.equal(
+    (await read(makeReader(mountingBlankDocument).reader)).sourceId,
+    JOB_ID,
+    "a newly created detail tab must wait through its initial blank document"
   );
 
   const missing = fakeBrowser({ samples: [snapshot({ title: "", company: "", description: "", loading: true })] });
@@ -258,6 +281,16 @@ let companyUnverifiedSnapshot;
   const incomplete = fakeBrowser({ samples: [snapshot({ description: "" })] });
   await assert.rejects(() => read(makeReader(incomplete, { timeoutMs: 10 }).reader), (error) => error.code === "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE");
   assert.deepStrictEqual(incomplete.tabs, baselineTabs());
+
+  const redirected = fakeBrowser({
+    samples: [snapshot({ description: "" })],
+    afterEval({ tabs }) {
+      tabs.find((tab) => tab.id === DETAIL_TAB_ID).url = "https://www.zhaopin.com/";
+    }
+  });
+  await assert.rejects(() => read(makeReader(redirected).reader),
+    (error) => error.code === "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE");
+  assert.deepStrictEqual(redirected.tabs, baselineTabs(), "a background redirect must close only the temporary detail tab");
 
   for (const blocked of [
     snapshot({ state: "login_required" }),

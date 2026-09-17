@@ -27,6 +27,7 @@ async function run() {
   assert.equal(offlineProjection.availability, "offline");
   assert.equal(offlineProjection.opportunityVerdict, "职位已下线，以下资料用于理解这段沟通");
   assert.equal(offlineInput.analysis.recommendation, "apply", "source availability must not rewrite the frozen model decision");
+  await fetchedDetailWithoutFullAnalysisSmoke();
   const fixture = createFixture();
   assert.equal(db.prepare("SELECT source_id FROM jobs WHERE id = ?").get(fixture.jobId).source_id, "ZL123456");
   assert.equal(findMessageDiscoveryJobContext(db, { profileId: fixture.profileId, planId: fixture.planId, platform: "zhaopin", sourceId: "ZL123456" }).contextComplete, true);
@@ -127,6 +128,7 @@ async function run() {
   await zhaopinDetailControllerSmoke();
   await zhaopinFatalDetailRetentionSmoke();
   await zhaopinCompanyUnverifiedIsolationSmoke();
+  await zhaopinDetailLocalFailureIsolationSmoke();
   const regressions = [emptyTextPendingSmoke, unsupportedSelfPendingSmoke, pendingPacingSmoke, confirmedSelfBoundarySmoke];
   const failures = [];
   for (const regression of regressions) {
@@ -293,6 +295,117 @@ async function zhaopinCompanyUnverifiedIsolationSmoke() {
     conversationKey: safeDigest(["zhaopin", "terminal-first"]),
     reasonCode: "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
   }]);
+}
+
+async function zhaopinDetailLocalFailureIsolationSmoke() {
+  for (const code of [
+    "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT",
+    "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+    "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE"
+  ]) {
+    const suffix = code.endsWith("READ_TIMEOUT") ? "TIMEOUT"
+      : code.endsWith("TARGET_UNAVAILABLE") ? "UNAVAILABLE" : "INCOMPLETE";
+    const fixture = createFixture({ id: `ZLLOCAL${suffix}2`, title: `Local ${suffix} Engineer` });
+    const firstConversation = safeDigest(["zhaopin", "local-failure", suffix, "first"]);
+    const secondConversation = safeDigest(["zhaopin", "local-failure", suffix, "second"]);
+    const firstSourceJobId = `zhaopin:ZLLOCAL${suffix}1`;
+    const secondSourceJobId = `zhaopin:ZLLOCAL${suffix}2`;
+    const reader = {
+      async scanConversationRows() {
+        return { tabId: 12, rows: [
+          { rowIndex: 0, unread: true, conversationKey: firstConversation,
+            previewDigest: safeDigest(["zhaopin", "local-failure", suffix, "preview-1"]), previewKind: "possible_hr_reply",
+            sourceJobId: firstSourceJobId, lastMessageId: "883001", lastMessageDirection: "friend", identityVerified: true },
+          { rowIndex: 1, unread: true, conversationKey: secondConversation,
+            previewDigest: safeDigest(["zhaopin", "local-failure", suffix, "preview-2"]), previewKind: "possible_hr_reply",
+            sourceJobId: secondSourceJobId, lastMessageId: "883002", lastMessageDirection: "friend", identityVerified: true }
+        ] };
+      },
+      async openQueuedConversation(target) {
+        return { sourceJobId: target.sourceJobId, lastMessageId: target.lastMessageId,
+          positionName: target.sourceJobId === firstSourceJobId ? `Pending ${suffix} Engineer` : fixture.title,
+          companyName: "Zhaopin Fixture Co", salary: "20-30K", city: "Shanghai",
+          messages: [{ direction: "friend", messageId: target.lastMessageId, text: "请介绍相关项目经验。", contentKind: "text" }] };
+      }
+    };
+    const cachedResolver = createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId, now: () => NOW });
+    const statuses = [];
+    const summary = await runBossMessageDiscovery({
+      db, profileId: fixture.profileId, platform: "zhaopin", reader,
+      resolveJobContext: async (input) => {
+        if (input.target.sourceJobId === firstSourceJobId) throw Object.assign(new Error("local detail failure"), { code });
+        return cachedResolver(input);
+      },
+      classifyMessageGroup: async () => classification(["第二条消息仍然完成。"]),
+      now: () => NOW, sleepFn: async () => {}, onStatus: (status) => statuses.push(status)
+    });
+    assert.equal(summary.processed, 1, `${code} must not stop the remaining queue`);
+    assert.ok(statuses.filter((status) => status.phase === "reading_messages").length >= 2,
+      `${code} must publish progress before continuing to the next conversation`);
+    assert.deepEqual(summary.continuedFailures, [{ conversationKey: firstConversation, reasonCode: code }]);
+    const retained = listUnresolvedMessageDiscoveryItems(db, { profileId: fixture.profileId, platform: "zhaopin" });
+    assert.equal(retained.length, 1);
+    assert.equal(retained[0].reasonCode, code);
+  }
+}
+
+async function fetchedDetailWithoutFullAnalysisSmoke() {
+  const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
+    display_name, profile_json, source_hash, created_at, updated_at
+  ) VALUES (?, '{}', NULL, ?, ?)`)
+    .run("Zhaopin fetched detail fixture", NOW, NOW).lastInsertRowid);
+  const planId = Number(db.prepare(`INSERT INTO search_plans(
+    profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at
+  ) VALUES (?, ?, '{}', NULL, 1, ?, ?)`)
+    .run(profileId, "Zhaopin fetched detail plan", NOW, NOW).lastInsertRowid);
+  const sourceId = "ZLFETCH001";
+  let analysisCalls = 0;
+  const resolver = createZhaopinMessageJobContextResolver({
+    db,
+    profileId,
+    messageReader: {
+      async readSelectedJobTarget() {
+        return {
+          jobId: sourceId,
+          navigationUrl: `https://www.zhaopin.com/jobdetail/${sourceId}.htm`,
+          canonicalUrl: `https://www.zhaopin.com/jobdetail/${sourceId}.htm`,
+          availability: "unknown"
+        };
+      }
+    },
+    detailReader: {
+      async readSelectedJobDetail() {
+        return {
+          source: "zhaopin",
+          sourceId,
+          canonicalUrl: `https://www.zhaopin.com/jobdetail/${sourceId}.htm`,
+          title: "Message Context Engineer",
+          company: "Context Fixture Co",
+          location: "Guangzhou",
+          salary: "15-25K",
+          experience: "3-5年",
+          education: "本科",
+          tags: ["Node.js"],
+          description: "负责可信消息上下文读取、Node.js 服务开发、异常恢复、自动化测试和生产问题排查。".repeat(8),
+          availability: "unknown"
+        };
+      }
+    },
+    async analyzeJob() {
+      analysisCalls += 1;
+      throw new Error("message discovery must not run full job matching");
+    },
+    now: () => NOW
+  });
+  const result = await resolver({
+    target: { sourceJobId: `zhaopin:${sourceId}`, conversationKey: safeDigest(["zhaopin", "fetched-detail"]) },
+    selected: { marker: "selected" }
+  });
+  assert.equal(analysisCalls, 0);
+  assert.equal(result.contextSource, "message_discovery_detail");
+  assert.equal(result.job.analysis.semanticStatus, "pending");
+  assert.equal(result.job.description.length >= 120, true);
+  assert.equal(findMessageDiscoveryJobContext(db, { profileId, planId, platform: "zhaopin", sourceId }).contextComplete, true);
 }
 
 async function zhaopinDetailControllerSmoke() {
@@ -644,6 +757,7 @@ function classification(messages) {
 }
 
 async function unresolvedDisplaySmoke() {
+  const existingZhaopinJobs = db.prepare("SELECT count(*) AS n FROM jobs WHERE source = 'zhaopin'").get().n;
   const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
     display_name, profile_json, source_hash, created_at, updated_at
   ) VALUES (?, '{}', NULL, ?, ?)`)
@@ -690,7 +804,8 @@ async function unresolvedDisplaySmoke() {
   assert.equal(retained.sourceJobId, first.sourceJobId);
   assert.equal(retained.positionTitle, first.positionTitle);
   assert.equal(listOpenMessageReplyDrafts(db, { profileId }).length, 0);
-  assert.equal(db.prepare("SELECT count(*) AS n FROM jobs WHERE source = 'zhaopin'").get().n, 1, "only the resolved fixture job may exist");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM jobs WHERE source = 'zhaopin'").get().n, existingZhaopinJobs,
+    "unresolved conversations must not create a fake job");
   reader.openQueuedConversation = async () => { throw Object.assign(new Error("timeline failed again"), { code: "ZHAOPIN_MESSAGE_TIMELINE_FAILED" }); };
   const stopped = await runBossMessageDiscovery({ db, profileId, platform: "zhaopin", reader, classifyMessageGroup: async () => { throw new Error("must not classify without cached context"); }, now: () => NOW, sleepFn: async () => {} });
   assert.equal(stopped.reasonCode, "ZHAOPIN_MESSAGE_TIMELINE_FAILED");

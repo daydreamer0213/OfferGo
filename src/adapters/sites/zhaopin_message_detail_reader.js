@@ -60,7 +60,7 @@ function createZhaopinMessageDetailReader({
   afterIssuedAttempt = async () => {},
   sleepFn = defaultSleep,
   nowFn = Date.now,
-  timeoutMs = 120000,
+  timeoutMs = 30000,
   pollIntervalMs = 500
 } = {}) {
   assertDependencies(browser, messageReader, beforeOpen, afterIssuedAttempt, sleepFn, nowFn, timeoutMs, pollIntervalMs);
@@ -154,7 +154,7 @@ function createZhaopinMessageDetailReader({
         }
         assertBaselineTabs(tabs, binding);
         if (isTargetDetailTab(created, target)) return created;
-        if (!isPendingTabUrl(created)) throw detailError("ZHAOPIN_MESSAGE_DETAIL_NOT_BACKGROUND", "zhaopin detail target could not be proven");
+        if (!isPendingTabUrl(created)) throw detailError("ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE", "zhaopin detail target redirected or became unavailable");
       } else if (newTabs.length || nowFn() >= deadline) {
         throw detailError("ZHAOPIN_MESSAGE_DETAIL_NOT_BACKGROUND", "zhaopin background detail tab identity is ambiguous");
       }
@@ -266,7 +266,7 @@ function captureBinding(tabs, communicationTabId) {
   }
   return {
     windowId: communication.windowId,
-    tabSnapshots: tabs.map((tab) => ({ id: tab.id, windowId: tab.windowId, active: tab.active === true, url: String(tab.url || "") })),
+    tabSnapshots: stableBaselineTabs(tabs).map((tab) => ({ id: tab.id, windowId: tab.windowId, active: tab.active === true, url: String(tab.url || "") })),
     activeTabIds: tabs.filter((tab) => tab.active === true).map((tab) => tab.id)
   };
 }
@@ -282,18 +282,21 @@ function assertBaselineTabs(tabs, binding) {
 
 function assertRestoredBaseline(tabs, binding) {
   assertBaselineTabs(tabs, binding);
-  if (tabs.length !== binding.tabSnapshots.length || !sameActiveTabs(tabs, binding.activeTabIds)) {
+  if (stableBaselineTabs(tabs).length !== binding.tabSnapshots.length || !sameActiveTabs(tabs, binding.activeTabIds)) {
     throw detailError("ZHAOPIN_MESSAGE_DETAIL_BASELINE_NOT_RESTORED", "browser baseline was not restored after zhaopin detail read");
   }
 }
 
 function assertLiveBinding(tabs, binding, detailTabId, target) {
   assertBaselineTabs(tabs, binding);
-  const extras = tabs.filter((tab) => !binding.tabSnapshots.some((item) => sameBrowserTabId(item.id, tab.id)));
+  const extras = stableBaselineTabs(tabs).filter((tab) => !binding.tabSnapshots.some((item) => sameBrowserTabId(item.id, tab.id)));
   if (extras.length !== 1 || !sameBrowserTabId(extras[0].id, detailTabId)
     || extras[0].windowId !== binding.windowId || extras[0].active === true
-    || !isTargetDetailTab(extras[0], target) || !sameActiveTabs(tabs, binding.activeTabIds)) {
+    || !sameActiveTabs(tabs, binding.activeTabIds)) {
     throw detailError("ZHAOPIN_MESSAGE_DETAIL_NOT_BACKGROUND", "zhaopin detail tab safety changed during read");
+  }
+  if (!isTargetDetailTab(extras[0], target)) {
+    throw detailError("ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE", "zhaopin detail target redirected or became unavailable");
   }
 }
 
@@ -312,9 +315,21 @@ function optionalReportedCreatedTab(beforeTabs, tabs, returnedTabId) {
 }
 
 function assertSnapshotJobId(raw, target) {
-  if (normalizedText(raw?.currentJobId) !== target.jobId) {
+  const currentJobId = normalizedText(raw?.currentJobId);
+  if (currentJobId && currentJobId !== target.jobId) {
     throw detailError("ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH", "zhaopin detail identity did not match the selected conversation");
   }
+}
+
+function stableBaselineTabs(tabs) {
+  return (tabs || []).filter((tab) => {
+    try {
+      const url = new URL(String(tab?.url || ""));
+      return !(["127.0.0.1", "localhost"].includes(url.hostname) && ["http:", "https:"].includes(url.protocol));
+    } catch {
+      return true;
+    }
+  });
 }
 
 function assertStableIdentity(raw, selected) {

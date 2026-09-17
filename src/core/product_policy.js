@@ -100,8 +100,8 @@ const PRODUCT_POLICY = Object.freeze({
     }),
     messageDiscoveryPacing: Object.freeze({
       delayMs: Object.freeze({
-        detail: Object.freeze([2500, 4500]),
-        list: Object.freeze([2500, 4500])
+        detail: Object.freeze([1800, 3200]),
+        list: Object.freeze([1800, 3200])
       }),
       periodicEvery: Object.freeze([24, 30]),
       periodicDelayMs: Object.freeze([10000, 15000]),

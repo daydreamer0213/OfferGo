@@ -371,7 +371,8 @@ function configuredDetailBudgetsSmoke() {
     "1h": 15,
     "24h": 30
   });
-  assert.deepStrictEqual(PRODUCT_POLICY.operations.messageDiscoveryPacing.delayMs.detail, [2500, 4500]);
+  assert.deepStrictEqual(PRODUCT_POLICY.operations.messageDiscoveryPacing.delayMs.detail, [1800, 3200]);
+  assert.deepStrictEqual(PRODUCT_POLICY.operations.messageDiscoveryPacing.delayMs.list, [1800, 3200]);
   assert.deepStrictEqual(PRODUCT_POLICY.operations.bossAccessBudget.modes.normal.message_detail_open, {
     "3m": 30,
     "10m": 90,

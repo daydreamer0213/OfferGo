@@ -663,6 +663,10 @@ async function main() {
     "这条会话与岗位详情暂时无法确认，已保留待重试；其他消息会继续处理。"
   );
   assert.equal(
+    messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE"),
+    "这份岗位详情已跳转或暂时不可用，消息已保留；系统会继续处理其他消息。"
+  );
+  assert.equal(
     messageDiscoveryReasonText("ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE"),
     "这份岗位详情还不完整，消息已保留，暂不生成草稿。可稍后重新只读发现。"
   );
@@ -939,10 +943,10 @@ async function detailSafetyCompositionSmoke() {
       listSiteAccessEvents(safetyDb, { site: "boss" }).map((event) => event.action),
       ["message_pane_detail_read", "message_detail_open"]
     );
-    assert.deepStrictEqual(sleeps.map((item) => item.durationMs), [2500],
+    assert.deepStrictEqual(sleeps.map((item) => item.durationMs), [1800],
       "message discovery keeps a short non-zero serial delay without inheriting scan cooldowns");
     assert.strictEqual(sleeps[0].phase, "cooldown");
-    assert.match(sleeps[0].waitUntil, /^2026-08-16T08:00:02\.500Z$/);
+    assert.match(sleeps[0].waitUntil, /^2026-08-16T08:00:01\.800Z$/);
     assert.strictEqual(run.phase, "reading_detail");
 
     await safety.afterIssuedAttempt({ jobId: "stable-job-id", assertTabBindings: async () => {} });
@@ -993,7 +997,7 @@ async function detailSafetyCompositionSmoke() {
     await resumed.beforeOpen({ jobId: "resumed-stable-job", assertTabBindings: async () => {} });
     assert.deepStrictEqual(
       resumedSleeps,
-      [2500],
+      [1800],
       "a new message run must not restore job-scan pacing state"
     );
   } finally {
@@ -1164,6 +1168,7 @@ async function controllerBrowserAuthoritySmoke() {
   let detailSafetyInput = null;
   let detailReaderInput = null;
   let contextResolverInput = null;
+  let analyzerModelConfig = null;
   let runResolver = null;
   let cleanupBrowser = null;
   const controllerDb = {
@@ -1194,7 +1199,14 @@ async function controllerBrowserAuthoritySmoke() {
       contextResolverInput = input;
       return resolverSentinel;
     },
-    createAnalyzer: () => ({}),
+    getModelConfig: () => ({
+      provider: "openai_compatible",
+      providers: { openai_compatible: { timeoutMs: 120000, maxRetries: 3, maxTokens: 4096 } }
+    }),
+    createAnalyzer: ({ modelConfig }) => {
+      analyzerModelConfig = modelConfig;
+      return {};
+    },
     runDiscovery: async (input) => {
       runResolver = input.resolveJobContext;
       return {
@@ -1229,6 +1241,10 @@ async function controllerBrowserAuthoritySmoke() {
   assert.strictEqual(contextResolverInput.messageReader, readerSentinel);
   assert.strictEqual(contextResolverInput.detailReader, detailReaderSentinel);
   assert.strictEqual(runResolver, resolverSentinel);
+  assert.strictEqual(analyzerModelConfig.providers.openai_compatible.timeoutMs, 60000,
+    "message drafting must cap one model attempt so a single conversation cannot look frozen indefinitely");
+  assert.strictEqual(analyzerModelConfig.providers.openai_compatible.maxRetries, 0,
+    "message discovery must continue with manual review instead of retrying one slow model call inline");
   assert.strictEqual(cleanupBrowser, browserSentinel, "controller cleanup must receive the owned adapter");
 }
 
@@ -2100,6 +2116,27 @@ async function messageDiscoveryPollingSmoke(markup) {
     "live discovery feedback must show how many messages were found");
   assert.match(cooldownPoll.feedback.textContent, /8 条.*待补/,
     "live discovery feedback must show retained messages that still need job context");
+
+  const analyzingPoll = runMessageDiscoveryClient(markup, {
+    response: jsonResponse(200, {
+      status: "running",
+      phase: "analyzing_messages",
+      queued: 19,
+      processed: 5,
+      unresolved: 5
+    })
+  }, { status: "running" });
+  await analyzingPoll.runTimer(0);
+  assert.match(analyzingPoll.feedback.textContent, /整理消息并生成回复建议/,
+    "model work must be described accurately instead of looking like a stalled browser read");
+
+  const terminalPoll = runMessageDiscoveryClient(markup, {
+    response: jsonResponse(200, { status: "needs_user_action" })
+  }, { status: "running", storedSelection: "stale-message-key" });
+  await terminalPoll.runTimer(0);
+  assert.strictEqual(terminalPoll.reloads(), 1);
+  assert.strictEqual(terminalPoll.storedSelection(), null,
+    "a completed sync must reset stale selection so the refreshed list and detail start on the same first item");
 }
 
 async function messageDiscoveryMalformedResponseSmoke(markup) {
@@ -2239,6 +2276,8 @@ function runMessageDiscoveryClient(markup, scenario, options = {}) {
   let reloadCount = 0;
   let fetchCallCount = 0;
   const timers = [];
+  const localValues = new Map();
+  if (options.storedSelection) localValues.set("message-selection-1", options.storedSelection);
   const context = {
     document,
     URLSearchParams,
@@ -2250,6 +2289,11 @@ function runMessageDiscoveryClient(markup, scenario, options = {}) {
       return scenario.response;
     },
     navigator: { clipboard: { writeText: async () => {} } },
+    localStorage: {
+      getItem(key) { return localValues.has(key) ? localValues.get(key) : null; },
+      setItem(key, value) { localValues.set(key, String(value)); },
+      removeItem(key) { localValues.delete(key); }
+    },
     location: { href: "/messages", reload() { reloadCount += 1; } },
     setTimeout(callback) { timers.push(callback); return timers.length; },
     clearTimeout() {},
@@ -2264,6 +2308,7 @@ function runMessageDiscoveryClient(markup, scenario, options = {}) {
     href: () => context.location.href,
     fetchCalls: () => fetchCallCount,
     reloads: () => reloadCount,
+    storedSelection: () => localValues.get("message-selection-1") ?? null,
     timerCount: () => timers.length,
     runTimer: (index) => timers[index](),
     submit: () => handlers.get("submit")({ preventDefault() {} })

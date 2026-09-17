@@ -188,7 +188,7 @@ async function main() {
     await page.getByRole('button',{name:'同步最新消息',exact:true}).click();
     let completedStatus;for(let attempt=0;attempt<100;attempt++){completedStatus=await (await fetch(base+'/api/message-discovery-status?profileId='+profileId)).json();if(completedStatus.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,5));}
     assert.equal(completedStatus.status,'completed');assert.equal(completedStatus.unresolved,0);assert.equal(completedStatus.reasonCode,'');assert(completedStatus.startedAt);
-    await page.locator('.message-read-details').waitFor({state:'visible'});
+    await page.waitForFunction(()=>document.querySelector('.message-read-details')?.textContent.includes('未解决 0'));
     const completedState=await page.locator('.message-read-details').textContent();assert.match(completedState,/未解决 0/);assert.match(completedState,/保留记录 1/);assert.doesNotMatch(completedState,/无法确认本地岗位与会话是否一致/);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM message_discovery_unresolved_items WHERE profile_id=? AND conversation_key=?').get(profileId,historicalConversationKey).n,1,'the successful current run must retain the old BOSS row');
     const historicalRow=page.locator('.message-list-item[data-platform="boss"]',{hasText:'历史待核对岗位'});
