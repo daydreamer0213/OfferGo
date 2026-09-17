@@ -59,7 +59,13 @@ async function main() {
     let bossReadCalls=0,zhaopinReadCalls=0,operations=0,maxOperations=0,cleanup=0;const riskRecords=[];
     let connected=['zhaopin']; const order=[];
     const deps={db,acquireLease:storage.acquireSiteScanLease,renewLease:storage.renewSiteScanLease,releaseLease:storage.releaseSiteScanLease,
-      createBrowser:()=>({listTabs:async()=>connected.map((p,i)=>({id:i+1,windowId:1,url:p==='boss'?'https://www.zhipin.com/web/geek/chat':p==='boss_risk'?'https://www.zhipin.com/web/geek/jobs?_security_check=fixture':PARAMETERIZED_IM_URL}))}),
+      createBrowser:()=>({
+        listTabs:async()=>connected.map((p,i)=>({id:i+1,windowId:1,url:p==='boss'?'https://www.zhipin.com/web/geek/chat':p==='boss_stale'||p==='boss_risk'?'https://www.zhipin.com/web/geek/jobs?_security_check=fixture':PARAMETERIZED_IM_URL})),
+        evalValue:async(tabId)=>{
+          const platform=connected[tabId-1];
+          return {url:platform==='boss'?'https://www.zhipin.com/web/geek/chat':'https://www.zhipin.com/web/geek/jobs?_security_check=fixture',title:platform==='boss_risk'?'安全验证':'BOSS直聘',isBoss:true,isLoginPage:false,isRiskPage:platform==='boss_risk',hasUserSurface:platform!=='boss_risk',loggedIn:platform!=='boss_risk',isSearchPage:platform!=='boss',hasJobStructure:platform!=='boss_risk'};
+        }
+      }),
       cleanupBrowser:async()=>{cleanup++;},assertRuntimeAvailable:()=>{bossReadCalls++;if(deps.blockBoss)throw Object.assign(Error('existing pause'),{code:'BOSS_RUNTIME_BLOCKED'});},
       recordRiskControl:(input)=>riskRecords.push(input),
       createReader:({platform})=>({platform}),createDetailSafety:()=>({}),createDetailReader:()=>({}),createJobContextResolver:()=>async()=>({}),createAnalyzer:()=>async()=>({}),
@@ -82,7 +88,8 @@ async function main() {
     connected=['boss','zhaopin','zhaopin'];controller.start(profileId);result=await settle(controller,profileId);
     assert.equal(result.results[0].cardId,boss.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'completed');assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').reasonCode,'','extra same-platform tabs must not block the managed message page');
     connected=['boss','zhaopin'];deps.blockBoss=true;controller.start(profileId);result=await settle(controller,profileId);assert.equal(result.results[0].cardId,zl.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RUNTIME_BLOCKED');deps.blockBoss=false;
-    connected=['boss','boss_risk','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['zhaopin'],'a BOSS security-check tab takes precedence over an apparently usable message tab');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'needs_user_action');assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RISK_CONTROL');assert.equal(riskRecords.at(-1).errorCode,'BOSS_RISK_CONTROL');
+    connected=['boss','boss_stale','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['boss','zhaopin'],'a stale security-check query parameter cannot hide a healthy logged-in BOSS session');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'completed');
+    connected=['boss','boss_risk','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['zhaopin'],'a live BOSS risk page takes precedence over an apparently usable message tab');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'needs_user_action');assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RISK_CONTROL');assert.equal(riskRecords.at(-1).errorCode,'BOSS_RISK_CONTROL');
     await controller.close();
     const restored=createMessageDiscoveryController({db});const recovered=restored.pageState(profileId);
     assert.equal(recovered.results.length,3,'manual-only inbound context must survive restart');

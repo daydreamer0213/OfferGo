@@ -5,7 +5,7 @@ const { createZhaopinMessageJobContextResolver } = require("../application/messa
 const { findMessageDiscoveryJobContext } = require("../core/candidate_progress");
 const { createBossMessageDetailReader } = require("../adapters/sites/boss_message_detail_reader");
 const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_message_detail_reader");
-const { BossSiteAdapter } = require("../adapters/sites/boss");
+const { BossSiteAdapter, inspectBossSessionState } = require("../adapters/sites/boss");
 const { createMessageDiscoveryJobContextResolver } = require("../application/message_discovery/job_context");
 const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../application/message_discovery/run");
 const { createMessageReplyAnalyzer } = require("../core/message_reply_analyzer");
@@ -184,6 +184,9 @@ function createMessageDiscoveryController(deps = {}) {
       browser = await createBrowser();
       if (abortController.signal.aborted) throw abortController.signal.reason;
       const tabs = await browser.listTabs();
+      const bossSessionState = enabledPlatforms.includes("boss") && typeof browser.evalValue === "function"
+        ? await inspectBossSessionState(browser, tabs)
+        : { hasRiskPage: false };
       const workspaceWindowIds = new Set(tabs.filter(isDashboardMessageWorkspaceTab).map((tab) => tab.windowId));
       run.platformRuns = enabledPlatforms.map((platform) => {
         const matches = tabs.filter((tab) => {
@@ -196,7 +199,7 @@ function createMessageDiscoveryController(deps = {}) {
         });
         const inWorkspace = matches.filter((tab) => workspaceWindowIds.has(tab.windowId));
         const selected = stableMessageTab(inWorkspace.length ? inWorkspace : matches);
-        const riskControl = platform === "boss" && tabs.some((tab) => isBossRiskControlUrl(tab?.url));
+        const riskControl = platform === "boss" && bossSessionState.hasRiskPage;
         return { platform, status: riskControl ? "needs_user_action" : selected ? "pending" : "not_connected",
           reasonCode: riskControl ? "BOSS_RISK_CONTROL" : "",
           bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
@@ -1149,15 +1152,6 @@ function boundedMessageDraftModelConfig(modelConfig) {
       }
     }
   };
-}
-
-function isBossRiskControlUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    return url.origin === "https://www.zhipin.com" && url.searchParams.has("_security_check");
-  } catch {
-    return false;
-  }
 }
 
 function stableMessageTab(tabs) {
