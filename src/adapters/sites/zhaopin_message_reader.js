@@ -456,10 +456,17 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
         }
         binding = next;
         const deadline = nowFn() + timeoutMs;
+        const mountDeadline = Math.min(deadline, nowFn() + 15000);
         let snapshot;
         while (true) {
           await assertActiveBindings(signal);
-          snapshot = await readSnapshot(next.tabId, signal);
+          try {
+            snapshot = await readSnapshot(next.tabId, signal);
+          } catch (error) {
+            if (error?.code !== "ZHAOPIN_MESSAGE_STRUCTURE_CHANGED" || nowFn() >= mountDeadline) throw error;
+            await sleepFn(pollIntervalMs, signal);
+            continue;
+          }
           if (snapshot.listError) throw codedError("ZHAOPIN_MESSAGE_LIST_FAILED", "zhaopin conversation list failed");
           if (!snapshot.listLoading) break;
           if (nowFn() >= deadline) throw codedError("ZHAOPIN_MESSAGE_CONTENT_PENDING", "zhaopin conversation list is not ready");

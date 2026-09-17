@@ -310,7 +310,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.fixture.clicks), clicksBeforeInvalidJob, "an invalid job identity must stop before row.click()");
     assert.deepEqual(await page.evaluate(() => [window.fixture.resumeClicks,window.fixture.senderClicks]), [0,0]);
     const failures = [];
-    for (const regression of [parameterizedUrlSmoke, loginGuardSmoke, listLoadingSmoke, ambiguousFromMeSmoke, defaultWaitCleanupSmoke, unselectedListSmoke]) {
+    for (const regression of [parameterizedUrlSmoke, loginGuardSmoke, refreshMountRaceSmoke, listLoadingSmoke, ambiguousFromMeSmoke, defaultWaitCleanupSmoke, unselectedListSmoke]) {
       try { await regression(page, first); } catch (error) { failures.push(`${regression.name}: ${error.stack}`); }
     }
     assert.deepEqual(failures, []);
@@ -441,6 +441,30 @@ async function listLoadingSmoke(page, first) {
     const bridge = fakeBrowser(page);
     await assert.rejects(() => readerFor(bridge, { onSleep: () => { bridge.listTabs = async () => tabs().map(tab => tab.id === IM_TAB_ID ? { ...tab, [field]: tab[field] + 1 } : tab); } }).scanConversationRows(), error => error.code === "ZHAOPIN_MESSAGE_TAB_BINDING_LOST");
   }
+}
+
+async function refreshMountRaceSmoke(page, first) {
+  const timeline = [message({ idServer: "650", body: "刷新后可读取" })];
+  await setFixture(page, { sessions: [first], active: first, timeline });
+  const bridge = fakeBrowser(page);
+  const reload = bridge.reload;
+  bridge.reload = async (tabId) => {
+    await reload(tabId);
+    await page.evaluate(() => {
+      document.querySelector(".im-side-panel").__vue__ = undefined;
+      document.querySelector(".im-main-panel").__vue__ = undefined;
+    });
+  };
+  let waits = 0;
+  const reader = readerFor(bridge, {
+    onSleep: async () => {
+      waits += 1;
+      await setFixture(page, { sessions: [first], active: first, timeline });
+    }
+  });
+  const scan = await reader.scanConversationRows();
+  assert.equal(scan.rows.length, 1, "a refreshed message page waits for Vue to remount before declaring a structure change");
+  assert.equal(waits, 1);
 }
 
 async function ambiguousFromMeSmoke(page, first) {
