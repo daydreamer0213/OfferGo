@@ -808,7 +808,7 @@ function durableLocalReasonCode(code) {
 function selectUnprocessedFriendMessageGroup(db, cardId, selected, threadKey, platform = "boss") {
   const messages = Array.isArray(selected?.messages) ? selected.messages : [];
   if (platform === "zhaopin" && messages.length === 0) {
-    return { ok: false, reasonCode: "ZHAOPIN_MESSAGE_CONTENT_PENDING" };
+    return { ok: false, reasonCode: "ZHAOPIN_MESSAGE_CONTENT_PENDING", actionable: [], ignored: [], unknown: [] };
   }
   let lastMyself = -1;
   for (let index = 0; index < messages.length; index += 1) {
@@ -816,79 +816,110 @@ function selectUnprocessedFriendMessageGroup(db, cardId, selected, threadKey, pl
     if (item?.direction === "myself" && (platform !== "zhaopin"
       || (item.contentKind === "text" && String(item.text || "").trim()))) lastMyself = index;
   }
+
   const candidates = [];
+  const ignored = [];
+  const unknown = [];
   for (let index = lastMyself + 1; index < messages.length; index += 1) {
     const item = messages[index];
     if (!item || typeof item !== "object") continue;
     const direction = String(item.direction || "");
-    const contentKind = String(item.contentKind || "text");
-    if (direction === "platform" && contentKind === "platform_notice") continue;
-    if (direction !== "friend") {
-      if (platform === "zhaopin") return { ok: false, reasonCode: "ZHAOPIN_MESSAGE_CONTENT_PENDING" };
-      item.messageId = "";
-      item.text = "";
-      continue;
-    }
-    if (!["text", "resume_request", "platform_notice"].includes(contentKind)) {
-      if (platform === "zhaopin") return { ok: false, reasonCode: "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED" };
-      clearMessageSources(messages);
-      return { ok: false, reasonCode: "BOSS_MESSAGE_CONTENT_UNSUPPORTED" };
-    }
+    const contentKind = String(item.contentKind || "text") === "unknown" ? "unknown_card" : String(item.contentKind || "text");
     const text = String(item.text || "").replace(/\s+/g, " ").trim();
-    if (contentKind === "text" && !text) {
-      if (platform === "zhaopin") return { ok: false, reasonCode: "ZHAOPIN_MESSAGE_CONTENT_PENDING" };
-      item.messageId = "";
-      item.text = "";
-      continue;
-    }
-    let digest;
+    let digest = "";
     try {
-      digest = platform === "boss"
-        ? messageKey({ platform: "boss", threadKey, messageId: item.messageId })
-        : zhaopinMessageKey(threadKey, item.messageId);
+      digest = validDigest(item.messageKey)
+        ? item.messageKey
+        : platform === "boss"
+          ? messageKey({ platform: "boss", threadKey, messageId: item.messageId })
+          : zhaopinMessageKey(threadKey, item.messageId);
+    } catch (error) {
+      if (platform === "zhaopin") {
+        unknown.push({ contentKind: "unknown_card", text: "", metadata: { reason: errorCode(error) } });
+        continue;
+      }
+      throw error;
     } finally {
       item.messageId = "";
     }
-    const idempotencyKey = `message:${platform}:${digest.slice(7)}`;
-    const exists = db.prepare(`SELECT 1 AS found FROM candidate_progress_events
-      WHERE card_id = ? AND idempotency_key = ?`).get(cardId, idempotencyKey);
-    candidates.push({
+    const event = {
       messageKey: digest,
-      text: contentKind === "text" ? text : "",
       contentKind,
-      isNew: !exists
-    });
+      text: contentKind === "media_ignored" ? "" : text,
+      metadata: item.metadata && typeof item.metadata === "object" ? { ...item.metadata } : {}
+    };
+
+    if (contentKind === "unknown_card") {
+      unknown.push(event);
+      item.text = "";
+      continue;
+    }
+    if (["platform_notice", "media_ignored"].includes(contentKind)) {
+      ignored.push(event);
+      item.text = "";
+      continue;
+    }
+    if (direction !== "friend") {
+      if (direction !== "platform" && platform === "zhaopin") unknown.push({ ...event, contentKind: "unknown_card" });
+      item.text = "";
+      continue;
+    }
+    if (!["text", "resume_request", "interview_invitation", "contact_exchange"].includes(contentKind)
+      || (contentKind === "text" && !text)) {
+      unknown.push({ ...event, contentKind: "unknown_card" });
+      item.text = "";
+      continue;
+    }
+    const idempotencyKey = "message:" + platform + ":" + digest.slice(7);
+    const exists = db.prepare("SELECT 1 AS found FROM candidate_progress_events WHERE card_id = ? AND idempotency_key = ?").get(cardId, idempotencyKey);
+    candidates.push({ ...event, isNew: !exists });
     item.text = "";
   }
   for (const item of messages) {
-    item.messageId = "";
-    item.text = "";
+    if (item && typeof item === "object") {
+      item.messageId = "";
+      item.text = "";
+    }
+  }
+
+  if (unknown.length) {
+    return {
+      ok: false,
+      reasonCode: platform === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED" : "BOSS_MESSAGE_CONTENT_UNSUPPORTED",
+      actionable: candidates,
+      ignored,
+      unknown
+    };
   }
   const processed = candidates.filter((item) => !item.isNew);
   const unprocessed = candidates.filter((item) => item.isNew);
   const grouped = [...processed, ...unprocessed];
   if (grouped.length > BOSS_MESSAGE_GROUP_LIMIT) {
-    return { ok: false, reasonCode: platform === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_PENDING" : "BOSS_MESSAGE_GROUP_LIMIT" };
+    return { ok: false, reasonCode: platform === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_PENDING" : "BOSS_MESSAGE_GROUP_LIMIT", actionable: grouped, ignored, unknown };
   }
   if (grouped.reduce((sum, item) => sum + (item.contentKind === "text" ? item.text.length : 0), 0) > BOSS_MESSAGE_GROUP_TEXT_LIMIT) {
-    return { ok: false, reasonCode: platform === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_PENDING" : "BOSS_MESSAGE_GROUP_TEXT_LIMIT" };
+    return { ok: false, reasonCode: platform === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_PENDING" : "BOSS_MESSAGE_GROUP_TEXT_LIMIT", actionable: grouped, ignored, unknown };
   }
   const newMessageKeys = unprocessed.map((item) => item.messageKey);
   if (newMessageKeys.length === 0) {
-    return { ok: false, skipped: true, reasonCode: "BOSS_MESSAGE_ALREADY_PROCESSED" };
+    return { ok: false, skipped: true, reasonCode: "BOSS_MESSAGE_ALREADY_PROCESSED", actionable: grouped, ignored, unknown };
   }
   const hasNewText = unprocessed.some((item) => item.contentKind === "text");
-  const manualActions = unprocessed.some((item) => item.contentKind === "resume_request")
-    ? [{ kind: "resume_request" }]
-    : [];
+  const manualActions = [...new Set(unprocessed
+    .filter((item) => ["resume_request", "interview_invitation", "contact_exchange"].includes(item.contentKind))
+    .map((item) => item.contentKind))]
+    .map((kind) => ({ kind }));
   if (!hasNewText && manualActions.length === 0) {
-    return { ok: false, skipped: true, reasonCode: "BOSS_MESSAGE_PLATFORM_NOTICE_ONLY" };
+    return { ok: false, skipped: true, reasonCode: "BOSS_MESSAGE_PLATFORM_NOTICE_ONLY", actionable: grouped, ignored, unknown };
   }
   return {
     ok: true,
+    actionable: grouped,
+    ignored,
+    unknown,
     messages: grouped
       .filter((item) => item.contentKind === "text")
-      .map(({ messageKey: itemKey, text }) => ({ messageKey: itemKey, text })),
+      .map(({ messageKey: itemKey, text: itemText }) => ({ messageKey: itemKey, text: itemText })),
     manualActions,
     messageGroupKey: safeDigest(platform === "boss"
       ? ["message-group", threadKey, ...grouped.map((item) => item.messageKey)]
@@ -897,6 +928,9 @@ function selectUnprocessedFriendMessageGroup(db, cardId, selected, threadKey, pl
   };
 }
 
+function validDigest(value) {
+  return /^sha256:[a-f0-9]{64}$/.test(String(value || ""));
+}
 function resumeRequestClassification(platform = "boss") {
   return {
     messageIntent: "manual_review",

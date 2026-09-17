@@ -124,14 +124,17 @@ function verifiedPreviewKind(row, value, identity) {
 }
 
 function messageContentKind(item) {
-  if (item.matches(".item-voice")) return "voice";
-  if (item.matches(".item-image")) return "image";
-  if (item.matches(".item-attachment")) return "attachment";
+  if (item.matches(".item-voice, .item-image, .item-attachment")) return "media_ignored";
   const card = item.querySelector(".message-card-wrap");
   if (!card) return "text";
   if (isResumeRequestCard(card)) return "resume_request";
   if (isCompetitionNoticeCard(card)) return "platform_notice";
-  return "unknown";
+  return "unknown_card";
+}
+
+function messageMetadata(item, contentKind) {
+  if (contentKind !== "media_ignored") return {};
+  return { mediaKind: item.matches(".item-voice") ? "voice" : item.matches(".item-image") ? "image" : "attachment" };
 }
 
 function isResumeRequestCard(card) {
@@ -224,11 +227,14 @@ function snapshotBossMessagePage(documentLike, locationHref) {
     const messages = [...documentLike.querySelectorAll(SELECTORS.message)].map((item) => {
       const messageId = String(item.getAttribute("data-mid") == null ? "" : item.getAttribute("data-mid"));
       if (!/^\d{15}$/.test(messageId)) throw codedError("BOSS_MESSAGE_ID_INVALID", "message id is invalid");
+      const contentKind = messageContentKind(item);
       return {
-        direction: item.matches(".item-friend") ? "friend" : item.matches(".item-myself") ? "myself" : "system",
+        direction: item.matches(".item-friend") ? "friend" : item.matches(".item-myself") ? "myself" : "platform",
         messageId,
-        text: normalizedText(item.textContent),
-        contentKind: messageContentKind(item)
+        text: contentKind === "media_ignored" ? "" : normalizedText(item.textContent),
+        contentKind,
+        occurredAt: null,
+        metadata: messageMetadata(item, contentKind)
       };
     });
     return {
@@ -329,7 +335,8 @@ const BOSS_MESSAGE_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
   const buttonTexts = (region) => region ? Array.from(region.querySelectorAll(".card-btn"), (button) => text(button.textContent)) : [];
   const resumeRequestCard = (card) => { const title = text(card.querySelector(".message-card-top-title.message-card-top-text")?.textContent); const actions = buttonTexts(card.querySelector(".message-card-buttons")); return card.matches(".boss-green") && Boolean(card.querySelector(".dialog-icon.resume")) && /附件简历/.test(title) && /是否同意/.test(title) && actions.length === 2 && actions[0] === "拒绝" && actions[1] === "同意"; };
   const competitionNoticeCard = (card) => { const title = text(card.querySelector(".message-card-top-title")?.textContent); const buttons = Array.from(card.querySelectorAll(".card-btn")); return card.matches(".blue") && !card.querySelector(".dialog-icon.resume") && /竞争/.test(title) && buttons.length === 1 && buttons[0].matches(".one-btn") && text(buttons[0].textContent) === "查看详细分析"; };
-  const contentKind = (item) => { if (item.matches(".item-voice")) return "voice"; if (item.matches(".item-image")) return "image"; if (item.matches(".item-attachment")) return "attachment"; const card = item.querySelector(".message-card-wrap"); if (!card) return "text"; if (resumeRequestCard(card)) return "resume_request"; if (competitionNoticeCard(card)) return "platform_notice"; return "unknown"; };
+  const contentKind = (item) => { if (item.matches(".item-voice, .item-image, .item-attachment")) return "media_ignored"; const card = item.querySelector(".message-card-wrap"); if (!card) return "text"; if (resumeRequestCard(card)) return "resume_request"; if (competitionNoticeCard(card)) return "platform_notice"; return "unknown_card"; };
+  const metadata = (item, kind) => kind !== "media_ignored" ? {} : ({ mediaKind: item.matches(".item-voice") ? "voice" : item.matches(".item-image") ? "image" : "attachment" });
   const signature = (row) => "sha256:" + sha256(canonical([row.rowIndex, row.recruiterLabel, row.previewText, row.unread]));
   const visible = (element) => { const rect = element.getBoundingClientRect(); const style = getComputedStyle(element); return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"; };
   window.__bossMessageSnapshot = function() {
@@ -340,7 +347,7 @@ const BOSS_MESSAGE_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
       const risk = /\/web\/passport\/zp\/(?:verify|403)/i.test(path) || new URLSearchParams(location.search).get("code") === "32" || /\u5b89\u5168\u9a8c\u8bc1|\u8bbf\u95ee\u5f02\u5e38|\u884c\u4e3a\u9a8c\u8bc1|\u8bbf\u95ee\u53d7\u9650/.test(document.title || "") || /\u8d26\u6237\u5b58\u5728\u5f02\u5e38\u884c\u4e3a|\u6682\u65f6\u65e0\u6cd5\u8bbf\u95ee\u6b64\u9875\u9762|\u8bf7\u52ff\u9891\u7e41\u63d0\u4ea4\u5237\u65b0\u8bf7\u6c42/.test(bodyText);
       const login = /\/web\/user\//i.test(path) || Array.from(document.querySelectorAll(".sign-form, .login-register, [class*='login-form']")).some(visible) || /\u6ca1\u6709\u66f4\u591a\u804c\u4f4d.{0,20}\u767b\u5f55\u67e5\u770b\u5168\u90e8\u804c\u4f4d|\u767b\u5f55\u540e\u53ef\u67e5\u770b/.test(bodyText);
       const rows = Array.from(document.querySelectorAll(selectors.row)).map((row, rowIndex) => { const rowLines = lines(row.innerText); const recruiterLabel = text(row.querySelector(selectors.rowTitle)?.textContent) || rowLines[0] || ""; const previewText = text(row.querySelector(selectors.lastMsg)?.textContent) || rowLines.at(-1) || ""; const identity = rowIdentity(row, recruiterLabel); const value = { rowIndex, unread: Boolean(row.querySelector(selectors.unread)), selected: row.matches(selectors.selected) || Boolean(row.querySelector(selectors.selected)), recruiterLabel, previewText, recruiterKey: recruiterKey(row, recruiterLabel), ...identity, previewDigest: "sha256:" + sha256(canonical(["preview", previewText])), previewKind: verifiedPreviewKind(row, previewText, identity) }; return { ...value, transientSignature: signature(value) }; });
-      const messages = Array.from(document.querySelectorAll(selectors.message)).map((item) => { const messageId = String(item.getAttribute("data-mid") == null ? "" : item.getAttribute("data-mid")); if (!/^\d{15}$/.test(messageId)) throw coded("BOSS_MESSAGE_ID_INVALID", "message id is invalid"); return { direction: item.matches(".item-friend") ? "friend" : item.matches(".item-myself") ? "myself" : "system", messageId, text: text(item.textContent), contentKind: contentKind(item) }; });
+      const messages = Array.from(document.querySelectorAll(selectors.message)).map((item) => { const messageId = String(item.getAttribute("data-mid") == null ? "" : item.getAttribute("data-mid")); if (!/^\d{15}$/.test(messageId)) throw coded("BOSS_MESSAGE_ID_INVALID", "message id is invalid"); const kind = contentKind(item); return { direction: item.matches(".item-friend") ? "friend" : item.matches(".item-myself") ? "myself" : "platform", messageId, text: kind === "media_ignored" ? "" : text(item.textContent), contentKind: kind, occurredAt: null, metadata: metadata(item, kind) }; });
       return { path, rows, headerText: lines(document.querySelector(selectors.header)?.innerText)[0] || "", positionName: text(document.querySelector(selectors.position)?.textContent), companyName, salary: text(document.querySelector(selectors.salary)?.textContent), city: text(document.querySelector(selectors.city)?.textContent), risk, login, messages, writeTargetsPresent: { editor: Boolean(document.querySelector(selectors.editor)), send: Boolean(document.querySelector(selectors.send)) } };
     } catch (error) {
       if (error && (error.code === "BOSS_MESSAGE_ID_INVALID" || error.code === "BOSS_MESSAGE_STRUCTURE_CHANGED")) throw error;

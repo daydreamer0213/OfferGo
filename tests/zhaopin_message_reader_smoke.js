@@ -61,7 +61,8 @@ function fixtureHtml() {
             const row = document.createElement('article'); row.className = 'im-message' + (current.tip ? ' im-message--tip' : '');
             row.__vue__ = { $options: { name: current.nested ? 'ImMessageRenderer' : 'ImMessageRow' }, $props: { msg: current, session: current.sessionOverride || this.active } };
             if (current.type === 'text') { const text = document.createElement('span'); text.className = 'im-msg-text'; text.textContent = current.body; row.append(text); }
-            else if (String(current.cardType) === '131') { const rich = document.createElement('div'); rich.className = 'im-msg-rich'; rich.textContent = current.body; row.append(rich); }
+            else if (['131','303'].includes(String(current.cardType))) { const rich = document.createElement('div'); rich.className = 'im-msg-rich'; rich.textContent = current.body; row.append(rich); }
+            else if (String(current.cardType) === '346') { const notice = document.createElement('div'); notice.className = 'im-msg-346__text'; notice.textContent = current.body; row.append(notice); }
             else if (String(current.cardType) === '11') { const card = document.createElement('div'); card.className = 'im-msg-11-wrap'; card.innerHTML = '<strong>邀请发送简历</strong><button class="im-msg-11__btn--refuse">拒绝</button><button class="im-msg-11__btn--agree">同意</button>'; row.append(card); }
             else if (String(current.cardType) === '255' && !current.noFallback) { const fallback = document.createElement('div'); fallback.className = 'im-msg-255-fallback'; fallback.textContent = current.body; row.append(fallback); }
             else { const card = document.createElement('div'); card.className = 'unknown-card'; card.textContent = current.body || '隐藏卡片'; row.append(card); }
@@ -124,6 +125,8 @@ async function main() {
       message({ idServer: "102", type: "custom", cardType: "11", body: "简历" }),
       message({ idServer: "103", type: "custom", cardType: "131", body: "请发送简历" }),
       message({ idServer: "104", type: "custom", cardType: "255", body: "系统提示", tip: true, flow: "out", fromMe: true, from: 900 }),
+      message({ idServer: "105", type: "custom", cardType: "303", body: "合成富文本" }),
+      message({ idServer: "106", type: "custom", cardType: "346", body: "合成平台提示", tip: true }),
       message({ idServer: "999", body: "不得重复", nested: true })
     ];
     await setFixture(page, { sessions: [first, second], active: first, timeline: richTimeline, loading: true });
@@ -139,11 +142,13 @@ async function main() {
     assert(bridge.calls.some(([name]) => name === "reload"));
     const selected = await reader.openQueuedConversation({ ...scanned.rows[0], tabId: scanned.tabId });
     assert.deepStrictEqual(selected.messages.map(m => [m.direction, m.contentKind]), [
-      ["friend", "text"], ["friend", "resume_request"], ["friend", "text"], ["platform", "platform_notice"]
+      ["friend", "text"], ["friend", "resume_request"], ["friend", "text"], ["platform", "platform_notice"],
+      ["friend", "text"], ["platform", "platform_notice"]
     ]);
-    assert.strictEqual(selected.messages.filter(m => m.contentKind === "text").length, 2);
+    assert.strictEqual(selected.messages.filter(m => m.contentKind === "text").length, 3);
+    assert(selected.messages.every(message => /^sha256:[a-f0-9]{64}$/.test(message.messageKey)));
     assert.strictEqual(selected.sourceJobId, "zhaopin:CCL1234567890J00123456789");
-    assert.equal(selected.lastMessageId, "104", "the detail reader returns a real final meaningful ID");
+    assert.equal(selected.lastMessageId, "106", "the detail reader returns a real final meaningful ID");
 
     await setFixture(page, { sessions: [], active: null, timeline: [], loading: false });
     let emptyMountWaits = 0;
@@ -219,7 +224,7 @@ async function main() {
     const malformedScan = await malformedReader.scanConversationRows();
     assert.equal(malformedScan.rows[0].lastMessageDirection, "unknown", "optional preview identity is never invented");
     const malformed = await malformedReader.openQueuedConversation({ ...malformedScan.rows[0], tabId: IM_TAB_ID });
-    assert.deepStrictEqual(malformed.messages.map(item => item.contentKind), ["unsupported", "unsupported", "unsupported", "unsupported", "text"]);
+    assert.deepStrictEqual(malformed.messages.map(item => item.contentKind), ["unknown_card", "unknown_card", "unknown_card", "unknown_card", "text"]);
     assert.equal(malformed.messages.at(-1).direction, "myself", "outbound identity must come from message data, not screen position");
     const outgoingSnapshot = await page.evaluate(ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION);
     assert.equal(hasZhaopinOutgoingTextSnapshot(outgoingSnapshot, { sessionId: uncertain.sessionId, jobNumber: JOB_A }), true,
@@ -496,7 +501,7 @@ async function ambiguousFromMeSmoke(page, first) {
   const reader = readerFor(fakeBrowser(page));
   const scan = await reader.scanConversationRows();
   const selected = await reader.openQueuedConversation({ ...scan.rows[0], tabId: scan.tabId });
-  assert.deepEqual(selected.messages.map(item => [item.direction, item.contentKind]), Array(5).fill(["unknown", "unsupported"]));
+  assert.deepEqual(selected.messages.map(item => [item.direction, item.contentKind]), Array(5).fill(["unknown", "unknown_card"]));
   assert.equal(selected.lastMessageId, "", "ambiguous sender evidence cannot become an accepted final message ID");
 }
 

@@ -219,6 +219,8 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
     ["platform_notice", "text", "resume_request"],
     "the reader must retain the two verified structured message kinds"
   );
+  assert(structuredSelected.messages.every((item) => /^sha256:[a-f0-9]{64}$/.test(item.messageKey)));
+  assert(structuredSelected.messages.every((item) => item.occurredAt === null && typeof item.metadata === "object"));
 
   const unverifiedKindBrowser = fakeBrowser({
     snapshots: [snapshot({

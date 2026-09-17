@@ -2,7 +2,8 @@ const {
   BOSS_MESSAGE_SNAPSHOT_EXPRESSION,
   BOSS_MESSAGE_SELECTED_JOB_TARGET_EXPRESSION,
   buildUnreadConversationQueue,
-  safeDigest
+  safeDigest,
+  messageKey
 } = require("./boss_message_dom");
 const {
   assertRestoredBaseline,
@@ -104,19 +105,19 @@ function normalizeBrowserSnapshot(value) {
   });
   const messages = snapshot.messages.map((item) => {
     const message = requireSnapshotField(item, (entry) => entry && typeof entry === "object" && !Array.isArray(entry));
-    requireSnapshotField(message.direction, (entry) => ["friend", "myself", "system"].includes(entry));
+    requireSnapshotField(message.direction, (entry) => ["friend", "myself", "platform"].includes(entry));
     requireSnapshotField(message.messageId, (entry) => /^\d{15}$/.test(entry));
     requireSnapshotField(message.text, (entry) => typeof entry === "string");
     requireSnapshotField(message.contentKind, (entry) => [
       "text",
-      "image",
-      "voice",
-      "attachment",
+      "media_ignored",
       "resume_request",
       "platform_notice",
-      "unknown"
+      "unknown_card"
     ].includes(entry));
-    return { direction: message.direction, messageId: message.messageId, text: normalizedText(message.text), contentKind: message.contentKind };
+    requireSnapshotField(message.metadata, (entry) => entry == null || (typeof entry === "object" && !Array.isArray(entry)));
+    requireSnapshotField(message.occurredAt, (entry) => entry == null || Number.isFinite(Date.parse(String(entry))));
+    return { direction: message.direction, messageId: message.messageId, text: normalizedText(message.text), contentKind: message.contentKind, occurredAt: message.occurredAt || null, metadata: { ...(message.metadata || {}) } };
   });
   for (const field of ["headerText", "positionName", "companyName", "salary", "city"]) {
     requireSnapshotField(snapshot[field], (entry) => typeof entry === "string");
@@ -449,8 +450,15 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
           const after = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(target.tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
           if (selectedTargetMatches(after, target)) {
             await assertCurrentBinding();
-            activeSelectedSnapshot = after;
-            return after;
+            const normalized = {
+              ...after,
+              messages: after.messages.map((item) => ({
+                ...item,
+                messageKey: messageKey({ platform: "boss", threadKey: target.conversationKey, messageId: item.messageId })
+              }))
+            };
+            activeSelectedSnapshot = normalized;
+            return normalized;
           }
           if (!selectedTargetIdentityMatches(after, target)
             && attempt + 1 >= SELECTED_IDENTITY_ATTEMPTS) break;

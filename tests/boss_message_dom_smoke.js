@@ -72,8 +72,10 @@ assert.deepStrictEqual(snapshot.rows.map((row) => row.transientSignature), [
   safeDigest([1, "Blair Example", "Thanks for the update", false]),
   safeDigest([2, "Casey Example", "Interview details attached", false])
 ]);
-assert.deepStrictEqual(snapshot.messages.map((item) => item.direction), ["friend", "myself", "system"]);
-assert.deepStrictEqual(snapshot.messages.map((item) => item.contentKind), ["text", "voice", "text"]);
+assert.deepStrictEqual(snapshot.messages.map((item) => item.direction), ["friend", "myself", "platform"]);
+assert.deepStrictEqual(snapshot.messages.map((item) => item.contentKind), ["text", "media_ignored", "text"]);
+assert.deepStrictEqual(snapshot.messages[1].metadata, { mediaKind: "voice" });
+assert.strictEqual(snapshot.messages[1].text, "");
 assert(snapshot.messages.every((item) => /^\d{15}$/.test(item.messageId)));
 assert.deepStrictEqual(snapshot.writeTargetsPresent, { editor: true, send: true });
 
@@ -208,7 +210,7 @@ assert.deepStrictEqual(
 const missingIconDocument = createStructuredBossMessageDomFixture({ resumeIcon: false });
 assert.strictEqual(
   snapshotBossMessagePage(missingIconDocument, "https://www.zhipin.com/web/geek/chat").messages[2].contentKind,
-  "unknown",
+  "unknown_card",
   "a card missing the verified resume icon must never fall through to text"
 );
 const keywordTextDocument = createStructuredBossMessageDomFixture({ plainText: "我同意补充附件简历信息" });

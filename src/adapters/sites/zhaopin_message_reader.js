@@ -84,10 +84,13 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
         type: String(msg.type == null ? "" : msg.type),
         cardType: String(msg.cardType == null ? "" : msg.cardType),
         body: typeof msg.body === "string" ? msg.body : "",
+        occurredAt: msg.time,
         hasText: Boolean(node.querySelector(".im-msg-text")),
         text: node.querySelector(".im-msg-text")?.textContent ?? "",
         hasRichText: Boolean(node.querySelector(".im-msg-rich")),
         richText: node.querySelector(".im-msg-rich")?.textContent ?? "",
+        has346Text: Boolean(node.querySelector(".im-msg-346__text")),
+        text346: node.querySelector(".im-msg-346__text")?.textContent ?? "",
         resumeTitle: text(node.querySelector(".im-msg-11-wrap")?.textContent),
         resumeRefuse: text(node.querySelector(".im-msg-11__btn--refuse")?.textContent),
         resumeAgree: text(node.querySelector(".im-msg-11__btn--agree")?.textContent),
@@ -297,35 +300,52 @@ function selectedIdentityMatches(snapshot, raw) {
 
 function parseMessages(messages, raw) {
   let lastMessageId = "";
-  const parsed = messages.map((item) => {
+  const conversationKey = safeDigest(["zhaopin", raw.sessionId]);
+  const parsed = messages.map((item, index) => {
     if (item?.invalid === true || item?.sessionId !== raw.sessionId || item?.jobNumber !== raw.jobNumber) {
       throw codedError("ZHAOPIN_MESSAGE_TARGET_MISMATCH", "zhaopin message row belongs to another conversation");
     }
     const validId = validMessageId(item?.idServer);
     const messageId = validId ? String(item.idServer) : "";
-    const platformNotice = item?.type === "custom" && item?.cardType === "255" && item?.tip === true && item?.hasFallback === true && typeof item?.fallbackText === "string";
+    const platformNotice255 = item?.type === "custom" && item?.cardType === "255" && item?.tip === true && item?.hasFallback === true && typeof item?.fallbackText === "string";
+    const platformNotice346 = item?.type === "custom" && item?.cardType === "346" && item?.tip === true
+      && item?.has346Text === true && text(item?.text346) === text(item?.body);
+    const platformNotice = platformNotice255 || platformNotice346;
     const direction = platformNotice ? "platform"
       : item?.flow === "in" && item?.fromMe === false && numericId(item?.from) === raw.peerPartnerId ? "friend"
         : item?.flow === "out" && item?.fromMe === true && numericId(item?.from) === raw.userId ? "myself" : "unknown";
-    let contentKind = "unsupported";
+    let contentKind = "unknown_card";
     let messageText = "";
     if (validId && (direction !== "unknown" || platformNotice)) {
       if (item.type === "text" && item.hasText === true && typeof item.text === "string" && item.text === item.body) {
         contentKind = "text";
         messageText = text(item.text);
-      } else if (item.type === "custom" && item.cardType === "131" && item.hasRichText === true && typeof item.richText === "string" && item.richText === item.body) {
+      } else if (item.type === "custom" && ["131", "303"].includes(item.cardType) && item.hasRichText === true && typeof item.richText === "string" && text(item.richText) === text(item.body)) {
         contentKind = "text";
         messageText = text(item.richText);
       } else if (item.type === "custom" && item.cardType === "11" && /简历/.test(item.resumeTitle || "") && item.resumeRefuse === "拒绝" && item.resumeAgree === "同意") {
         contentKind = "resume_request";
         messageText = "HR 邀请你发送简历";
-      } else if (platformNotice) {
+      } else if (platformNotice255) {
         contentKind = "platform_notice";
         messageText = text(item.fallbackText);
+      } else if (platformNotice346) {
+        contentKind = "platform_notice";
+        messageText = text(item.text346);
       }
     }
     if (["text", "resume_request", "platform_notice"].includes(contentKind)) lastMessageId = messageId;
-    return { messageId, direction, contentKind, text: messageText };
+    return {
+      messageId,
+      messageKey: validId
+        ? safeDigest(["zhaopin", conversationKey, messageId])
+        : safeDigest(["zhaopin", conversationKey, "unknown", index, item?.type, item?.cardType, item?.body]),
+      direction,
+      contentKind,
+      text: messageText,
+      occurredAt: activityAt(item?.occurredAt),
+      metadata: { type: String(item?.type || ""), cardType: String(item?.cardType || ""), tip: item?.tip === true }
+    };
   });
   return { messages: parsed, lastMessageId };
 }

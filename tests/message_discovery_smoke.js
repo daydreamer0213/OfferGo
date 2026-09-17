@@ -1385,23 +1385,18 @@ async function messageGroupBoundarySmoke() {
     profileId: unsupported.profileId,
     reader: fakeReader([selectedConversation({
       title: unsupported.title,
-      messages: [{
-        direction: "friend",
-        messageId: "600000000000000",
-        text: "voice",
-        contentKind: "voice"
-      }]
+      messages: [
+        { direction: "friend", messageId: "600000000000000", text: "", contentKind: "media_ignored", metadata: { mediaKind: "voice" } },
+        message("friend", "600000000000001", "voice 后面的文字仍要处理")
+      ]
     })]),
-    classifyMessageGroup: async () => {
-      throw new Error("unsupported content must not call the model");
+    classifyMessageGroup: async ({ messages }) => {
+      assert.deepStrictEqual(messages.map(item => item.text), ["voice 后面的文字仍要处理"]);
+      return classification();
     }
   });
-  assertStopped(unsupportedSummary, "BOSS_MESSAGE_CONTENT_UNSUPPORTED");
-  assert.strictEqual(
-    listPreviewStates(db, { profileId: unsupported.profileId }).length,
-    0,
-    "unsupported content must not commit the conversation preview"
-  );
+  assert.strictEqual(unsupportedSummary.status, "completed");
+  assert.strictEqual(unsupportedSummary.processed, 1);
 
   const repeated = createFixture({ suffix: "group-repeated", title: "Group Repeated Engineer" });
   const firstSummary = await runBossMessageDiscovery({
@@ -1482,8 +1477,8 @@ async function messageGroupBoundarySmoke() {
   ]);
   assert.strictEqual(
     listProgressEvents(db, structured.card.id).filter((event) => event.type === "incoming_message_classified").length,
-    3,
-    "every supported incoming item in the mixed group must receive a message-level idempotency event"
+    2,
+    "only actionable incoming items receive candidate-progress idempotency events"
   );
   const structuredPersisted = allText(db, "candidate_progress_events");
   for (const forbidden of [languageQuestion, structuredDraft, "岗位竞争情况", "附件简历请求", "同意", "拒绝"]) {
