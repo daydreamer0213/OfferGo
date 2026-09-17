@@ -41,7 +41,8 @@ const {
 const { createDashboardServer } = require("../src/dashboard/server");
 const {
   createMessageDiscoveryController,
-  createMessageDiscoveryDetailSafety
+  createMessageDiscoveryDetailSafety,
+  clearResolvedMessageDiscoveryRuntimeBlock
 } = require("../src/dashboard/message_discovery_controller");
 const {
   renderMessageDiscoveryPage,
@@ -80,6 +81,7 @@ main().catch((error) => {
 });
 
 async function main() {
+  liveBossRuntimeRecoverySmoke();
   durableDraftRecoverySmoke();
   await controllerBrowserAuthoritySmoke();
   await detailSafetyCompositionSmoke();
@@ -2204,6 +2206,39 @@ async function messageDiscoveryPollingSmoke(markup) {
   assert.strictEqual(terminalPoll.reloads(), 1);
   assert.strictEqual(terminalPoll.storedSelection(), null,
     "a completed sync must reset stale selection so the refreshed list and detail start on the same first item");
+}
+
+function liveBossRuntimeRecoverySmoke() {
+  setSiteRuntimeState(db, "boss", {
+    status: "blocked",
+    reasonCode: "BOSS_RISK_CONTROL",
+    details: { phase: "message_discovery", blockedUntil: "2099-01-01T00:00:00.000Z" }
+  });
+  assert.strictEqual(clearResolvedMessageDiscoveryRuntimeBlock(db, {
+    bossSessionState: {
+      hasRiskPage: false,
+      states: [{ tabId: "boss-chat", state: "ready" }]
+    },
+    platformRuns: [{ platform: "boss", bindingTabId: "boss-chat", status: "pending" }]
+  }), true);
+  assert.strictEqual(getSiteRuntimeState(db, "boss"), null,
+    "a freshly verified BOSS message page must clear a stale risk pause");
+
+  setSiteRuntimeState(db, "boss", {
+    status: "blocked",
+    reasonCode: "BOSS_RISK_CONTROL",
+    details: { phase: "message_discovery", blockedUntil: "2099-01-01T00:00:00.000Z" }
+  });
+  assert.strictEqual(clearResolvedMessageDiscoveryRuntimeBlock(db, {
+    bossSessionState: {
+      hasRiskPage: true,
+      states: [{ tabId: "boss-chat", state: "ready" }, { tabId: "boss-search", state: "risk_control" }]
+    },
+    platformRuns: [{ platform: "boss", bindingTabId: "boss-chat", status: "pending" }]
+  }), false);
+  assert.strictEqual(getSiteRuntimeState(db, "boss").reasonCode, "BOSS_RISK_CONTROL",
+    "any current BOSS risk signal must preserve the safety pause");
+  clearSiteRuntimeState(db, "boss");
 }
 
 async function messageDiscoveryMalformedResponseSmoke(markup) {

@@ -15,9 +15,12 @@ const {
 const { createSiteAccessController } = require("../core/site_access_budget");
 const { communicationRuntimeBlock, scanRuntimeBlock } = require("../core/communication_runtime");
 const { resolveBossRiskWindow } = require("../core/boss_risk_window");
+const { sameBrowserTabId } = require("../core/browser_tab_identity");
 const { PRODUCT_POLICY } = require("../core/product_policy");
 const {
   setSiteRuntimeState,
+  getSiteRuntimeState,
+  clearSiteRuntimeState,
   recordSiteAccessEvent,
   listOpenMessageReplyDrafts,
   listMessageInboundContexts,
@@ -203,6 +206,11 @@ function createMessageDiscoveryController(deps = {}) {
         return { platform, status: riskControl ? "needs_user_action" : selected ? "pending" : "not_connected",
           reasonCode: riskControl ? "BOSS_RISK_CONTROL" : "",
           bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
+      });
+      clearResolvedMessageDiscoveryRuntimeBlock(db, {
+        bossSessionState,
+        platformRuns: run.platformRuns,
+        logger
       });
       for (const entry of run.platformRuns) {
         if (entry.reasonCode === "BOSS_RISK_CONTROL") {
@@ -1003,6 +1011,27 @@ function messageDiscoveryError(code, message, statusCode = 500) {
   return error;
 }
 
+function clearResolvedMessageDiscoveryRuntimeBlock(db, {
+  bossSessionState = null,
+  platformRuns = [],
+  logger = null
+} = {}) {
+  const bossRun = (platformRuns || []).find((entry) => entry?.platform === "boss");
+  if (!bossRun || bossRun.status !== "pending" || bossSessionState?.hasRiskPage === true) return false;
+  const messageTabState = (bossSessionState?.states || []).find((state) =>
+    sameBrowserTabId(state?.tabId, bossRun.bindingTabId));
+  if (messageTabState?.state !== "ready") return false;
+  const prior = getSiteRuntimeState(db, "boss");
+  if (prior?.status !== "blocked" || prior.reasonCode !== "BOSS_RISK_CONTROL") return false;
+  clearSiteRuntimeState(db, "boss");
+  logger?.info("site_runtime_block_cleared", {
+    site: "boss",
+    priorReasonCode: prior.reasonCode,
+    source: "message_discovery_live_preflight"
+  });
+  return true;
+}
+
 function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = new Date() } = {}) {
   const current = now instanceof Date ? now : new Date(now);
   const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
@@ -1185,5 +1214,6 @@ function stableMessageTab(tabs) {
 module.exports = {
   createMessageDiscoveryController,
   createMessageDiscoveryDetailSafety,
-  buildMessageInboxPageState
+  buildMessageInboxPageState,
+  clearResolvedMessageDiscoveryRuntimeBlock
 };
