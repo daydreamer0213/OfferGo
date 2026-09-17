@@ -175,7 +175,7 @@ function createSiteAccessController({
 
 function sanitizeReservationDetails(action, details) {
   const normalizedAction = String(action || "").trim().toLowerCase();
-  if (["pane_detail_read", "job_detail_fetch", "detail_open"].includes(normalizedAction)) {
+  if (["pane_detail_read", "job_detail_fetch", "detail_open", "message_pane_detail_read", "message_detail_open"].includes(normalizedAction)) {
     const jobId = String(details?.jobId || "").trim();
     return jobId ? { jobId } : {};
   }

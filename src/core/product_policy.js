@@ -98,6 +98,20 @@ const PRODUCT_POLICY = Object.freeze({
         macroDelayMs: Object.freeze([90000, 150000])
       })
     }),
+    messageDiscoveryPacing: Object.freeze({
+      delayMs: Object.freeze({
+        detail: Object.freeze([2500, 4500]),
+        list: Object.freeze([2500, 4500])
+      }),
+      periodicEvery: Object.freeze([24, 30]),
+      periodicDelayMs: Object.freeze([10000, 15000]),
+      detail: Object.freeze({
+        microEvery: Object.freeze([8, 10]),
+        microDelayMs: Object.freeze([8000, 12000]),
+        macroEvery: Object.freeze([24, 30]),
+        macroDelayMs: Object.freeze([30000, 45000])
+      })
+    }),
     bossAccessBudget: Object.freeze({
       recoveryHours: 48,
       waitJitterMs: Object.freeze([1000, 3000]),
@@ -113,6 +127,8 @@ const PRODUCT_POLICY = Object.freeze({
           pane_detail_read: BOSS_PANE_DETAIL_RECOVERY_LIMITS,
           job_detail_fetch: BOSS_PANE_DETAIL_RECOVERY_LIMITS,
           detail_open: Object.freeze({ "10m": 5, "1h": 15, "24h": 30 }),
+          message_pane_detail_read: Object.freeze({ "3m": 15, "10m": 45, "1h": 120, "24h": 240 }),
+          message_detail_open: Object.freeze({ "3m": 10, "10m": 30, "1h": 90, "24h": 180 }),
           communication_visit: BOSS_COMMUNICATION_LIMITS,
           message_reply_send: BOSS_COMMUNICATION_LIMITS,
           list_navigation: Object.freeze({ "24h": 8 }),
@@ -122,6 +138,8 @@ const PRODUCT_POLICY = Object.freeze({
           pane_detail_read: BOSS_PANE_DETAIL_NORMAL_LIMITS,
           job_detail_fetch: BOSS_PANE_DETAIL_NORMAL_LIMITS,
           detail_open: Object.freeze({ "10m": 8, "1h": 25, "24h": 60 }),
+          message_pane_detail_read: Object.freeze({ "3m": 45, "10m": 120, "1h": 360, "24h": 720 }),
+          message_detail_open: Object.freeze({ "3m": 30, "10m": 90, "1h": 240, "24h": 480 }),
           communication_visit: BOSS_COMMUNICATION_LIMITS,
           message_reply_send: BOSS_COMMUNICATION_LIMITS,
           list_navigation: Object.freeze({ "24h": 16 }),

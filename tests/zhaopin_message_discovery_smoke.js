@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   openDb, createBatch, upsertJob, listOpenMessageReplyDrafts,
-  listMessageInboundContexts, listSiteAccessEvents, getSitePacingState,
+  listMessageInboundContexts, listSiteAccessEvents,
   getSiteRuntimeState, clearSiteRuntimeState
 } = require("../src/core/storage");
 const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../src/application/message_discovery/run");
@@ -307,8 +307,8 @@ async function zhaopinDetailControllerSmoke() {
   });
   await safety.beforeOpen({ jobId: "ZLSAFETY001", assertTabBindings: async () => {} });
   await safety.afterIssuedAttempt({ jobId: "ZLSAFETY001", assertTabBindings: async () => {} });
-  assert.deepEqual(listSiteAccessEvents(db, { site: "zhaopin" }).slice(-2).map((event) => event.action), ["pane_detail_read", "detail_open"]);
-  assert.equal(getSitePacingState(db, "zhaopin").pacing.detailActions, 1);
+  assert.deepEqual(listSiteAccessEvents(db, { site: "zhaopin" }).slice(-2).map((event) => event.action), ["message_pane_detail_read", "message_detail_open"]);
+  assert.equal(safety.pacing.pacingState().detailActions, 1);
 
   const fixture = createFixture({ id: "ZLCONTROLLER001", title: "Controller Engineer" });
   const created = [];

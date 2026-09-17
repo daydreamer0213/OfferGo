@@ -371,6 +371,19 @@ function configuredDetailBudgetsSmoke() {
     "1h": 15,
     "24h": 30
   });
+  assert.deepStrictEqual(PRODUCT_POLICY.operations.messageDiscoveryPacing.delayMs.detail, [2500, 4500]);
+  assert.deepStrictEqual(PRODUCT_POLICY.operations.bossAccessBudget.modes.normal.message_detail_open, {
+    "3m": 30,
+    "10m": 90,
+    "1h": 240,
+    "24h": 480
+  });
+  assert.deepStrictEqual(PRODUCT_POLICY.operations.bossAccessBudget.modes.recovery.message_detail_open, {
+    "3m": 10,
+    "10m": 30,
+    "1h": 90,
+    "24h": 180
+  });
   assert.strictEqual(PRODUCT_POLICY.dailyScan.maxDetailTotal, 240);
   assert.deepStrictEqual(PRODUCT_POLICY.dailyScan.detailLimits, { A: 45, B: 30 });
   assert.deepStrictEqual(PRODUCT_POLICY.operations.bossAccessBudget.modes.normal.list_navigation, { "24h": 16 });

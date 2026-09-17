@@ -757,12 +757,13 @@ const PAGE_HELPERS = String.raw`
 `;
 
 class BossSiteAdapter {
-  constructor({ browser = null, logger = null, sleepFn = sleep, randomFn = Math.random, accessController = null } = {}) {
+  constructor({ browser = null, logger = null, sleepFn = sleep, randomFn = Math.random, accessController = null, pacingPolicy = BOSS_PACING_POLICY } = {}) {
     this.browser = browser;
     this.logger = logger;
     this.sleep = sleepFn;
     this.random = randomFn;
     this.accessController = accessController;
+    this.pacingPolicy = pacingPolicy || BOSS_PACING_POLICY;
     this.pageNavigations = 0;
     this.listNavigations = 0;
     this.pageBudget = SEARCH_PLAN_POLICY.broadScanDefaults.browserPageBudget;
@@ -1009,7 +1010,7 @@ class BossSiteAdapter {
   } = {}) {
     throwIfAborted(signal);
     if (!skipInitialTabBindingCheck) await assertRuntimeTabBindings(assertTabBindings);
-    const [min, max] = BOSS_PACING_POLICY.delayMs[kind] || BOSS_PACING_POLICY.delayMs.list;
+    const [min, max] = this.pacingPolicy.delayMs[kind] || this.pacingPolicy.delayMs.list;
     const delayMs = randomBetween(min, max, this.random);
     if (typeof onWait === "function") await onWait({ kind, durationMs: delayMs });
     await waitForAbortableSleep(this.sleep(delayMs), signal);
@@ -1018,11 +1019,11 @@ class BossSiteAdapter {
     if (!["catalog", "list", "detail", "scroll", "card", "refresh", "target", "pane_detail_read"].includes(kind)) return;
     this.pacedActions += 1;
     if (this.pacedActions < this.nextPacingCooldownAt) return;
-    const cooldownMs = randomBetween(...BOSS_PACING_POLICY.periodicDelayMs, this.random);
+    const cooldownMs = randomBetween(...this.pacingPolicy.periodicDelayMs, this.random);
     this.logger?.info("boss_pacing_cooldown", { pacedActions: this.pacedActions, cooldownMs });
     if (typeof onWait === "function") await onWait({ kind: "periodic", durationMs: cooldownMs });
     await waitForAbortableSleep(this.sleep(cooldownMs), signal);
-    this.nextPacingCooldownAt += randomBetween(...BOSS_PACING_POLICY.periodicEvery, this.random);
+    this.nextPacingCooldownAt += randomBetween(...this.pacingPolicy.periodicEvery, this.random);
   }
 
   async reserveAccess(action, details = {}) {
@@ -1032,10 +1033,10 @@ class BossSiteAdapter {
 
   resetPacing() {
     this.pacedActions = 0;
-    this.nextPacingCooldownAt = randomBetween(...BOSS_PACING_POLICY.periodicEvery, this.random);
+    this.nextPacingCooldownAt = randomBetween(...this.pacingPolicy.periodicEvery, this.random);
     this.detailActions = 0;
-    this.nextDetailMicroCooldownAt = randomBetween(...BOSS_PACING_POLICY.detail.microEvery, this.random);
-    this.nextDetailMacroCooldownAt = randomBetween(...BOSS_PACING_POLICY.detail.macroEvery, this.random);
+    this.nextDetailMicroCooldownAt = randomBetween(...this.pacingPolicy.detail.microEvery, this.random);
+    this.nextDetailMacroCooldownAt = randomBetween(...this.pacingPolicy.detail.macroEvery, this.random);
   }
 
   pacingState() {
@@ -1049,7 +1050,7 @@ class BossSiteAdapter {
   }
 
   restorePacing(state) {
-    if (!isSafePacingState(state)) {
+    if (!isSafePacingState(state, this.pacingPolicy)) {
       this.resetPacing();
       return;
     }
@@ -1060,24 +1061,24 @@ class BossSiteAdapter {
     throwIfAborted(signal);
     await assertRuntimeTabBindings(assertTabBindings);
     if (this.detailActions >= this.nextDetailMacroCooldownAt) {
-      const cooldownMs = randomBetween(...BOSS_PACING_POLICY.detail.macroDelayMs, this.random);
+      const cooldownMs = randomBetween(...this.pacingPolicy.detail.macroDelayMs, this.random);
       console.error(`[boss] 已读取 ${this.detailActions} 个右栏详情，阶段冷却 ${Math.ceil(cooldownMs / 1000)} 秒后继续`);
       this.logger?.info("boss_detail_macro_cooldown", { detailActions: this.detailActions, cooldownMs });
       if (typeof onWait === "function") await onWait({ kind: "detail_macro", durationMs: cooldownMs });
       await waitForAbortableSleep(this.sleep(cooldownMs), signal);
-      this.nextDetailMacroCooldownAt += randomBetween(...BOSS_PACING_POLICY.detail.macroEvery, this.random);
+      this.nextDetailMacroCooldownAt += randomBetween(...this.pacingPolicy.detail.macroEvery, this.random);
       while (this.nextDetailMicroCooldownAt <= this.detailActions) {
-        this.nextDetailMicroCooldownAt += randomBetween(...BOSS_PACING_POLICY.detail.microEvery, this.random);
+        this.nextDetailMicroCooldownAt += randomBetween(...this.pacingPolicy.detail.microEvery, this.random);
       }
       if (typeof onPacingCheckpoint === "function") await onPacingCheckpoint(this.pacingState());
       return;
     }
     if (this.detailActions >= this.nextDetailMicroCooldownAt) {
-      const cooldownMs = randomBetween(...BOSS_PACING_POLICY.detail.microDelayMs, this.random);
+      const cooldownMs = randomBetween(...this.pacingPolicy.detail.microDelayMs, this.random);
       this.logger?.info("boss_detail_micro_cooldown", { detailActions: this.detailActions, cooldownMs });
       if (typeof onWait === "function") await onWait({ kind: "detail_micro", durationMs: cooldownMs });
       await waitForAbortableSleep(this.sleep(cooldownMs), signal);
-      this.nextDetailMicroCooldownAt += randomBetween(...BOSS_PACING_POLICY.detail.microEvery, this.random);
+      this.nextDetailMicroCooldownAt += randomBetween(...this.pacingPolicy.detail.microEvery, this.random);
       if (typeof onPacingCheckpoint === "function") await onPacingCheckpoint(this.pacingState());
     }
   }
@@ -2522,12 +2523,12 @@ class BossSiteAdapter {
   }
 }
 
-function isSafePacingState(state) {
+function isSafePacingState(state, policy = BOSS_PACING_POLICY) {
   if (!state || Object.keys(state).some((field) => !PACING_STATE_FIELDS.includes(field))) return false;
   if (PACING_STATE_FIELDS.some((field) => !Number.isSafeInteger(state[field]) || state[field] < 0)) return false;
-  return state.nextPacingCooldownAt <= state.pacedActions + Math.max(...BOSS_PACING_POLICY.periodicEvery)
-    && state.nextDetailMicroCooldownAt <= state.detailActions + Math.max(...BOSS_PACING_POLICY.detail.microEvery)
-    && state.nextDetailMacroCooldownAt <= state.detailActions + Math.max(...BOSS_PACING_POLICY.detail.macroEvery);
+  return state.nextPacingCooldownAt <= state.pacedActions + Math.max(...policy.periodicEvery)
+    && state.nextDetailMicroCooldownAt <= state.detailActions + Math.max(...policy.detail.microEvery)
+    && state.nextDetailMacroCooldownAt <= state.detailActions + Math.max(...policy.detail.macroEvery);
 }
 
 function normalizeBossJob(job) {

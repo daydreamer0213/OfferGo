@@ -175,7 +175,7 @@ function createZhaopinMessageDetailReader({
       if (state === "risk_control") throw detailError("ZHAOPIN_MESSAGE_RISK_CONTROL", "zhaopin requires security verification");
       if (state === "login_required") throw detailError("ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "zhaopin login is required");
       if (state !== "ready") throw detailError("ZHAOPIN_MESSAGE_DETAIL_PAGE_LOST", "zhaopin detail page changed");
-      assertSnapshotIdentity(raw, selected, target);
+      assertSnapshotJobId(raw, target);
       let detail = null;
       try { detail = parseZhaopinMessageDetailSnapshot(raw); }
       catch (error) {
@@ -184,7 +184,10 @@ function createZhaopinMessageDetailReader({
       }
       if (detail && raw.loading !== true) {
         const digest = JSON.stringify(detail);
-        if (digest === previous) return detail;
+        if (digest === previous) {
+          assertStableIdentity(raw, selected);
+          return detail;
+        }
         previous = digest;
       } else {
         previous = "";
@@ -308,11 +311,16 @@ function optionalReportedCreatedTab(beforeTabs, tabs, returnedTabId) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-function assertSnapshotIdentity(raw, selected, target) {
+function assertSnapshotJobId(raw, target) {
+  if (normalizedText(raw?.currentJobId) !== target.jobId) {
+    throw detailError("ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH", "zhaopin detail identity did not match the selected conversation");
+  }
+}
+
+function assertStableIdentity(raw, selected) {
   const title = normalizedText(raw?.title);
   const company = normalizedText(raw?.company);
-  if (normalizedText(raw?.currentJobId) !== target.jobId
-    || (title && !sameText(title, selected?.positionName))) {
+  if (title && !sameText(title, selected?.positionName)) {
     throw detailError("ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH", "zhaopin detail identity did not match the selected conversation");
   }
   if (company && !compatibleCompany(company, selected?.companyName)) {

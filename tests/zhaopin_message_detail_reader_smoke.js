@@ -205,6 +205,17 @@ let companyUnverifiedSnapshot;
   assert.equal(skeleton.calls.filter(([name]) => name === "evalValue").length, 3);
   assert.equal(skeletonReader.waits.length, 2);
 
+  const mountingOldContent = fakeBrowser({ samples: [
+    snapshot({ title: "上一个岗位", company: "上一个公司", description: "", loading: true }),
+    snapshot(),
+    snapshot()
+  ] });
+  assert.equal(
+    (await read(makeReader(mountingOldContent).reader)).sourceId,
+    JOB_ID,
+    "same-job navigation must wait through transient old mounted content before checking title and company"
+  );
+
   const missing = fakeBrowser({ samples: [snapshot({ title: "", company: "", description: "", loading: true })] });
   const missingReader = makeReader(missing, { timeoutMs: 10 });
   await assert.rejects(() => read(missingReader.reader), (error) => error.code === "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE");

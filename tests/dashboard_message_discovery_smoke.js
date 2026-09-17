@@ -932,28 +932,24 @@ async function detailSafetyCompositionSmoke() {
       sleepFn: async (durationMs) => sleeps.push({ durationMs, phase: run.phase, waitUntil: run.waitUntil }),
       randomFn: () => 0
     });
-    assert.deepStrictEqual(safety.pacing.pacingState(), {
-      pacedActions: 2,
-      nextPacingCooldownAt: 18,
-      detailActions: 6,
-      nextDetailMicroCooldownAt: 6,
-      nextDetailMacroCooldownAt: 16
-    });
+    assert.strictEqual(safety.pacing.pacingState().detailActions, 0,
+      "message discovery pacing must start independently from job scanning");
     await safety.beforeOpen({ jobId: "stable-job-id", assertTabBindings: async () => {} });
     assert.deepStrictEqual(
       listSiteAccessEvents(safetyDb, { site: "boss" }).map((event) => event.action),
-      ["pane_detail_read", "detail_open"]
+      ["message_pane_detail_read", "message_detail_open"]
     );
-    assert.deepStrictEqual(sleeps.map((item) => item.durationMs), [15000, 8000],
-      "message discovery must honor a due cooldown inherited from a normal scan");
+    assert.deepStrictEqual(sleeps.map((item) => item.durationMs), [2500],
+      "message discovery keeps a short non-zero serial delay without inheriting scan cooldowns");
     assert.strictEqual(sleeps[0].phase, "cooldown");
-    assert.match(sleeps[0].waitUntil, /^2026-08-16T08:00:15\.000Z$/);
+    assert.match(sleeps[0].waitUntil, /^2026-08-16T08:00:02\.500Z$/);
     assert.strictEqual(run.phase, "reading_detail");
 
     await safety.afterIssuedAttempt({ jobId: "stable-job-id", assertTabBindings: async () => {} });
     assert.strictEqual(
-      getMessageDiscoveryRuntimeState(safetyDb, { profileId: secondProfileId, platform: "boss" }).pacing.detailActions,
-      7
+      safety.pacing.pacingState().detailActions,
+      1,
+      "the independent message run still counts issued detail attempts"
     );
 
     const stop = new AbortController();
@@ -967,9 +963,9 @@ async function detailSafetyCompositionSmoke() {
       (error) => error.code === "MESSAGE_DISCOVERY_STOPPED"
     );
     assert.strictEqual(
-      getMessageDiscoveryRuntimeState(safetyDb, { profileId: secondProfileId, platform: "boss" }).pacing.detailActions,
-      8,
-      "an aborted issued request must still persist its detail pacing count"
+      safety.pacing.pacingState().detailActions,
+      2,
+      "an aborted issued request must still count toward this message run"
     );
 
     saveMessageDiscoveryRuntimeState(safetyDb, {
@@ -996,9 +992,9 @@ async function detailSafetyCompositionSmoke() {
     });
     await resumed.beforeOpen({ jobId: "resumed-stable-job", assertTabBindings: async () => {} });
     assert.deepStrictEqual(
-      resumedSleeps.slice(0, 2),
-      [15000, 8000],
-      "a restored due detail cooldown must run before ordinary pre-open pacing"
+      resumedSleeps,
+      [2500],
+      "a new message run must not restore job-scan pacing state"
     );
   } finally {
     safetyDb.close();
@@ -2050,7 +2046,7 @@ async function messageDiscoveryClientResponseSmoke(markup) {
     { name: "already running conflict", response: jsonResponse(409, { errorCode: "MESSAGE_DISCOVERY_ALREADY_RUNNING" }), reloads: 0, feedback: "正在运行" },
     { name: "application error", response: jsonResponse(409, { errorCode: "BOSS_RISK_CONTROL" }), reloads: 0, feedback: "安全检查" },
     { name: "non-JSON response", response: textResponse(502, "bad gateway"), reloads: 0, feedback: "本地服务" },
-    { name: "network rejection", reject: new Error("offline"), reloads: 0, feedback: "Edge" }
+    { name: "network rejection", reject: new Error("offline"), reloads: 0, feedback: "本地服务" }
   ]) {
     const client = runMessageDiscoveryClient(markup, scenario);
     await assert.doesNotReject(client.submit(), `${scenario.name} must stay handled in the current page`);
@@ -2085,6 +2081,25 @@ async function messageDiscoveryPollingSmoke(markup) {
   const runningPoll = runMessageDiscoveryClient(markup, { response: jsonResponse(200, { status: "running" }) }, { status: "running" });
   await runningPoll.runTimer(0);
   assert.strictEqual(runningPoll.timerCount(), 2, "each successful running poll must schedule exactly one successor");
+
+  const waitUntil = new Date(Date.now() + 7 * 60_000).toISOString();
+  const cooldownPoll = runMessageDiscoveryClient(markup, {
+    response: jsonResponse(200, {
+      status: "running",
+      phase: "cooldown",
+      waitUntil,
+      queued: 19,
+      processed: 0,
+      unresolved: 8
+    })
+  }, { status: "running" });
+  await cooldownPoll.runTimer(0);
+  assert.match(cooldownPoll.feedback.textContent, /安全节奏/,
+    "a long safety wait must be visible while polling instead of looking frozen");
+  assert.match(cooldownPoll.feedback.textContent, /19 条/,
+    "live discovery feedback must show how many messages were found");
+  assert.match(cooldownPoll.feedback.textContent, /8 条.*待补/,
+    "live discovery feedback must show retained messages that still need job context");
 }
 
 async function messageDiscoveryMalformedResponseSmoke(markup) {

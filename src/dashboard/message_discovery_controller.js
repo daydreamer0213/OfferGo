@@ -15,9 +15,8 @@ const {
 const { createSiteAccessController } = require("../core/site_access_budget");
 const { communicationRuntimeBlock, scanRuntimeBlock } = require("../core/communication_runtime");
 const { resolveBossRiskWindow } = require("../core/boss_risk_window");
+const { PRODUCT_POLICY } = require("../core/product_policy");
 const {
-  getSitePacingState,
-  setSitePacingState,
   setSiteRuntimeState,
   recordSiteAccessEvent,
   listOpenMessageReplyDrafts,
@@ -803,11 +802,6 @@ function createMessageDiscoveryDetailSafety({
   const site = ["boss", "zhaopin"].includes(platform) ? platform : "boss";
   let assertActiveBindings = null;
   const onWait = ({ durationMs }) => setDetailWait(run, durationMs, now);
-  const checkpointPacing = async (state) => setSitePacingState(db, {
-    site,
-    pacing: state,
-    updatedAt: safeNow(now).toISOString()
-  });
   const accessController = createAccessController({
     db,
     auditDb: db,
@@ -822,8 +816,13 @@ function createMessageDiscoveryDetailSafety({
       if (typeof assertActiveBindings === "function") await assertActiveBindings();
     }
   });
-  const pacing = createPacingAdapter({ logger, sleepFn, randomFn, accessController });
-  pacing.restorePacing(getSitePacingState(db, site).pacing);
+  const pacing = createPacingAdapter({
+    logger,
+    sleepFn,
+    randomFn,
+    accessController,
+    pacingPolicy: PRODUCT_POLICY.operations.messageDiscoveryPacing
+  });
 
   return {
     pacing,
@@ -834,16 +833,15 @@ function createMessageDiscoveryDetailSafety({
         await pacing.waitForPendingDetailCooldown({
           signal: operationSignal,
           assertTabBindings,
-          onWait,
-          onPacingCheckpoint: checkpointPacing
+          onWait
         });
-        await pacing.waitWithPacing("pane_detail_read", {
+        await pacing.waitWithPacing("detail", {
           signal: operationSignal,
           assertTabBindings,
           onWait
         });
-        await pacing.reserveAccess("pane_detail_read", { jobId });
-        await pacing.reserveAccess("detail_open", { jobId });
+        await pacing.reserveAccess("message_pane_detail_read", { jobId });
+        await pacing.reserveAccess("message_detail_open", { jobId });
       } finally {
         assertActiveBindings = null;
         setDetailPhase(run, "reading_detail", now);
@@ -854,8 +852,7 @@ function createMessageDiscoveryDetailSafety({
         await pacing.waitAfterDetailAction({
           signal: operationSignal,
           assertTabBindings,
-          onWait,
-          onPacingCheckpoint: checkpointPacing
+          onWait
         });
       } finally {
         if (!operationSignal?.aborted) setDetailPhase(run, "reading_detail", now);
