@@ -39,7 +39,7 @@ function fixtureHtml() {
     <script>
       window.fixture = {
         sessions: [], active: null, timeline: [], loading: false, timelineError: "", selectWrong: "", clicks: 0, resumeClicks: 0, senderClicks: 0,
-        set(data) { this.sessions = data.sessions; this.active = data.active || data.sessions[0] || null; this.timeline = data.timeline || []; this.loading = Boolean(data.loading); this.listLoading = data.listLoading === true; this.loginPanel = data.loginPanel === true; this.accountHeader = data.accountHeader === true; this.misplacedAccountHeader = data.misplacedAccountHeader === true; this.timelineError = data.timelineError || ""; this.selectWrong = data.selectWrong || ""; this.offline = data.offline === true; this.render(); },
+        set(data) { this.sessions = data.sessions; this.active = Object.prototype.hasOwnProperty.call(data, 'active') ? data.active : data.sessions[0] || null; this.timeline = data.timeline || []; this.loading = Boolean(data.loading); this.listLoading = data.listLoading === true; this.loginPanel = data.loginPanel === true; this.accountHeader = data.accountHeader === true; this.misplacedAccountHeader = data.misplacedAccountHeader === true; this.timelineError = data.timelineError || ""; this.selectWrong = data.selectWrong || ""; this.offline = data.offline === true; this.render(); },
         render() {
           document.querySelector('.login-panel').hidden = !this.loginPanel;
           document.querySelector('.home-header__right > .home-header__c-login').hidden = !this.accountHeader;
@@ -304,7 +304,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.fixture.clicks), clicksBeforeInvalidJob, "an invalid job identity must stop before row.click()");
     assert.deepEqual(await page.evaluate(() => [window.fixture.resumeClicks,window.fixture.senderClicks]), [0,0]);
     const failures = [];
-    for (const regression of [parameterizedUrlSmoke, loginGuardSmoke, listLoadingSmoke, ambiguousFromMeSmoke, defaultWaitCleanupSmoke]) {
+    for (const regression of [parameterizedUrlSmoke, loginGuardSmoke, listLoadingSmoke, ambiguousFromMeSmoke, defaultWaitCleanupSmoke, unselectedListSmoke]) {
       try { await regression(page, first); } catch (error) { failures.push(`${regression.name}: ${error.stack}`); }
     }
     assert.deepEqual(failures, []);
@@ -485,6 +485,16 @@ async function defaultWaitCleanupSmoke(page, first) {
   const raceScan = await raceReader.scanConversationRows(race.signal);
   await assert.rejects(() => raceReader.openQueuedConversation({ ...raceScan.rows[0], tabId: raceScan.tabId }, race.signal), error => error.code === "ZHAOPIN_MESSAGE_ABORTED");
   assert.equal(getEventListeners(race.signal, "abort").length, 0, "abort at registration must also clean up the listener");
+}
+
+async function unselectedListSmoke(page, first) {
+  const second = session({ sessionId: "b".repeat(32), jobNumber: JOB_B, text: "另一条会话" });
+  await setFixture(page, { sessions: [first, second], active: null, timeline: [], loading: false });
+  await page.evaluate(() => document.querySelector(".im-chat-header").remove());
+  const reader = readerFor(fakeBrowser(page));
+  const scanned = await reader.scanConversationRows();
+  assert.equal(scanned.rows.length, 2,
+    "a loaded conversation list remains readable before any conversation is selected");
 }
 
 main().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });

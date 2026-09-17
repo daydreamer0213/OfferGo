@@ -44,8 +44,7 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
     const sideVm = side?.__vue__;
     const mainVm = main?.__vue__;
     if (sideVm?.$options?.name !== "SidePanelThreeColumns" || !Array.isArray(sideVm.sessions)
-      || mainVm?.$options?.name !== "MainPanelThreeColumns" || !Array.isArray(mainVm.activeTimeline)
-      || !header?.__vue__?.$props?.session) return failed("structure_changed");
+      || mainVm?.$options?.name !== "MainPanelThreeColumns" || !Array.isArray(mainVm.activeTimeline)) return failed("structure_changed");
     const rows = Array.from(document.querySelectorAll(".im-session-item")).map((node, rowIndex) => {
       const vm = node.__vue__;
       const item = vm?.$options?.name === "ImSessionItem" ? vm.$props?.session : null;
@@ -67,6 +66,7 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
       };
     });
     if (rows.some((row) => !row)) return failed("structure_changed");
+    const headerSession = header?.__vue__?.$props?.session || null;
     const messages = Array.from(document.querySelectorAll(".im-message")).flatMap((node) => {
       const vm = node.__vue__;
       if (vm?.$options?.name !== "ImMessageRow") return [];
@@ -104,13 +104,13 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
       activeSessionId: String(mainVm.activeSessionId == null ? "" : mainVm.activeSessionId),
       activeSessionIdFromObject: String(active?.sessionId == null ? "" : active.sessionId),
       activeJobNumber: String(active?.jobNumber == null ? "" : active.jobNumber),
-      headerSessionId: String(header.__vue__.$props.session?.sessionId == null ? "" : header.__vue__.$props.session.sessionId),
-      headerJobNumber: String(header.__vue__.$props.session?.jobNumber == null ? "" : header.__vue__.$props.session.jobNumber),
-      jobDetailHref: String(header.querySelector(".im-chat-header__detail")?.href || ""),
-      jobOffline: header.classList.contains("is-offline") || Boolean(header.querySelector(".is-offline")),
-      positionName: text(header.querySelector(".im-chat-header__job-title")?.textContent),
-      salary: text(header.querySelector(".im-chat-header__salary")?.textContent),
-      city: text(header.querySelector(".im-chat-header__city")?.textContent),
+      headerSessionId: String(headerSession?.sessionId == null ? "" : headerSession.sessionId),
+      headerJobNumber: String(headerSession?.jobNumber == null ? "" : headerSession.jobNumber),
+      jobDetailHref: String(header?.querySelector(".im-chat-header__detail")?.href || ""),
+      jobOffline: Boolean(header?.classList.contains("is-offline") || header?.querySelector(".is-offline")),
+      positionName: text(header?.querySelector(".im-chat-header__job-title")?.textContent),
+      salary: text(header?.querySelector(".im-chat-header__salary")?.textContent),
+      city: text(header?.querySelector(".im-chat-header__city")?.textContent),
       timelineLoading: mainVm.timelineLoading === true,
       timelineError: text(mainVm.timelineError),
       messages
@@ -175,6 +175,7 @@ function assertBrowser(browser) {
 function resolveMessageTab(tabs, expectedTabId = null) {
   const matches = (tabs || []).filter((tab) => isZhaopinMessageUrl(tab?.url));
   if (!matches.length) throw codedError("ZHAOPIN_MESSAGE_TAB_MISSING", "zhaopin message tab is missing");
+  if (matches.length > 1) throw codedError("ZHAOPIN_MESSAGE_TAB_AMBIGUOUS", "multiple zhaopin message tabs are open");
   const tab = expectedTabId === null || expectedTabId === undefined
     ? [...matches].sort((left, right) => `${typeof left.id}:${String(left.id)}`.localeCompare(`${typeof right.id}:${String(right.id)}`))[0]
     : matches.find((item) => item.id === expectedTabId);
