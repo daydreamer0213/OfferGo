@@ -196,9 +196,16 @@ function createMessageDiscoveryController(deps = {}) {
         });
         const inWorkspace = matches.filter((tab) => workspaceWindowIds.has(tab.windowId));
         const selected = stableMessageTab(inWorkspace.length ? inWorkspace : matches);
-        return { platform, status: selected ? "pending" : "not_connected",
-          reasonCode: "", bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
+        const riskControl = platform === "boss" && tabs.some((tab) => isBossRiskControlUrl(tab?.url));
+        return { platform, status: selected ? "pending" : riskControl ? "needs_user_action" : "not_connected",
+          reasonCode: selected ? "" : riskControl ? "BOSS_RISK_CONTROL" : "",
+          bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
       });
+      for (const entry of run.platformRuns) {
+        if (entry.reasonCode === "BOSS_RISK_CONTROL") {
+          recordRiskOnce(run, entry.platform, entry.reasonCode, "BOSS requires security verification");
+        }
+      }
       for (const entry of run.platformRuns) {
         if (abortController.signal.aborted) break;
         if (entry.status !== "pending") continue;
@@ -1116,6 +1123,15 @@ function normalizeEnabledPlatforms(value) {
 function isDashboardMessageWorkspaceTab(tab) {
   try {
     return ["127.0.0.1", "localhost"].includes(new URL(String(tab?.url || "")).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isBossRiskControlUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.origin === "https://www.zhipin.com" && url.searchParams.has("_security_check");
   } catch {
     return false;
   }

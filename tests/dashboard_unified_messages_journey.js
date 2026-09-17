@@ -56,11 +56,12 @@ async function main() {
     assertUnknownZhaopinReceipts({ platformRuns: nativeStates[1] });
     assert.equal(nativeStates[1].find(entry => entry.platform === 'zhaopin').reasonCode, 'MESSAGE_DISCOVERY_WAITING_TURN');
     await nativeController.close();
-    let bossReadCalls=0,zhaopinReadCalls=0,operations=0,maxOperations=0,cleanup=0;
+    let bossReadCalls=0,zhaopinReadCalls=0,operations=0,maxOperations=0,cleanup=0;const riskRecords=[];
     let connected=['zhaopin']; const order=[];
     const deps={db,acquireLease:storage.acquireSiteScanLease,renewLease:storage.renewSiteScanLease,releaseLease:storage.releaseSiteScanLease,
-      createBrowser:()=>({listTabs:async()=>connected.map((p,i)=>({id:i+1,windowId:1,url:p==='boss'?'https://www.zhipin.com/web/geek/chat':PARAMETERIZED_IM_URL}))}),
+      createBrowser:()=>({listTabs:async()=>connected.map((p,i)=>({id:i+1,windowId:1,url:p==='boss'?'https://www.zhipin.com/web/geek/chat':p==='boss_risk'?'https://www.zhipin.com/web/geek/jobs?_security_check=fixture':PARAMETERIZED_IM_URL}))}),
       cleanupBrowser:async()=>{cleanup++;},assertRuntimeAvailable:()=>{bossReadCalls++;if(deps.blockBoss)throw Object.assign(Error('existing pause'),{code:'BOSS_RUNTIME_BLOCKED'});},
+      recordRiskControl:(input)=>riskRecords.push(input),
       createReader:({platform})=>({platform}),createDetailSafety:()=>({}),createDetailReader:()=>({}),createJobContextResolver:()=>async()=>({}),createAnalyzer:()=>async()=>({}),
       runDiscovery:async({platform,signal,onStatus})=>{operations++;maxOperations=Math.max(maxOperations,operations);order.push(platform);if(platform==='zhaopin')zhaopinReadCalls++;try{if(deps.waitSecond&&platform==='zhaopin'){onStatus({status:'running',phase:'reading_messages',results:[]});await new Promise(r=>signal.addEventListener('abort',r,{once:true}));return {status:'stopped',results:[]};}return {status:'completed',processed:1,counters:{visible:1,newReplies:1,currentRead:platform==='boss'?7:99},results:[{cardId:platform==='boss'?boss.cardId:zl.cardId,jobId:platform==='boss'?boss.jobId:zl.jobId}]};}finally{operations--;}}};
     const controller=createMessageDiscoveryController(deps);
@@ -81,6 +82,7 @@ async function main() {
     connected=['boss','zhaopin','zhaopin'];controller.start(profileId);result=await settle(controller,profileId);
     assert.equal(result.results[0].cardId,boss.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'completed');assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').reasonCode,'','extra same-platform tabs must not block the managed message page');
     connected=['boss','zhaopin'];deps.blockBoss=true;controller.start(profileId);result=await settle(controller,profileId);assert.equal(result.results[0].cardId,zl.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RUNTIME_BLOCKED');deps.blockBoss=false;
+    connected=['boss_risk','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['zhaopin'],'BOSS security-check tabs stop before a BOSS reader is created');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'needs_user_action');assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RISK_CONTROL');assert.equal(riskRecords.at(-1).errorCode,'BOSS_RISK_CONTROL');
     await controller.close();
     const restored=createMessageDiscoveryController({db});const recovered=restored.pageState(profileId);
     assert.equal(recovered.results.length,3,'manual-only inbound context must survive restart');
