@@ -33,7 +33,10 @@ function row(rowIndex, {
   lastMessageDirection = "unknown",
   lastMessageStatus = "unknown",
   identityVerified = false,
-  friendId = 123
+  friendId = 123,
+  lastActivityAt = "2026-09-17T01:59:00.000Z",
+  positionTitle = "Java Engineer",
+  company = "Fixture Company"
 } = {}) {
   const value = {
     rowIndex,
@@ -53,6 +56,9 @@ function row(rowIndex, {
     lastMessageDirection,
     lastMessageStatus,
     identityVerified,
+    lastActivityAt,
+    positionTitle,
+    company,
     friendKey: safeDigest(["friend", friendId]),
     transientSignature: safeDigest([value.rowIndex, value.recruiterLabel, value.previewText, value.unread])
   };
@@ -86,6 +92,9 @@ function fakeBrowser({ tabs = operatorTabs(), snapshots = [] } = {}) {
     async setPageLifecycleActive(tabId) {
       this.calls.push(["setPageLifecycleActive", tabId]);
       return { state: "active" };
+    },
+    async reload(tabId) {
+      this.calls.push(["reload", tabId]);
     },
     async evalValue(tabId, expression) {
       this.calls.push(["evalValue", tabId, expression]);
@@ -272,10 +281,13 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
 
   const rowsBrowser = fakeBrowser({ snapshots: [snapshot()] });
   const rowsReader = createBossMessageReader({ browser: rowsBrowser, sleepFn: async () => {} });
-  const rowsScan = await rowsReader.scanConversationRows();
+  const rowsScan = await rowsReader.scanConversationRows(undefined, { cutoffAt: "2026-09-14T02:00:00.000Z" });
   assert.strictEqual(rowsScan.tabId, COMMUNICATION_TAB_ID);
   assert.strictEqual(rowsScan.path, "/web/geek/chat");
   assert.strictEqual(rowsScan.rows[0].conversationKey, initialSnapshot.rows[0].conversationKey);
+  assert.strictEqual(rowsScan.rows[0].lastActivityAt, "2026-09-17T01:59:00.000Z");
+  assert.strictEqual(rowsScan.coverage.complete, false);
+  assert(rowsBrowser.calls.some(([name]) => name === "reload"));
 
   const verifiedRow = row(0, {
     unread: true,

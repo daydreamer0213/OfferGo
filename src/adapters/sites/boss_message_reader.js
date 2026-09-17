@@ -71,6 +71,9 @@ function normalizeBrowserSnapshot(value) {
     requireSnapshotField(row.lastMessageId, (entry) => typeof entry === "string");
     requireSnapshotField(row.lastMessageDirection, (entry) => ["friend", "myself", "unknown"].includes(entry));
     requireSnapshotField(row.lastMessageStatus, (entry) => ["read", "delivered", "unknown"].includes(entry));
+    requireSnapshotField(row.lastActivityAt, (entry) => entry === null || Number.isFinite(Date.parse(entry)));
+    requireSnapshotField(row.positionTitle, (entry) => typeof entry === "string");
+    requireSnapshotField(row.company, (entry) => typeof entry === "string");
     requireSnapshotField(row.identityVerified, (entry) => typeof entry === "boolean");
     requireSnapshotField(row.transientSignature, (entry) => /^sha256:[a-f0-9]{64}$/.test(entry));
     validateRowIdentity(row);
@@ -89,6 +92,9 @@ function normalizeBrowserSnapshot(value) {
       lastMessageId: row.lastMessageId,
       lastMessageDirection: row.lastMessageDirection,
       lastMessageStatus: row.lastMessageStatus,
+      lastActivityAt: row.lastActivityAt,
+      positionTitle: normalizedText(row.positionTitle),
+      company: normalizedText(row.company),
       identityVerified: row.identityVerified
     };
     if (row.transientSignature !== conversationSignature(normalized)) {
@@ -351,7 +357,7 @@ function sleep(ms, signal) {
 }
 
 function assertBrowser(browser) {
-  for (const name of ["listTabs", "evalValue", "setPageLifecycleActive"]) {
+  for (const name of ["listTabs", "evalValue", "setPageLifecycleActive", "reload"]) {
     if (typeof browser?.[name] !== "function") throw codedError("BOSS_MESSAGE_BROWSER_INVALID", `browser.${name} is required`);
   }
 }
@@ -374,8 +380,8 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
     }
   }
   return {
-    async scanConversationRows() {
-      return runExclusive(scanRows);
+    async scanConversationRows(signal, options = {}) {
+      return runExclusive(() => scanRows(signal, options));
     },
     async scanUnread() {
       return runExclusive(async () => {
@@ -454,17 +460,22 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
     }
   };
 
-  async function scanRows() {
+  async function scanRows(signal, { cutoffAt = null } = {}) {
     activeTabId = null;
     activeBinding = null;
     activeRowKeys = new Set();
     activeUnreadTargets = new Set();
     activeSelectedSnapshot = null;
+    throwIfAborted(signal);
     const tabs = await browser.listTabs();
     const binding = captureBinding(tabs, expectedCommunicationTabId);
     const tabId = binding.communicationTabId;
     await browser.setPageLifecycleActive(tabId);
     assertRestoredBaseline(await browser.listTabs(), binding);
+    throwIfAborted(signal);
+    await browser.reload(tabId);
+    assertRestoredBaseline(await browser.listTabs(), binding);
+    throwIfAborted(signal);
     const snapshot = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
     assertRestoredBaseline(await browser.listTabs(), binding);
     const rows = Object.freeze(snapshot.rows.map((row) => Object.freeze({ ...row })));
@@ -473,7 +484,7 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
     activeRowKeys = new Set(rows.map((row) => `${tabId}:${row.rowIndex}:${row.conversationKey}`));
     activeUnreadTargets = new Set();
     activeSelectedSnapshot = null;
-    return { tabId, path: snapshot.path, rows };
+    return { tabId, path: snapshot.path, rows, coverage: coverageForRows(rows, cutoffAt) };
   }
 
   async function assertCurrentBinding() {
@@ -482,6 +493,17 @@ function createBossMessageReader({ browser, sleepFn = sleep, expectedCommunicati
     }
     return assertRestoredBaseline(await browser.listTabs(), activeBinding);
   }
+}
+
+function coverageForRows(rows, cutoffAt) {
+  const cutoffMillis = Date.parse(String(cutoffAt || ""));
+  const timestamps = rows.map((row) => Date.parse(String(row.lastActivityAt || ""))).filter(Number.isFinite);
+  const oldestMillis = timestamps.length ? Math.min(...timestamps) : null;
+  return Object.freeze({
+    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || (oldestMillis !== null && oldestMillis <= cutoffMillis),
+    oldestActivityAt: oldestMillis === null ? null : new Date(oldestMillis).toISOString(),
+    cutoffAt: Number.isFinite(cutoffMillis) ? new Date(cutoffMillis).toISOString() : null
+  });
 }
 
 module.exports = {

@@ -58,6 +58,7 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
         senderId: numeric(item.senderId) ? String(item.senderId) : "",
         userId: numeric(item.userId) ? String(item.userId) : "",
         unreadCount: numeric(item.unreadCount) ? Number(item.unreadCount) : 0,
+        sendTime: item.sendTime,
         unreadBadge: text(node.querySelector(".im-session-item__badge")?.textContent),
         previewText: text(node.querySelector(".im-session-item__preview-text")?.textContent),
         positionName: text(node.querySelector(".im-session-item__job")?.textContent),
@@ -167,7 +168,7 @@ function defaultSleep(ms, signal) {
 }
 
 function assertBrowser(browser) {
-  for (const name of ["listTabs", "evalValue", "setPageLifecycleActive"]) {
+  for (const name of ["listTabs", "evalValue", "setPageLifecycleActive", "reload"]) {
     if (typeof browser?.[name] !== "function") throw codedError("ZHAOPIN_MESSAGE_BROWSER_INVALID", `browser.${name} is required`);
   }
 }
@@ -221,11 +222,23 @@ function rowFromSnapshot(raw, row) {
     identityVerified,
     friendKey: peerPartnerId ? safeDigest(["zhaopin", "friend", peerPartnerId]) : "",
     sourceJobId: validJobNumber(jobNumber) ? `zhaopin:${jobNumber}` : "",
-    lastMessageDirection: incoming ? "friend" : "unknown",
+    lastMessageDirection: incoming ? "friend" : senderId ? "myself" : "unknown",
     lastMessageStatus: "unknown",
     lastMessageId: "",
+    lastActivityAt: activityAt(row.sendTime),
+    positionTitle: text(row.positionName),
+    company: text(row.companyName),
     _raw: { sessionId, jobNumber, previewText, peerPartnerId, userId: numericId(row.userId), positionName: text(row.positionName), companyName: text(row.companyName), salary: text(row.salary), city: text(raw.city) }
   };
+}
+
+function activityAt(value) {
+  if (value == null || value === "") return null;
+  const numeric = Number(value);
+  const millis = Number.isFinite(numeric)
+    ? (Math.abs(numeric) < 100000000000 ? numeric * 1000 : numeric)
+    : Date.parse(String(value));
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
 }
 
 function publicRow(row) {
@@ -419,7 +432,7 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
   }
 
   return {
-    scanConversationRows(signal) {
+    scanConversationRows(signal, { cutoffAt = null } = {}) {
       return exclusive(async () => {
         binding = null;
         targetMap = new Map();
@@ -433,6 +446,12 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
         const confirmed = resolveMessageTab(await browser.listTabs(), expectedTabId);
         throwIfAborted(signal);
         if (confirmed.tabId !== next.tabId || confirmed.windowId !== next.windowId) {
+          throw codedError("ZHAOPIN_MESSAGE_TAB_BINDING_LOST", "zhaopin message tab binding changed");
+        }
+        await browser.reload(next.tabId);
+        throwIfAborted(signal);
+        const reloaded = resolveMessageTab(await browser.listTabs(), expectedTabId);
+        if (reloaded.tabId !== next.tabId || reloaded.windowId !== next.windowId) {
           throw codedError("ZHAOPIN_MESSAGE_TAB_BINDING_LOST", "zhaopin message tab binding changed");
         }
         binding = next;
@@ -450,7 +469,7 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
         const rows = internalRows.map(publicRow);
         binding = next;
         targetMap = new Map(internalRows.map((row) => [targetKey(next.tabId, row), row]));
-        return Object.freeze({ tabId: next.tabId, platform: "zhaopin", scope: "loaded_conversations", rows: Object.freeze(rows) });
+        return Object.freeze({ tabId: next.tabId, platform: "zhaopin", scope: "loaded_conversations", rows: Object.freeze(rows), coverage: coverageForRows(rows, cutoffAt) });
       });
     },
     assertActiveBindings(signal) { return exclusive(() => assertActiveBindings(signal)); },
@@ -512,6 +531,17 @@ function createZhaopinMessageReader({ browser, sleepFn = defaultSleep, nowFn = D
       });
     }
   };
+}
+
+function coverageForRows(rows, cutoffAt) {
+  const cutoffMillis = Date.parse(String(cutoffAt || ""));
+  const timestamps = rows.map((row) => Date.parse(String(row.lastActivityAt || ""))).filter(Number.isFinite);
+  const oldestMillis = timestamps.length ? Math.min(...timestamps) : null;
+  return Object.freeze({
+    complete: !Number.isFinite(cutoffMillis) || rows.length === 0 || (oldestMillis !== null && oldestMillis <= cutoffMillis),
+    oldestActivityAt: oldestMillis === null ? null : new Date(oldestMillis).toISOString(),
+    cutoffAt: Number.isFinite(cutoffMillis) ? new Date(cutoffMillis).toISOString() : null
+  });
 }
 
 module.exports = {

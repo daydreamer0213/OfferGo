@@ -107,6 +107,10 @@ class EdgeControlAdapter {
     return this.cdp(tabId, "Page.setWebLifecycleState", { state: "active" });
   }
 
+  async reload(tabId) {
+    return this.cdp(tabId, "Page.reload", { ignoreCache: false });
+  }
+
   async createTab(openerTabId, url = "about:blank") {
     const tabs = await this.listTabs();
     const opener = tabs.find((tab) => tab.id === openerTabId);

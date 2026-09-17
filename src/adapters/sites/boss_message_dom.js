@@ -67,8 +67,23 @@ function rowIdentity(row, label) {
     lastMessageId,
     lastMessageDirection,
     lastMessageStatus,
+    lastActivityAt: normalizedActivityAt(source.lastTS, source.updateTime),
+    positionTitle: normalizedText(source.jobName || source.title),
+    company: normalizedText(source.brandName || source.companyName),
     identityVerified: Boolean(uniqueId && encryptJobId && lastMessageId && lastMessageDirection !== "unknown")
   };
+}
+
+function normalizedActivityAt(...values) {
+  for (const value of values) {
+    if (value == null || value === "") continue;
+    const numeric = Number(value);
+    const millis = Number.isFinite(numeric)
+      ? (Math.abs(numeric) < 100000000000 ? numeric * 1000 : numeric)
+      : Date.parse(String(value));
+    if (Number.isFinite(millis)) return new Date(millis).toISOString();
+  }
+  return null;
 }
 
 function safeSourceValue(value, limit, pattern = /^\S+$/) {
@@ -306,7 +321,8 @@ const BOSS_MESSAGE_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
     const lastMessageId = /^\d{15}$/.test(String(source.lastMsgId || "")) ? String(source.lastMsgId) : "";
     const lastMessageDirection = source.lastIsSelf === true ? "myself" : source.lastIsSelf === false ? "friend" : "unknown";
     const lastMessageStatus = lastMessageDirection !== "myself" ? "unknown" : Number(source.lastMsgStatus) === 2 ? "read" : Number(source.lastMsgStatus) === 1 ? "delivered" : "unknown";
-    return { friendKey, conversationKey: uniqueId ? "sha256:" + sha256(canonical(["conversation", "id:" + uniqueId])) : legacyConversationKey(row, label), sourceJobId: encryptJobId ? "boss:" + encryptJobId : "", lastMessageId, lastMessageDirection, lastMessageStatus, identityVerified: Boolean(uniqueId && encryptJobId && lastMessageId && lastMessageDirection !== "unknown") };
+    const activityAt = (...values) => { for (const value of values) { if (value == null || value === "") continue; const numericValue = Number(value); const millis = Number.isFinite(numericValue) ? (Math.abs(numericValue) < 100000000000 ? numericValue * 1000 : numericValue) : Date.parse(String(value)); if (Number.isFinite(millis)) return new Date(millis).toISOString(); } return null; };
+    return { friendKey, conversationKey: uniqueId ? "sha256:" + sha256(canonical(["conversation", "id:" + uniqueId])) : legacyConversationKey(row, label), sourceJobId: encryptJobId ? "boss:" + encryptJobId : "", lastMessageId, lastMessageDirection, lastMessageStatus, lastActivityAt: activityAt(source.lastTS, source.updateTime), positionTitle: text(source.jobName || source.title), company: text(source.brandName || source.companyName), identityVerified: Boolean(uniqueId && encryptJobId && lastMessageId && lastMessageDirection !== "unknown") };
   };
   const previewKind = (row, value) => { if (row && row.querySelector && row.querySelector(".status-read")) return "self_read"; if (row && row.querySelector && row.querySelector(".status-delivery")) return "self_delivered"; const textValue = text(value); if (/^\[送达\]/.test(textValue)) return "self_delivered"; if (/^\[已读\]/.test(textValue)) return "self_read"; if (/对方已同意|附件简历已发送|已投递成功/.test(textValue)) return "platform_notice"; if (/\[语音\]|\[图片\]|\[文件\]/.test(textValue)) return "unsupported"; return textValue ? "possible_hr_reply" : "unknown"; };
   const verifiedPreviewKind = (row, value, identity) => { const visibleKind = previewKind(row, value); if (identity.lastMessageDirection === "friend") { if (["self_read", "self_delivered"].includes(visibleKind)) throw coded("BOSS_MESSAGE_STRUCTURE_CHANGED", "message row status disagrees with source data"); return visibleKind; } if (identity.lastMessageDirection !== "myself") return visibleKind; const expectedKind = identity.lastMessageStatus === "read" ? "self_read" : identity.lastMessageStatus === "delivered" ? "self_delivered" : "unknown"; if (expectedKind !== "unknown" && visibleKind !== expectedKind) throw coded("BOSS_MESSAGE_STRUCTURE_CHANGED", "message row status disagrees with source data"); if (expectedKind === "unknown" && ["self_read", "self_delivered"].includes(visibleKind)) throw coded("BOSS_MESSAGE_STRUCTURE_CHANGED", "message row status disagrees with source data"); return expectedKind; };

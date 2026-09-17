@@ -21,8 +21,8 @@ const WINDOW_ID = 7;
 const JOB_A = "CCL1234567890J00123456789";
 const JOB_B = "CZL1234567890J00987654321";
 
-function session({ sessionId, jobNumber, peerPartnerId = 501, senderId = 501, userId = 900, text = "请问方便沟通吗", unreadCount = 1 } = {}) {
-  return { sessionId, jobNumber, peerPartnerId, senderId, userId, sendTime: 1, text, lastSentenceType: "text", unreadCount };
+function session({ sessionId, jobNumber, peerPartnerId = 501, senderId = 501, userId = 900, text = "请问方便沟通吗", unreadCount = 1, sendTime = 1789610340000 } = {}) {
+  return { sessionId, jobNumber, peerPartnerId, senderId, userId, sendTime, text, lastSentenceType: "text", unreadCount };
 }
 
 function message({ idServer, flow = "in", fromMe = false, from = 501, type = "text", cardType = "", body = "你好", content = "", tip = false, nested = false, noFallback = false, sessionOverride = null } = {}) {
@@ -87,6 +87,7 @@ function fakeBrowser(page, messageUrl = IM_URL, messageTabId = IM_TAB_ID) {
     calls,
     async listTabs() { calls.push(["listTabs"]); return tabs(messageUrl, messageTabId); },
     async setPageLifecycleActive(tabId) { calls.push(["setPageLifecycleActive", tabId]); return { state: "active" }; },
+    async reload(tabId) { calls.push(["reload", tabId]); },
     async evalValue(tabId, expression) { calls.push(["evalValue", tabId]); assert.equal(tabId, messageTabId); return page.evaluate(expression); },
     async bringToFront() { calls.push(["bringToFront"]); throw new Error("must not focus"); },
     async navigate() { calls.push(["navigate"]); throw new Error("must not navigate"); },
@@ -127,9 +128,14 @@ async function main() {
     await setFixture(page, { sessions: [first, second], active: first, timeline: richTimeline, loading: true });
     const bridge = fakeBrowser(page);
     const reader = readerFor(bridge, { onSleep: () => setFixture(page, { sessions: [first, second], active: first, timeline: richTimeline, loading: false }) });
-    const scanned = await reader.scanConversationRows();
+    const scanned = await reader.scanConversationRows(undefined, { cutoffAt: "2026-09-14T02:00:00.000Z" });
     assert.equal(scanned.platform, "zhaopin");
     assert.equal(scanned.rows[0].lastMessageId, "");
+    assert.equal(scanned.rows[0].lastActivityAt, "2026-09-17T01:59:00.000Z");
+    assert.equal(scanned.rows[0].positionTitle, "合成职位");
+    assert.equal(scanned.rows[0].company, "合成公司");
+    assert.equal(scanned.coverage.complete, false);
+    assert(bridge.calls.some(([name]) => name === "reload"));
     const selected = await reader.openQueuedConversation({ ...scanned.rows[0], tabId: scanned.tabId });
     assert.deepStrictEqual(selected.messages.map(m => [m.direction, m.contentKind]), [
       ["friend", "text"], ["friend", "resume_request"], ["friend", "text"], ["platform", "platform_notice"]
