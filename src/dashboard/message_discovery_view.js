@@ -153,7 +153,9 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         <p class="line"><strong>薪资：</strong>${escapeHtml(job.salary || "薪资未说明")}</p>
       </details>
     </section>`;
-    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${result.platform === "zhaopin" ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
+    const hasVerifiedActionCard = result.platform === "zhaopin" && (inboxItem?.timeline || [])
+      .some((event) => event.kind === "resume_request" && event.direction === "friend");
+    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const nextSection = `${manualSection}${replySection}`
       || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
