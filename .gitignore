@@ -1,4 +1,5 @@
 .runtime/
+.superpowers/
 .worktrees/
 node_modules/
 data/*.sqlite
