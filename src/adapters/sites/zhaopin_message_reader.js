@@ -549,6 +549,19 @@ function createZhaopinMessageReader({
       });
     },
     assertActiveBindings(signal) { return exclusive(() => assertActiveBindings(signal)); },
+    readSelectedConversation(selected, signal) {
+      return exclusive(async () => {
+        if (!activeSelectedResult || selected !== activeSelectedResult || !activeSelectedTarget) {
+          throw codedError("ZHAOPIN_MESSAGE_TARGET_INVALID", "selected zhaopin message target is not active");
+        }
+        await assertActiveBindings(signal);
+        const snapshot = await readSnapshot(binding.tabId, signal);
+        if (!selectedIdentityMatches(snapshot, activeSelectedTarget)) {
+          throw codedError("ZHAOPIN_MESSAGE_TARGET_MISMATCH", "zhaopin selected conversation changed");
+        }
+        return selectedResult(snapshot, activeSelectedTarget);
+      });
+    },
     readSelectedJobTarget(selected, signal) {
       return exclusive(async () => {
         if (!activeSelectedResult || selected !== activeSelectedResult || !activeSelectedTarget) {

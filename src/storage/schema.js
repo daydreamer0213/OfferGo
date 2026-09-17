@@ -594,6 +594,7 @@ CREATE INDEX IF NOT EXISTS idx_message_reply_send_batches_profile
 CREATE TABLE IF NOT EXISTS message_reply_send_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id INTEGER NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'boss' CHECK(platform IN ('boss','zhaopin')),
   position INTEGER NOT NULL,
   draft_id INTEGER NOT NULL,
   card_id INTEGER NOT NULL,

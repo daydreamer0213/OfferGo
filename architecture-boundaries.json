@@ -116,6 +116,8 @@
     "dependency:dashboard-adapters:dashboard/message_follow_up_controller.js -> adapters/sites/boss_message_reader.js",
     "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/boss_message_reader.js",
     "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/boss_message_reply_sender.js",
+    "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/zhaopin_message_reader.js",
+    "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/zhaopin_message_reply_sender.js",
     "dependency:dashboard-storage:dashboard/message_discovery_controller.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/message_follow_up_controller.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/message_reply_send_controller.js -> core/storage.js",

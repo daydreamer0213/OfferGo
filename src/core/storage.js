@@ -644,6 +644,33 @@ const MIGRATIONS = [
     apply(db) {
       db.exec(MESSAGE_TIMELINE_SCHEMA);
     }
+  },
+  {
+    version: 34,
+    name: "message_reply_send_platform_v1",
+    apply(db) {
+      db.exec(MESSAGE_REPLY_LEARNING_SCHEMA);
+      db.exec(MESSAGE_REPLY_SENDING_SCHEMA);
+      const columns = new Set(db.prepare("PRAGMA table_info(message_reply_send_items)").all().map((column) => column.name));
+      if (!columns.has("platform")) {
+        db.exec("ALTER TABLE message_reply_send_items ADD COLUMN platform TEXT NOT NULL DEFAULT 'boss' CHECK(platform IN ('boss','zhaopin'))");
+      }
+      if (Number(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_items").get().n) > 0) {
+        db.exec(`UPDATE message_reply_send_items
+          SET platform = COALESCE((
+            SELECT jobs.source FROM message_reply_drafts drafts
+            JOIN candidate_progress_cards cards ON cards.id = drafts.card_id
+            JOIN jobs ON jobs.id = drafts.job_id
+            WHERE drafts.id = message_reply_send_items.draft_id
+              AND cards.id = message_reply_send_items.card_id
+              AND cards.job_id = message_reply_send_items.job_id
+              AND cards.source = jobs.source
+              AND jobs.source IN ('boss','zhaopin')
+          ), '')`);
+      }
+      const invalid = db.prepare("SELECT id FROM message_reply_send_items WHERE platform NOT IN ('boss','zhaopin') LIMIT 1").get();
+      if (invalid) throw storageError("MESSAGE_REPLY_SEND_SOURCE_MISMATCH", "reply send item source is inconsistent");
+    }
   }
 ];
 

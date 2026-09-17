@@ -15,6 +15,7 @@ const NAMES = [
   "getLatestMessageReplySendBatch",
   "listActiveMessageReplySendBatches",
   "getMessageReplySendBatchOwner",
+  "getMessageReplyDraftPlatforms",
   "hasBlockingReplySendItemForCard",
   "listActiveFollowUpCardIds",
   "listMessageReplySendItems",
@@ -25,7 +26,7 @@ const NAMES = [
 assert.deepEqual(Object.keys(store).sort(), [...NAMES].sort());
 for (const name of NAMES.filter((name) => ![
   "getActiveMessageReplySendBatch", "getLatestMessageReplySendBatch", "listActiveMessageReplySendBatches",
-  "getMessageReplySendBatchOwner", "hasBlockingReplySendItemForCard", "listActiveFollowUpCardIds"
+  "getMessageReplySendBatchOwner", "getMessageReplyDraftPlatforms", "hasBlockingReplySendItemForCard", "listActiveFollowUpCardIds"
 ].includes(name))) assert.equal(storage[name], store[name], `${name} must be a direct facade reference`);
 
 const db = storage.openDb(":memory:");
@@ -129,16 +130,25 @@ try {
     cardId: zhaopin.card.id,
     messageGroupKey: zhaopin.groupKey
   }).platform, "zhaopin");
-  assert.throws(
-    () => store.createMessageReplySendBatch(db, {
-      profileId: owner.profileId,
-      items: [{ draftId: zhaopin.draft.id, revision: zhaopin.draft.revision }],
-      createdAt: "2026-08-29T01:02:20.000Z"
-    }),
-    (error) => error.code === "MESSAGE_REPLY_SEND_PLATFORM_UNSUPPORTED"
-  );
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_items").get().n, 0);
+  const zhaopinBatch = store.createMessageReplySendBatch(db, {
+    profileId: owner.profileId,
+    items: [{ draftId: zhaopin.draft.id, revision: zhaopin.draft.revision }],
+    createdAt: "2026-08-29T01:02:20.000Z"
+  });
+  assert.equal(zhaopinBatch.items[0].platform, "zhaopin");
+  store.stopPendingMessageReplySendItems(db, {
+    profileId: owner.profileId,
+    batchId: zhaopinBatch.batch.id,
+    updatedAt: "2026-08-29T01:02:21.000Z"
+  });
+  store.transitionMessageReplySendBatch(db, {
+    profileId: owner.profileId,
+    batchId: zhaopinBatch.batch.id,
+    expectedStatus: "confirmed",
+    status: "stopped",
+    updatedAt: "2026-08-29T01:02:21.000Z"
+  });
+  const batchesBeforeMixed = db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n;
   assert.throws(
     () => store.createMessageReplySendBatch(db, {
       profileId: owner.profileId,
@@ -148,10 +158,9 @@ try {
       ],
       createdAt: "2026-08-29T01:02:25.000Z"
     }),
-    (error) => error.code === "MESSAGE_REPLY_SEND_PLATFORM_UNSUPPORTED"
+    (error) => error.code === "MESSAGE_REPLY_SEND_MIXED_PLATFORM"
   );
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_items").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n, batchesBeforeMixed);
   assert.throws(
     () => store.createMessageReplySendBatch(db, {
       profileId: owner.profileId,
@@ -217,7 +226,7 @@ try {
     }),
     (error) => error.code === "MESSAGE_REPLY_SEND_REVISION_CONFLICT"
   );
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n, 1,
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_reply_send_batches").get().n, 2,
     "failed batch creation must roll back its batch row");
 
   const running = store.transitionMessageReplySendBatch(db, {

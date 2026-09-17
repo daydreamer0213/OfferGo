@@ -10,9 +10,13 @@ const {
 const TERMINAL_BATCH_STATUSES = new Set(["completed", "stopped", "interrupted"]);
 const PRE_CLICK_ITEM_STATUSES = new Set(["pending", "selecting", "verified", "filled"]);
 const TARGET_MISMATCH_CODES = new Set([
+  "MESSAGE_REPLY_TARGET_MISMATCH",
   "BOSS_MESSAGE_REPLY_TARGET_MISMATCH",
   "BOSS_MESSAGE_TARGET_MISMATCH",
-  "BOSS_MESSAGE_ROW_DRIFTED"
+  "BOSS_MESSAGE_ROW_DRIFTED",
+  "ZHAOPIN_MESSAGE_REPLY_TARGET_MISMATCH",
+  "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
+  "ZHAOPIN_MESSAGE_TARGET_INVALID"
 ]);
 
 async function runMessageReplySendBatch({
@@ -299,8 +303,8 @@ function normalizeOutcome(value) {
 
 function outcomeCode(state) {
   return {
-    target_mismatch: "BOSS_MESSAGE_REPLY_TARGET_MISMATCH",
-    platform_rejected: "BOSS_MESSAGE_REPLY_PLATFORM_REJECTED",
+    target_mismatch: "MESSAGE_REPLY_TARGET_MISMATCH",
+    platform_rejected: "MESSAGE_REPLY_PLATFORM_REJECTED",
     ambiguous: "MESSAGE_REPLY_SEND_AMBIGUOUS"
   }[state] || "MESSAGE_REPLY_SEND_AMBIGUOUS";
 }

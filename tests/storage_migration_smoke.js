@@ -44,6 +44,7 @@ const MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION = 30;
 const WORKSPACE_PLATFORM_PREFERENCES_VERSION = 31;
 const MESSAGE_INBOX_VERSION = 32;
 const MESSAGE_TIMELINE_VERSION = 33;
+const MESSAGE_REPLY_SEND_PLATFORM_VERSION = 34;
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-migration-"));
 let db;
@@ -89,10 +90,11 @@ try {
       { version: MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION, name: "message_discovery_unresolved_inbound_v1", backup_path: null },
       { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1", backup_path: null },
       { version: MESSAGE_INBOX_VERSION, name: "message_inbox_v1", backup_path: null },
-      { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1", backup_path: null }
+      { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1", backup_path: null },
+      { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1", backup_path: null }
     ]
   );
-  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "message_timeline_v1");
+  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "message_reply_send_platform_v1");
   assert.strictEqual(freshMigrations[freshMigrations.length - 1].version, SCHEMA_VERSION);
   assert(db.prepare("PRAGMA table_info(resume_optimizations)").all()
     .some((column) => column.name === "plan_id"));
@@ -244,7 +246,7 @@ try {
   assert(SCHEMA_VERSION >= 3);
   assert.strictEqual(SHARED_BOSS_PACING_VERSION, 16);
   assert.strictEqual(MESSAGE_REPLY_LEARNING_VERSION, 17);
-  assert.strictEqual(SCHEMA_VERSION, MESSAGE_TIMELINE_VERSION);
+  assert.strictEqual(SCHEMA_VERSION, MESSAGE_REPLY_SEND_PLATFORM_VERSION);
   assert.strictEqual(
     db.prepare("SELECT count(*) AS n FROM workspace_platform_preferences").get().n,
     0,
@@ -782,7 +784,8 @@ try {
       { version: MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION, name: "message_discovery_unresolved_inbound_v1" },
       { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1" },
       { version: MESSAGE_INBOX_VERSION, name: "message_inbox_v1" },
-      { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1" }
+      { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1" },
+      { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1" }
     ]
   );
   assert.strictEqual(db.prepare("SELECT source FROM keyword_sources WHERE keyword = 'v1-preserved'").get().source, "migration-smoke");

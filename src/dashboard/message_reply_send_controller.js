@@ -1,6 +1,8 @@
 const { randomUUID } = require("node:crypto");
 const { createBossMessageReader } = require("../adapters/sites/boss_message_reader");
 const { createBossMessageReplySender } = require("../adapters/sites/boss_message_reply_sender");
+const { createZhaopinMessageReader } = require("../adapters/sites/zhaopin_message_reader");
+const { createZhaopinMessageReplySender } = require("../adapters/sites/zhaopin_message_reply_sender");
 const { createMessageReplySendingService } = require("../application/message_reply_sending");
 const { runMessageReplySendBatch } = require("../core/message_reply_send_executor");
 const {
@@ -17,7 +19,7 @@ const {
   stopPendingMessageReplySendItems
 } = require("../core/storage");
 const { getActiveMessageReplySendBatch, getLatestMessageReplySendBatch,
-  listActiveMessageReplySendBatches, getMessageReplySendBatchOwner } = require("../application/message_reply_sending/queries");
+  listActiveMessageReplySendBatches, getMessageReplySendBatchOwner, getMessageReplyDraftPlatforms } = require("../application/message_reply_sending/queries");
 
 function createMessageReplySendController({
   db,
@@ -26,8 +28,12 @@ function createMessageReplySendController({
   logger = null,
   now = () => new Date(),
   cleanupBrowser = defaultCleanupBrowser,
-  createReader = ({ browser }) => createBossMessageReader({ browser }),
-  createSender = ({ browser, reader }) => createBossMessageReplySender({ browser, reader }),
+  createReader = null,
+  createSender = null,
+  createBossReader = ({ browser }) => createBossMessageReader({ browser }),
+  createBossSender = ({ browser, reader }) => createBossMessageReplySender({ browser, reader }),
+  createZhaopinReader = ({ browser }) => createZhaopinMessageReader({ browser }),
+  createZhaopinSender = ({ browser, reader }) => createZhaopinMessageReplySender({ browser, reader }),
   createAccessController = (options) => createSiteAccessController(options),
   runBatch = runMessageReplySendBatch,
   acquireLease = acquireSiteScanLease,
@@ -69,8 +75,9 @@ function createMessageReplySendController({
     if (active || activeByProfile.has(profileId)) {
       throw controllerError("MESSAGE_REPLY_SEND_PROFILE_BUSY", "this profile already has an active reply send batch");
     }
-    if (getSiteScanLease(db, "boss")) {
-      throw controllerError("MESSAGE_REPLY_SEND_LEASE_BUSY", "BOSS is already in use by another task");
+    const platform = requestedPlatform(db, profileId, input.items);
+    if (getSiteScanLease(db, platform)) {
+      throw controllerError("MESSAGE_REPLY_SEND_LEASE_BUSY", `${platform} is already in use by another task`);
     }
     const result = service.confirmBatch({ profileId, items: input.items });
     scheduledByProfile.set(profileId, result.batch.id);
@@ -182,22 +189,27 @@ function createMessageReplySendController({
     let browser = null;
     let leaseAcquired = false;
     let heartbeat = null;
+    let platform = "boss";
     run.completion = Promise.resolve().then(async () => {
-      acquireLease(db, { site: "boss", owner, command: "message-reply-send", planId: null });
+      const initial = loadReplySendBatch(db, { profileId, batchId });
+      platform = initial.items[0]?.platform || "boss";
+      acquireLease(db, { site: platform, owner, command: "message-reply-send", planId: null });
       leaseAcquired = true;
       heartbeat = setIntervalFn(() => {
         try {
-          renewLease(db, { site: "boss", owner });
+          renewLease(db, { site: platform, owner });
         } catch {
           abortController.abort(controllerError("MESSAGE_REPLY_SEND_LEASE_LOST", "message reply send control was lost"));
         }
       }, Math.max(1000, Number(leaseHeartbeatMs) || 30_000));
       browser = await browserFactory();
-      const reader = createReader({ browser });
-      const sender = createSender({ browser, reader });
+      const reader = typeof createReader === "function" ? createReader({ browser, platform })
+        : platform === "zhaopin" ? createZhaopinReader({ browser }) : createBossReader({ browser });
+      const sender = typeof createSender === "function" ? createSender({ browser, reader, platform })
+        : platform === "zhaopin" ? createZhaopinSender({ browser, reader }) : createBossSender({ browser, reader });
       const accessController = createAccessController({
         db,
-        site: "boss",
+        site: platform,
         runId: `message-reply-send:${batchId}:${randomUUID()}`,
         logger,
         signal: abortController.signal
@@ -232,7 +244,7 @@ function createMessageReplySendController({
       }
       if (leaseAcquired) {
         try {
-          releaseLease(db, { site: "boss", owner });
+          releaseLease(db, { site: platform, owner });
         } catch (error) {
           logger?.warn("message_reply_send_lease_release_failed", {
             batchId,
@@ -249,6 +261,15 @@ function createMessageReplySendController({
 async function defaultCleanupBrowser(browser) {
   if (browser && typeof browser.disconnect === "function") await browser.disconnect();
   else if (browser && typeof browser.cleanup === "function") await browser.cleanup();
+}
+
+function requestedPlatform(db, profileId, items) {
+  if (!Array.isArray(items) || !items.length) return "boss";
+  const platforms = getMessageReplyDraftPlatforms(db, { profileId, draftIds: items.map((item) => item?.draftId) });
+  if (platforms.length !== 1 || !["boss", "zhaopin"].includes(platforms[0])) {
+    throw controllerError("MESSAGE_REPLY_SEND_SOURCE_MISMATCH", "reply drafts must belong to one supported platform");
+  }
+  return platforms[0];
 }
 
 function positiveInteger(value, label) {

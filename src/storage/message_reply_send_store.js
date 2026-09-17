@@ -99,6 +99,9 @@ function createMessageReplySendBatch(db, input = {}) {
   try {
     return immediateTransaction(db, () => {
       const frozen = requested.map((item) => freezeDraft(db, profileId, item));
+      if (new Set(frozen.map((item) => item.platform)).size !== 1) {
+        throw storageError("MESSAGE_REPLY_SEND_MIXED_PLATFORM", "one reply batch must contain exactly one platform");
+      }
       const conversations = new Set();
       for (const item of frozen) {
         if (conversations.has(item.conversationKey)) {
@@ -113,13 +116,13 @@ function createMessageReplySendBatch(db, input = {}) {
         profile_id, status, stop_code, created_at, updated_at, completed_at
       ) VALUES (?, 'confirmed', '', ?, ?, NULL)`).run(profileId, createdAt, createdAt).lastInsertRowid);
       const insert = db.prepare(`INSERT INTO message_reply_send_items(
-        batch_id, position, draft_id, card_id, job_id, conversation_key,
+        batch_id, platform, position, draft_id, card_id, job_id, conversation_key,
         source_job_id, expected_last_message_id, draft_revision, reply_text,
         reply_digest, status, click_count, evidence_json, error_code,
         error_message, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, '{}', '', '', ?, ?)`);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, '{}', '', '', ?, ?)`);
       frozen.forEach((item, position) => insert.run(
-        batchId, position, item.draftId, item.cardId, item.jobId, item.conversationKey,
+        batchId, item.platform, position, item.draftId, item.cardId, item.jobId, item.conversationKey,
         item.sourceJobId, item.expectedLastMessageId, item.draftRevision,
         item.replyText, item.replyDigest, createdAt, createdAt
       ));
@@ -167,6 +170,16 @@ function listActiveMessageReplySendBatches(db) {
 function getMessageReplySendBatchOwner(db, batchId) {
   const row = db.prepare("SELECT profile_id, status FROM message_reply_send_batches WHERE id = ?").get(Number(batchId));
   return row ? { profileId: Number(row.profile_id), status: row.status } : null;
+}
+
+function getMessageReplyDraftPlatforms(db, { profileId, draftIds } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  if (!Array.isArray(draftIds) || !draftIds.length) return [];
+  const select = db.prepare(`SELECT jobs.source FROM message_reply_drafts drafts
+    JOIN candidate_progress_cards cards ON cards.id = drafts.card_id AND cards.profile_id = drafts.profile_id
+    JOIN jobs ON jobs.id = drafts.job_id AND jobs.id = cards.job_id
+    WHERE drafts.id = ? AND drafts.profile_id = ?`);
+  return [...new Set(draftIds.map((draftId) => select.get(positiveInteger(draftId, "draftId"), profile)?.source).filter(Boolean))];
 }
 
 function hasBlockingReplySendItemForCard(db, { profileId, cardId } = {}) {
@@ -290,9 +303,10 @@ function freezeDraft(db, profileId, item) {
     WHERE cards.id = ? AND cards.profile_id = ? AND cards.job_id = ?`).get(
     draft.card_id, profileId, draft.job_id
   );
-  if (!owner || owner.card_source !== "boss" || owner.job_source !== "boss") {
-    throw storageError("MESSAGE_REPLY_SEND_PLATFORM_UNSUPPORTED", "message reply send supports BOSS only");
+  if (!owner || owner.card_source !== owner.job_source || !["boss", "zhaopin"].includes(owner.job_source)) {
+    throw storageError("MESSAGE_REPLY_SEND_SOURCE_MISMATCH", "reply draft source is inconsistent");
   }
+  const platform = owner.job_source;
   const context = db.prepare(`SELECT * FROM message_inbound_contexts
     WHERE profile_id = ? AND card_id = ? AND message_group_key = ?`).get(
     profileId, draft.card_id, draft.message_group_key
@@ -306,8 +320,9 @@ function freezeDraft(db, profileId, item) {
     cardId: Number(draft.card_id),
     jobId: Number(draft.job_id),
     conversationKey: digestKey(context.conversation_key, "conversationKey"),
-    sourceJobId: sourceJobKey(context.source_job_id),
-    expectedLastMessageId: messageId(context.last_message_id),
+    platform,
+    sourceJobId: sourceJobKey(context.source_job_id, platform),
+    expectedLastMessageId: messageId(context.last_message_id, platform),
     draftRevision: Number(draft.revision),
     replyText,
     replyDigest: digest(foldWhitespace(replyText))
@@ -428,6 +443,7 @@ function mapItem(row) {
   return {
     id: Number(row.id),
     batchId: Number(row.batch_id),
+    platform: row.platform || "boss",
     position: Number(row.position),
     draftId: Number(row.draft_id),
     cardId: Number(row.card_id),
@@ -573,6 +589,7 @@ module.exports = {
   getLatestMessageReplySendBatch,
   listActiveMessageReplySendBatches,
   getMessageReplySendBatchOwner,
+  getMessageReplyDraftPlatforms,
   hasBlockingReplySendItemForCard,
   listActiveFollowUpCardIds,
   listMessageReplySendItems,

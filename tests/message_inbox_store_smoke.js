@@ -21,7 +21,7 @@ function digest(value) {
 }
 
 try {
-  assert.equal(SCHEMA_VERSION, 33);
+  assert.equal(SCHEMA_VERSION, 34);
   const createdAt = "2026-09-17T01:50:00.000Z";
   const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
       display_name, profile_json, source_hash, created_at, updated_at

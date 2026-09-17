@@ -61,6 +61,7 @@ function publicReplySendBatch(value = {}) {
       id: Number(item.id || 0),
       batchId: Number(item.batchId || 0),
       position: Number(item.position || 0),
+      platform: String(item.platform || "boss"),
       draftId: Number(item.draftId || 0),
       cardId: Number(item.cardId || 0),
       jobId: Number(item.jobId || 0),
