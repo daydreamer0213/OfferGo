@@ -25,7 +25,7 @@ const { safeDigest, messageKey } = require("../src/adapters/sites/boss_message_d
 const {
   runBossMessageDiscovery,
   projectMessageDecisionCard
-} = require("../src/core/message_discovery");
+} = require("../src/application/message_discovery/run");
 const { resolveInboundOpportunity } = require("../src/application/message_discovery/inbound");
 const { factStatus } = require("../src/core/candidate_fact_policy");
 const {

@@ -9,7 +9,7 @@ const {
   listMessageInboundContexts, listSiteAccessEvents, getSitePacingState,
   getSiteRuntimeState, clearSiteRuntimeState
 } = require("../src/core/storage");
-const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../src/core/message_discovery");
+const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../src/application/message_discovery/run");
 const { ensureProgressCard, findMessageDiscoveryJobContext } = require("../src/core/candidate_progress");
 const { zhaopinJobIdentity } = require("../src/core/zhaopin_search_scope");
 const { createMessageDiscoveryController, createMessageDiscoveryDetailSafety } = require("../src/dashboard/message_discovery_controller");

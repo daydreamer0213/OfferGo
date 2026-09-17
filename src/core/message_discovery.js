@@ -11,11 +11,7 @@ const {
   listCandidateAnswerMemories,
   recordMessageReplyDrafts,
   saveMessageInboundContext,
-  immediateTransaction,
-  upsertMessageInboxItem,
-  getMessageInboxSyncState,
-  saveMessageInboxSyncState,
-  markMessageInboxItemDone
+  immediateTransaction
 } = require("./storage");
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
@@ -104,8 +100,15 @@ async function runBossMessageDiscovery({
   now = () => new Date().toISOString(),
   sleepFn = abortableSleep,
   randomFn = Math.random,
-  onStatus = () => {}
+  onStatus = () => {},
+  messageInbox
 }) {
+  const {
+    upsertMessageInboxItem,
+    getMessageInboxSyncState,
+    saveMessageInboxSyncState,
+    markMessageInboxItemDone
+  } = messageInboxPort(messageInbox);
   const source = discoveryPlatform(platform);
   const candidates = listMessageDiscoveryCandidates(db, { profileId, platform: source });
   const storedProfile = getCandidateProfile(db, profileId);
@@ -178,7 +181,8 @@ async function runBossMessageDiscovery({
     unresolved: unresolvedByConversation,
     firstSync,
     cutoffAt,
-    observedAt: runStartedAt
+    observedAt: runStartedAt,
+    upsertMessageInboxItem
   });
   for (const baseline of planned.baselineWrites) {
     recordPreviewState(db, {
@@ -212,7 +216,7 @@ async function runBossMessageDiscovery({
         observedAt: now(),
         identity: {}
       });
-      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now() });
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now(), upsertMessageInboxItem });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: code });
       retained = unresolvedSummary(db, profileId, source);
       continue;
@@ -230,7 +234,7 @@ async function runBossMessageDiscovery({
           previewDigest: target.previewDigest, previewKind: target.previewKind,
           reasonCode: localReasonCode, observedAt: now(), identity: {}
         });
-        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now() });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now(), upsertMessageInboxItem });
         continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: localReasonCode });
         retained = unresolvedSummary(db, profileId, source);
         await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
@@ -309,7 +313,8 @@ async function runBossMessageDiscovery({
         target,
         reasonCode: resolved.reasonCode,
         observedAt: now(),
-        selected: identity
+        selected: identity,
+        upsertMessageInboxItem
       });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: resolved.reasonCode });
       retained = unresolvedSummary(db, profileId, source);
@@ -387,7 +392,7 @@ async function runBossMessageDiscovery({
             sourceJobId: selectedTarget.sourceJobId, lastMessageId: selectedTarget.lastMessageId
           } : {})
         });
-        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: incoming.reasonCode, observedAt: now(), selected: selectedIdentityValue });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: incoming.reasonCode, observedAt: now(), selected: selectedIdentityValue, upsertMessageInboxItem });
         continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: incoming.reasonCode });
         retained = unresolvedSummary(db, profileId, source);
         await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
@@ -532,7 +537,7 @@ async function runBossMessageDiscovery({
     });
     if (!committed) {
       retained = unresolvedSummary(db, profileId, source);
-      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", observedAt: now(), selected: capturedIdentity });
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", observedAt: now(), selected: capturedIdentity, upsertMessageInboxItem });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" });
       await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
       continue;
@@ -1321,7 +1326,8 @@ function projectScannedInboxRows(db, {
   unresolved,
   firstSync,
   cutoffAt,
-  observedAt
+  observedAt,
+  upsertMessageInboxItem
 }) {
   const cutoffMillis = Date.parse(String(cutoffAt || ""));
   for (const row of rows || []) {
@@ -1360,7 +1366,8 @@ function recordLocalInboxFailure(db, {
   target,
   reasonCode,
   observedAt,
-  selected = {}
+  selected = {},
+  upsertMessageInboxItem
 }) {
   upsertMessageInboxItem(db, {
     profileId,
@@ -1379,6 +1386,19 @@ function recordLocalInboxFailure(db, {
     reasonCode,
     observedAt
   });
+}
+
+function messageInboxPort(value) {
+  const required = [
+    "upsertMessageInboxItem",
+    "getMessageInboxSyncState",
+    "saveMessageInboxSyncState",
+    "markMessageInboxItemDone"
+  ];
+  if (!value || required.some((name) => typeof value[name] !== "function")) {
+    throw discoveryError("MESSAGE_INBOX_PORT_REQUIRED", "message discovery requires a message inbox persistence port");
+  }
+  return value;
 }
 
 function emitStatus(status, logger, onStatus) {

@@ -13,7 +13,7 @@ const {
 const { listOpenMessageReplyDrafts } = require("../src/core/storage");
 const { matchingCardFromProfile } = require("../src/core/matching_card");
 const { createZhaopinMessageJobContextResolver } = require("../src/application/message_discovery/zhaopin_job_context");
-const { runBossMessageDiscovery } = require("../src/core/message_discovery");
+const { runBossMessageDiscovery } = require("../src/application/message_discovery/run");
 const { safeDigest } = require("../src/adapters/sites/boss_message_dom");
 
 const JOB_ID = "CCSYNTH001J00000000001";

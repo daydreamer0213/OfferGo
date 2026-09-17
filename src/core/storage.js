@@ -27,7 +27,6 @@ const funnelStore = require("../storage/funnel_store");
 const resumeOptimizationStore = require("../storage/resume_optimization_store");
 const mockInterviewStore = require("../storage/mock_interview_store");
 const workspacePlatformStore = require("../storage/workspace_platform_store");
-const messageInboxStore = require("../storage/message_inbox_store");
 const {
   recordMessageReplyDrafts,
   getMessageReplyDraft,
@@ -1559,11 +1558,6 @@ module.exports = {
   openDb,
   getWorkspacePlatformPreference: workspacePlatformStore.getWorkspacePlatformPreference,
   saveWorkspacePlatformPreference: workspacePlatformStore.saveWorkspacePlatformPreference,
-  upsertMessageInboxItem: messageInboxStore.upsertMessageInboxItem,
-  listMessageInboxItems: messageInboxStore.listMessageInboxItems,
-  getMessageInboxSyncState: messageInboxStore.getMessageInboxSyncState,
-  saveMessageInboxSyncState: messageInboxStore.saveMessageInboxSyncState,
-  markMessageInboxItemDone: messageInboxStore.markMessageInboxItemDone,
   immediateTransaction,
   recordMessageReplyDrafts,
   getMessageReplyDraft,

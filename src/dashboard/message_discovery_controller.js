@@ -7,7 +7,7 @@ const { createBossMessageDetailReader } = require("../adapters/sites/boss_messag
 const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_message_detail_reader");
 const { BossSiteAdapter } = require("../adapters/sites/boss");
 const { createMessageDiscoveryJobContextResolver } = require("../application/message_discovery/job_context");
-const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../core/message_discovery");
+const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../application/message_discovery/run");
 const { createMessageReplyAnalyzer } = require("../core/message_reply_analyzer");
 const {
   listUnresolvedMessageDiscoveryItems
@@ -24,10 +24,9 @@ const {
   listMessageInboundContexts,
   deleteMessageInboundContext,
   getActiveSearchPlan,
-  closeMessageReplyDrafts,
-  listMessageInboxItems,
-  getMessageInboxSyncState
+  closeMessageReplyDrafts
 } = require("../core/storage");
+const { listMessageInboxItems, getMessageInboxSyncState } = require("../application/message_inbox");
 const { getCandidateProfile } = require("../application/candidate_queries");
 const {
   getPersistedCardJobIdentity,
