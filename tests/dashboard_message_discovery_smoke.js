@@ -560,6 +560,30 @@ async function main() {
     reasonCode: "",
     observedAt: "2026-07-31T01:05:00.000Z"
   });
+  const zhaopinActionConversationKey = `sha256:${"9".repeat(64)}`;
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinActionConversationKey,
+    observedAt: "2026-07-31T01:06:00.000Z",
+    events: [{ messageKey: `sha256:${"6".repeat(64)}`, platformMessageId: "206", direction: "friend",
+      kind: "resume_request", text: RESUME_REQUEST_SUMMARY, occurredAt: "2026-07-31T01:06:00.000Z", metadata: { cardType: "11" } }]
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinActionConversationKey,
+    lastMessageId: "206",
+    lastActivityAt: "2026-07-31T01:06:00.000Z",
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: "智联简历请求",
+    company: "示例公司",
+    latestExcerpt: RESUME_REQUEST_SUMMARY,
+    actionGroup: "needs_action",
+    actionCode: "resume_request",
+    observedAt: "2026-07-31T01:06:00.000Z"
+  });
   await startAndWait(base, fixture.profileId, "completed");
   status = await getStatus(base, fixture.profileId);
   assertNoDraftMessagesInJson(status);
@@ -587,7 +611,7 @@ async function main() {
     "薪资未说明",
     "下一步",
     "HR 邀请你发送简历",
-    "OfferGo 已识别这项请求，可在本页确认处理。",
+    "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。",
     "推荐回复",
     "HR 消息",
     OPEN_HR_TEXT,
@@ -600,6 +624,8 @@ async function main() {
   assert.match(understoodPage.body, /class="message-bubble message-bubble--friend"/);
   assert.match(understoodPage.body, /class="message-bubble message-bubble--self"/);
   assert.match(understoodPage.body, /收到一条语音消息，本版本暂不读取内容/);
+  assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
+  assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
   assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
   assert(
     understoodPage.body.indexOf("<h4>HR 邀请你发送简历</h4>")

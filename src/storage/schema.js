@@ -891,6 +891,32 @@ CREATE INDEX IF NOT EXISTS idx_message_events_timeline
   ON message_events(profile_id, platform, conversation_key, occurred_at, id);
 `;
 
+const MESSAGE_ACTION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS message_platform_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL,
+  platform TEXT NOT NULL CHECK(platform IN ('boss','zhaopin')),
+  conversation_key TEXT NOT NULL,
+  message_key TEXT NOT NULL,
+  action_kind TEXT NOT NULL CHECK(action_kind IN ('resume_request_accept','resume_request_decline')),
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN (
+    'confirmed','selecting','verified','click_dispatched','succeeded',
+    'target_mismatch','platform_rejected','ambiguous','stopped'
+  )),
+  click_count INTEGER NOT NULL DEFAULT 0 CHECK(click_count BETWEEN 0 AND 1),
+  evidence_json TEXT NOT NULL DEFAULT '{}',
+  error_code TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(profile_id, idempotency_key),
+  UNIQUE(profile_id, platform, conversation_key, message_key, action_kind),
+  FOREIGN KEY(profile_id) REFERENCES candidate_profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_platform_actions_active
+  ON message_platform_actions(profile_id, status, updated_at DESC, id DESC);
+`;
+
 module.exports = {
   buildSchema,
   MATCHING_CARD_SCHEMA,
@@ -900,6 +926,7 @@ module.exports = {
   MESSAGE_DISCOVERY_RUNTIME_STATES_SCHEMA,
   MESSAGE_INBOX_SCHEMA,
   MESSAGE_TIMELINE_SCHEMA,
+  MESSAGE_ACTION_SCHEMA,
   SHARED_SITE_PACING_STATES_SCHEMA,
   ONBOARDING_RUN_SCHEMA,
   MESSAGE_REPLY_LEARNING_SCHEMA,

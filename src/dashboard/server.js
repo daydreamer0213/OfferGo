@@ -299,6 +299,7 @@ const { EdgeControlAdapter } = require("../adapters/browser/edge_control");
 const { CdpBrowserAdapter } = require("../adapters/browser/cdp");
 const { createMessageDiscoveryController } = require("./message_discovery_controller");
 const { createMessageReplySendController } = require("./message_reply_send_controller");
+const { createMessageActionController } = require("./message_action_controller");
 const { createMessageFollowUpController } = require("./message_follow_up_controller");
 const { createWorkflowController } = require("./workflow_controller");
 const { renderMessageDiscoveryPage } = require("./message_discovery_view");
@@ -553,6 +554,7 @@ function createDashboardServer({
   analysisRetryRunnerFactory = null,
   messageDiscoveryDependencies = {},
   messageReplySendDependencies = {},
+  messageActionDependencies = {},
   messageReplyLearningService = null,
   messageFollowUpService = null,
   messageFollowUpController = null,
@@ -832,6 +834,15 @@ function createDashboardServer({
       cdpPort: frozenBrowserAuthority.cdpPort
     }),
     ...messageReplySendDependencies
+  });
+  const messageAction = createMessageActionController({
+    db,
+    logger,
+    browserFactory: () => browserFactory({
+      browserMode: frozenBrowserAuthority.browserMode,
+      cdpPort: frozenBrowserAuthority.cdpPort
+    }),
+    ...messageActionDependencies
   });
   const followUpService = messageFollowUpService || createMessageFollowUpService({
     db,
@@ -1254,6 +1265,7 @@ function createDashboardServer({
         searchParams: url.searchParams,
         controller: messageDiscovery,
         replySendController: messageReplySend,
+        messageActionController: messageAction,
         messageReplyActionToken,
         helpers: messageDiscoveryViewHelpers()
       }));
@@ -1449,6 +1461,18 @@ function createDashboardServer({
       if (req.method === "GET" && url.pathname === "/api/message-reply-send-status") {
         return handleMessageReplySendStatus(res, messageReplySend, url.searchParams);
       }
+      if (req.method === "GET" && url.pathname === "/api/message-action/status") {
+        return handleMessageActionStatus(res, messageAction, url.searchParams);
+      }
+      if (req.method === "POST" && url.pathname === "/api/message-action/confirm") {
+        requireMessageReplyAction(req, messageReplyActionToken);
+        await ensureManagedWorkspaceReady("message_action");
+        return handleMessageActionConfirm(req, res, messageAction);
+      }
+      if (req.method === "POST" && url.pathname === "/api/message-action/stop") {
+        requireMessageReplyAction(req, messageReplyActionToken);
+        return handleMessageActionStop(req, res, messageAction);
+      }
       if (req.method === "POST" && url.pathname === "/api/message-reply-send-batch") {
         requireMessageReplyAction(req, messageReplyActionToken);
         await ensureManagedWorkspaceReady("message_reply_send");
@@ -1590,6 +1614,7 @@ function createDashboardServer({
     const cleanups = [
       Promise.resolve().then(() => messageDiscovery.close()),
       Promise.resolve().then(() => messageReplySend.close()),
+      Promise.resolve().then(() => messageAction.close()),
       Promise.resolve().then(() => messageFollowUp.close()),
       Promise.resolve().then(() => browserSupervisor?.close?.())
     ];
@@ -3885,6 +3910,61 @@ async function handleMessageReplySendControl(req, res, controller) {
   } catch (error) {
     return sendMessageReplySendError(res, error);
   }
+}
+
+async function handleMessageActionConfirm(req, res, controller) {
+  try {
+    const params = await readStrictJsonObject(req);
+    assertExactKeys(params, ["profileId", "platform", "conversationKey", "messageKey", "actionKind", "idempotencyKey"]);
+    return sendJson(res, 202, controller.confirm(params));
+  } catch (error) {
+    return sendMessageActionError(res, error);
+  }
+}
+
+function handleMessageActionStatus(res, controller, searchParams) {
+  try {
+    return sendJson(res, 200, controller.status({
+      profileId: searchParams.get("profileId"),
+      actionId: searchParams.get("actionId")
+    }));
+  } catch (error) {
+    return sendMessageActionError(res, error);
+  }
+}
+
+async function handleMessageActionStop(req, res, controller) {
+  try {
+    const params = await readStrictJsonObject(req);
+    assertExactKeys(params, ["profileId", "actionId"]);
+    return sendJson(res, 200, controller.stop(params));
+  } catch (error) {
+    return sendMessageActionError(res, error);
+  }
+}
+
+function sendMessageActionError(res, error) {
+  const code = String(error?.code || "MESSAGE_ACTION_FAILED");
+  const statusCode = code === "MESSAGE_ACTION_NOT_FOUND" ? 404
+    : code === "MESSAGE_ACTION_INPUT_INVALID" ? 400
+      : code === "MESSAGE_REPLY_SEND_ACTION_REQUIRED" ? 403 : 409;
+  return sendJson(res, statusCode, {
+    error: publicMessageActionError(code),
+    errorCode: code
+  });
+}
+
+function publicMessageActionError(code) {
+  return ({
+    MESSAGE_ACTION_PLATFORM_UNSUPPORTED: "这个平台的操作控件还没有通过安全核验，本次没有执行。",
+    MESSAGE_ACTION_PROFILE_BUSY: "当前已有一项消息操作正在执行，请等待完成。",
+    MESSAGE_ACTION_LEASE_BUSY: "智联正在执行其他任务，请稍后再试。",
+    MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE: "这条请求已经变化，请先同步最新消息。",
+    MESSAGE_ACTION_DECISION_CONFLICT: "这条请求已经选择过另一个处理结果。",
+    MESSAGE_ACTION_IDEMPOTENCY_CONFLICT: "本次操作编号与已确认内容不一致。",
+    MESSAGE_ACTION_NOT_FOUND: "消息操作不存在。",
+    MESSAGE_REPLY_SEND_ACTION_REQUIRED: "请从当前 OfferGo 消息页面重新确认。"
+  })[code] || "这项操作没有执行，请同步最新消息后重试。";
 }
 
 async function readStrictJsonObject(req) {

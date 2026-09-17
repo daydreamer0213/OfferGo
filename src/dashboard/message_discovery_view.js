@@ -4,7 +4,7 @@ const { listIncomingContacts } = require("../application/funnel_analysis");
 const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
 const { findExactIdentityCandidates } = require("../application/message_discovery/queries");
 
-function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageReplyActionToken = "", helpers }) {
+function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageActionController = null, messageReplyActionToken = "", helpers }) {
   const {
     getCandidateProfile,
     renderErrorPage,
@@ -30,6 +30,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const profile = getCandidateProfile(db, profileId);
   if (!profile) return renderErrorPage("候选人画像不存在。", "/onboarding", { code: "MESSAGE_DISCOVERY_PROFILE_NOT_FOUND" });
   const initialReplySend = replySendController?.latest?.({ profileId }) || null;
+  const messageActions = messageActionController?.list?.({ profileId }) || [];
   const pageState = controller.pageState(profileId);
   const inboxState = pageState.inbox || { groups: { needsAction: [], waiting: [], needsReview: [], done: [] }, freshness: {}, counts: { total: 0 } };
   const inboxItems = Object.values(inboxState.groups || {}).flat();
@@ -101,7 +102,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       ? durableUnresolved.find(item => item.platform === result.platform && item.conversationKey === result.conversationKey) : null;
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
     const pending = resultPending(result) || Boolean(retainedItem);
-    const retainedWork = retainedItem ? `<details class="message-retained-work"><summary>这条会话还有待核对事项</summary>${renderUnresolvedItem(db, retainedItem, { profileId, embedded: true, escapeHtml, escapeAttr })}</details>` : "";
+    const retainedWork = retainedItem ? `<details class="message-retained-work"><summary>这条会话还有待核对事项</summary>${renderUnresolvedItem(db, retainedItem, { profileId, embedded: true, messageActions, escapeHtml, escapeAttr })}</details>` : "";
     const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
     const interviewInvited = Boolean(matchingContact?.interviewInvited || result.messageIntent === "interview_invitation");
     const durableDrafts = Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0) : [];
@@ -131,7 +132,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       return messageIndex === 0 ? card : `<details class="message-draft-alternatives"><summary>查看其他回复版本</summary>${card}</details>`;
     }).join("");
     const inboundMessages = Array.isArray(result.inboundMessages) ? result.inboundMessages : [];
-    const timelineSection = renderConversationTimeline(inboxItem?.timeline, { escapeHtml, escapeAttr });
+    const timelineSection = renderConversationTimeline(inboxItem?.timeline, { escapeHtml, escapeAttr, messageActions });
     const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
       : "");
@@ -152,7 +153,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         <p class="line"><strong>薪资：</strong>${escapeHtml(job.salary || "薪资未说明")}</p>
       </details>
     </section>`;
-    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">OfferGo 已识别这项请求，可在本页确认处理。</p></div>`).join("");
+    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${result.platform === "zhaopin" ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const nextSection = `${manualSection}${replySection}`
       || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
@@ -200,16 +201,16 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       actionGroup: "needs_review",
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform || "")}" data-task="pending" data-pending="true" data-resume="${Boolean(matchingContact?.resumeRequested)}" data-interview="${Boolean(matchingContact?.interviewInvited)}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small class="message-source">${escapeHtml(platformLabel)} · 待补岗位资料</small><small>${escapeHtml(company)}</small><em>${escapeHtml(messagePreview(item, "待补岗位资料"))}</em></span></label>`,
-      detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, escapeHtml, escapeAttr })
+      detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, messageActions, escapeHtml, escapeAttr })
     };
   });
   const unresolvedIdentities = new Set(durableUnresolved.map((item) => `${item.platform}\0${item.conversationKey}`));
   const incomingViews = incomingContacts.filter((item) => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)
     && !unresolvedIdentities.has(`${item.platform}\0${item.conversationKey}`))
-    .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, escapeHtml, escapeAttr }));
+    .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, messageActions, escapeHtml, escapeAttr }));
   const representedIdentities = new Set([...resultViews, ...unresolvedViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
   const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
-    .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr }));
+    .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }));
   const allViews = [...resultViews, ...unresolvedViews, ...incomingViews, ...inboxOnlyViews];
   const requestedView = contactMatchesScope ? allViews.find((view) => view.contactKey === requestedContact.key) : null;
   const selectionLocked = Boolean(contactKey && !requestedView);
@@ -283,7 +284,7 @@ function messageStatusLabel(result) {
   return "待人工判断";
 }
 
-function renderIncomingContactView(item, { selected, pending, timeline, escapeHtml, escapeAttr }) {
+function renderIncomingContactView(item, { selected, pending, timeline, messageActions, escapeHtml, escapeAttr }) {
   const key = messageViewKey("incoming", [item.key]);
   const inputId = `message-view-${key}`;
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
@@ -295,11 +296,11 @@ function renderIncomingContactView(item, { selected, pending, timeline, escapeHt
     actionGroup: pending ? "needs_action" : "done",
     contactKey: item.key,
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">当前没有需要你处理的操作。</p></section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">当前没有需要你处理的操作。</p></section>`
   };
 }
 
-function renderInboxOnlyView(item, { escapeHtml, escapeAttr }) {
+function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
   const key = messageViewKey("inbox", [item.platform, item.conversationKey]);
   const inputId = `message-view-${key}`;
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
@@ -316,11 +317,11 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr }) {
     actionGroup: item.actionGroup,
     contactKey: "",
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">岗位资料正在后台补充，消息内容已保留。</p>' : ""}</section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">岗位资料正在后台补充，消息内容已保留。</p>' : ""}</section>`
   };
 }
 
-function renderConversationTimeline(events, { escapeHtml, escapeAttr }) {
+function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageActions = [] }) {
   if (!Array.isArray(events) || !events.length) return "";
   const bubbles = events.map((event) => {
     const side = event.direction === "myself" ? "self" : event.direction === "friend" ? "friend" : "platform";
@@ -328,9 +329,24 @@ function renderConversationTimeline(events, { escapeHtml, escapeAttr }) {
       ? mediaPlaceholder(event.metadata?.mediaKind)
       : event.text || messageActionLabel(event.kind);
     const time = event.occurredAt ? `<time datetime="${escapeAttr(event.occurredAt)}">${escapeHtml(messageTimeLabel(event.occurredAt))}</time>` : "";
-    return `<article class="message-bubble message-bubble--${side}" data-message-key="${escapeAttr(event.messageKey || "")}"><p>${escapeHtml(content)}</p>${time}</article>`;
+    const action = event.kind === "resume_request" ? messageActions.find((item) => item.platform === event.platform
+      && item.conversationKey === event.conversationKey && item.messageKey === event.messageKey) : null;
+    const controls = event.kind === "resume_request" ? renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) : "";
+    return `<article class="message-bubble message-bubble--${side}" data-message-key="${escapeAttr(event.messageKey || "")}"><p>${escapeHtml(content)}</p>${time}${controls}</article>`;
   }).join("");
   return `<section class="message-timeline" aria-label="完整会话"><h3>完整会话</h3><div class="message-timeline-body">${bubbles}</div></section>`;
+}
+
+function renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) {
+  const labels = {
+    confirmed: "已确认，等待处理", selecting: "正在核对会话", verified: "已核对操作目标",
+    click_dispatched: "正在确认平台结果", succeeded: "已在智联完成处理",
+    target_mismatch: "会话已变化，本次未执行", platform_rejected: "智联未接受本次操作",
+    ambiguous: "平台结果暂时无法确认，已停止重试", stopped: "本次操作已停止"
+  };
+  if (action) return `<div class="message-card-action" data-message-action-state="${escapeAttr(action.status)}"><strong>${escapeHtml(action.actionKind === "resume_request_accept" ? "同意发送简历" : "拒绝发送简历")}</strong><span>${escapeHtml(labels[action.status] || "等待处理")}</span></div>`;
+  if (event.platform !== "zhaopin") return '<div class="message-card-action message-card-action--notice"><span>OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。</span></div>';
+  return `<div class="message-card-action" data-message-action-group><span>直接处理这项请求</span><div class="button-row"><button type="button" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="accept_resume">同意发送简历</button><button type="button" class="secondary" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="decline_resume">拒绝</button></div><small data-message-action-feedback role="status">点击后 OfferGo 会先核对当前会话，再执行一次。</small></div>`;
 }
 
 function mediaPlaceholder(kind) {
@@ -454,6 +470,11 @@ function messageDiscoveryClientScript(scriptState) {
     sendStopButton?.addEventListener("click",async()=>{if(!activeBatchId||sendStopButton.disabled)return;sendStopButton.disabled=true;try{const state=await readSendResponse(await fetch("/api/message-reply-send-control",{method:"POST",headers:{"content-type":"application/json","x-roleflow-action":initial.messageReplyActionToken},body:JSON.stringify({profileId:initial.profileId,batchId:activeBatchId,action:"stop"})}));applySendState(state);feedback.textContent="已停止后续发送。";}catch(error){sendStopButton.disabled=false;feedback.textContent=sendMessage(error.message);}});
     updateSelection();
     if(initial.initialReplySend)applySendState(initial.initialReplySend);
+    const actionTerminal=new Set(["succeeded","target_mismatch","platform_rejected","ambiguous","stopped"]);
+    const actionLabel=(status)=>({confirmed:"已确认，等待处理",selecting:"正在核对当前会话",verified:"会话已核对",click_dispatched:"正在确认智联结果",succeeded:"已处理完成",target_mismatch:"会话已变化，本次未执行",platform_rejected:"智联未接受本次操作",ambiguous:"结果暂时无法确认，已停止重试",stopped:"本次操作已停止"}[status]||"等待处理");
+    const actionError=(code)=>({MESSAGE_ACTION_PROFILE_BUSY:"已有一项消息操作正在执行，请等待完成。",MESSAGE_ACTION_LEASE_BUSY:"智联正在执行其他任务，请稍后再试。",MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE:"这条请求已经变化，请先同步最新消息。",MESSAGE_ACTION_DECISION_CONFLICT:"这条请求已经处理过。",MESSAGE_ACTION_PLATFORM_UNSUPPORTED:"当前平台操作还没有通过安全核验，本次没有执行。",MESSAGE_REPLY_SEND_ACTION_REQUIRED:"请刷新当前消息页面后重新确认。"}[code]||"这项操作没有执行，请同步最新消息后重试。");
+    const pollMessageAction=async(actionId,group)=>{try{const response=await fetch("/api/message-action/status?profileId="+encodeURIComponent(initial.profileId)+"&actionId="+encodeURIComponent(actionId));const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.status)throw new Error(parsed.body?.errorCode||"MESSAGE_ACTION_FAILED");const node=group.querySelector("[data-message-action-feedback]");if(node)node.textContent=actionLabel(parsed.body.status);if(actionTerminal.has(parsed.body.status)){if(parsed.body.status==="succeeded")setTimeout(()=>requestReload(true),350);return;}setTimeout(()=>pollMessageAction(actionId,group),700);}catch(error){const node=group.querySelector("[data-message-action-feedback]");if(node)node.textContent=actionError(error.message);}};
+    for(const button of document.querySelectorAll("[data-message-action-confirm]"))button.addEventListener("click",async()=>{const group=button.closest("[data-message-action-group]");if(!group||group.dataset.pending==="true")return;group.dataset.pending="true";for(const peer of group.querySelectorAll("button"))peer.disabled=true;const status=group.querySelector("[data-message-action-feedback]");if(status)status.textContent="正在核对当前智联会话…";const actionKind="resume"+"_request_"+(button.dataset.actionKind==="accept_resume"?"accept":"decline");const body={profileId:initial.profileId,platform:button.dataset.platform,conversationKey:button.dataset.conversationKey,messageKey:button.dataset.messageKey,actionKind,idempotencyKey:crypto.randomUUID()};try{const response=await fetch("/api/message-action/confirm",{method:"POST",headers:{"content-type":"application/json","x-roleflow-action":initial.messageReplyActionToken},body:JSON.stringify(body)});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.id)throw new Error(parsed.body?.errorCode||"MESSAGE_ACTION_FAILED");if(status)status.textContent=actionLabel(parsed.body.status);pollMessageAction(parsed.body.id,group);}catch(error){group.dataset.pending="false";for(const peer of group.querySelectorAll("button"))peer.disabled=false;if(status)status.textContent=actionError(error.message);}});
     const applySelection=(preferredKey=selectedKey,persist=true)=>{
       const rows=Array.from(document.querySelectorAll(".message-list-item[data-platform]"));
       for(const row of rows)row.hidden=false;
@@ -516,10 +537,10 @@ function messageDiscoveryClientScript(scriptState) {
   }());</script>`;
 }
 
-function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, timeline = [], escapeHtml, escapeAttr }) {
+function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, timeline = [], messageActions = [], escapeHtml, escapeAttr }) {
   const attributes = embedded ? 'class="message-unresolved-context"' : `id="message-detail-${viewKey}" class="panel message-unresolved" data-platform="${escapeAttr(item.platform || "")}" data-message-detail-panel="${viewKey}"${hidden ? " hidden" : ""}`;
   const back = embedded ? "" : '<button type="button" class="message-back" data-message-back>返回列表</button>';
-  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr }) || (item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位资料正在后台补充，消息内容已保留。</p></section>`;
+  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || (item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位资料正在后台补充，消息内容已保留。</p></section>`;
   const complete = Boolean(String(item.positionTitle || "").trim() && String(item.company || "").trim());
   const matches = complete ? findExactIdentityCandidates(db, {
     profileId, title: item.positionTitle, company: item.company
@@ -534,7 +555,7 @@ function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded =
   const create = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button name="action" value="create"${complete ? "" : " disabled"}>保存为 HR 主动机会</button></form>`;
   const ignore = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button class="secondary" name="action" value="ignore">不纳入 OfferGo</button></form>`;
   const incomplete = complete ? "" : `<p class="risk-text">岗位身份仍不完整，请下次只读发现后再处理。</p>`;
-  return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "岗位名称待确认")}</h2><p class="message-source">BOSS</p><p class="line">${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(item.salary || "薪资待确认")} · ${escapeHtml(item.city || "地点待确认")}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr })}${incomplete}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><div class="message-controls">${link}${create}${ignore}</div></section>`;
+  return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "岗位名称待确认")}</h2><p class="message-source">BOSS</p><p class="line">${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(item.salary || "薪资待确认")} · ${escapeHtml(item.city || "地点待确认")}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions })}${incomplete}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><div class="message-controls">${link}${create}${ignore}</div></section>`;
 }
 
 function messageViewKey(type, parts) {

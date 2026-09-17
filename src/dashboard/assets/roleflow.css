@@ -198,6 +198,10 @@ h2{font-size:19px;font-weight:600}
 .message-bubble--self{align-self:flex-end;background:#dff0ea;border-color:#bad7cc;border-bottom-right-radius:4px}
 .message-bubble--self time{text-align:right}
 .message-bubble--platform{align-self:center;max-width:92%;background:#f0f1ed;color:var(--rf-ink-soft);font-size:13px;text-align:center}
+.message-card-action{display:grid;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--rf-rule)}
+.message-card-action .button-row{margin:0;display:flex;gap:8px;flex-wrap:wrap}
+.message-card-action small,.message-card-action span{color:var(--rf-ink-soft);font-size:12px}
+.message-card-action--notice{max-width:420px}
 @media(max-width:760px){
   .message-state{display:block}
   .message-state h2{margin-bottom:6px;padding:0;border:0}

@@ -8,6 +8,7 @@ const {
   MESSAGE_DISCOVERY_RUNTIME_STATES_SCHEMA,
   MESSAGE_INBOX_SCHEMA,
   MESSAGE_TIMELINE_SCHEMA,
+  MESSAGE_ACTION_SCHEMA,
   SHARED_SITE_PACING_STATES_SCHEMA,
   ONBOARDING_RUN_SCHEMA,
   MESSAGE_REPLY_LEARNING_SCHEMA,
@@ -670,6 +671,13 @@ const MIGRATIONS = [
       }
       const invalid = db.prepare("SELECT id FROM message_reply_send_items WHERE platform NOT IN ('boss','zhaopin') LIMIT 1").get();
       if (invalid) throw storageError("MESSAGE_REPLY_SEND_SOURCE_MISMATCH", "reply send item source is inconsistent");
+    }
+  },
+  {
+    version: 35,
+    name: "message_platform_actions_v1",
+    apply(db) {
+      db.exec(MESSAGE_ACTION_SCHEMA);
     }
   }
 ];

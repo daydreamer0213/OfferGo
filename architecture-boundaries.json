@@ -118,9 +118,12 @@
     "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/boss_message_reply_sender.js",
     "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/zhaopin_message_reader.js",
     "dependency:dashboard-adapters:dashboard/message_reply_send_controller.js -> adapters/sites/zhaopin_message_reply_sender.js",
+    "dependency:dashboard-adapters:dashboard/message_action_controller.js -> adapters/sites/zhaopin_message_action_sender.js",
+    "dependency:dashboard-adapters:dashboard/message_action_controller.js -> adapters/sites/zhaopin_message_reader.js",
     "dependency:dashboard-storage:dashboard/message_discovery_controller.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/message_follow_up_controller.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/message_reply_send_controller.js -> core/storage.js",
+    "dependency:dashboard-storage:dashboard/message_action_controller.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/server.js -> core/storage.js",
     "dependency:dashboard-storage:dashboard/server.js -> storage/onboarding_store.js",
     "dependency:dashboard-storage:dashboard/server.js -> storage/platform_search_context_store.js"
