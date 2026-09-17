@@ -7,6 +7,7 @@ const {
   MESSAGE_DISCOVERY_UNRESOLVED_ITEMS_SCHEMA,
   MESSAGE_DISCOVERY_RUNTIME_STATES_SCHEMA,
   MESSAGE_INBOX_SCHEMA,
+  MESSAGE_TIMELINE_SCHEMA,
   SHARED_SITE_PACING_STATES_SCHEMA,
   ONBOARDING_RUN_SCHEMA,
   MESSAGE_REPLY_LEARNING_SCHEMA,
@@ -27,6 +28,7 @@ const funnelStore = require("../storage/funnel_store");
 const resumeOptimizationStore = require("../storage/resume_optimization_store");
 const mockInterviewStore = require("../storage/mock_interview_store");
 const workspacePlatformStore = require("../storage/workspace_platform_store");
+const messageTimelineStore = require("../storage/message_timeline_store");
 const {
   recordMessageReplyDrafts,
   getMessageReplyDraft,
@@ -634,6 +636,13 @@ const MIGRATIONS = [
     name: "message_inbox_v1",
     apply(db) {
       db.exec(MESSAGE_INBOX_SCHEMA);
+    }
+  },
+  {
+    version: 33,
+    name: "message_timeline_v1",
+    apply(db) {
+      db.exec(MESSAGE_TIMELINE_SCHEMA);
     }
   }
 ];
@@ -1558,6 +1567,9 @@ module.exports = {
   openDb,
   getWorkspacePlatformPreference: workspacePlatformStore.getWorkspacePlatformPreference,
   saveWorkspacePlatformPreference: workspacePlatformStore.saveWorkspacePlatformPreference,
+  upsertMessageEvents: messageTimelineStore.upsertMessageEvents,
+  listMessageEvents: messageTimelineStore.listMessageEvents,
+  latestMessageEvent: messageTimelineStore.latestMessageEvent,
   immediateTransaction,
   recordMessageReplyDrafts,
   getMessageReplyDraft,

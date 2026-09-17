@@ -865,6 +865,31 @@ CREATE TABLE IF NOT EXISTS message_inbox_sync_states (
 );
 `;
 
+const MESSAGE_TIMELINE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS message_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL,
+  platform TEXT NOT NULL CHECK(platform IN ('boss','zhaopin')),
+  conversation_key TEXT NOT NULL,
+  message_key TEXT NOT NULL,
+  platform_message_id TEXT NOT NULL DEFAULT '',
+  direction TEXT NOT NULL CHECK(direction IN ('friend','myself','platform','unknown')),
+  kind TEXT NOT NULL CHECK(kind IN (
+    'text','platform_notice','resume_request','interview_invitation',
+    'contact_exchange','media_ignored','unknown_card'
+  )),
+  text TEXT NOT NULL DEFAULT '',
+  occurred_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  first_observed_at TEXT NOT NULL,
+  last_observed_at TEXT NOT NULL,
+  UNIQUE(profile_id, platform, conversation_key, message_key),
+  FOREIGN KEY(profile_id) REFERENCES candidate_profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_events_timeline
+  ON message_events(profile_id, platform, conversation_key, occurred_at, id);
+`;
+
 module.exports = {
   buildSchema,
   MATCHING_CARD_SCHEMA,
@@ -873,6 +898,7 @@ module.exports = {
   MESSAGE_DISCOVERY_UNRESOLVED_ITEMS_SCHEMA,
   MESSAGE_DISCOVERY_RUNTIME_STATES_SCHEMA,
   MESSAGE_INBOX_SCHEMA,
+  MESSAGE_TIMELINE_SCHEMA,
   SHARED_SITE_PACING_STATES_SCHEMA,
   ONBOARDING_RUN_SCHEMA,
   MESSAGE_REPLY_LEARNING_SCHEMA,

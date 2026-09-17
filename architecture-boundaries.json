@@ -97,6 +97,7 @@
     "dependency:core-outward:core/storage.js -> storage/funnel_store.js",
     "dependency:core-outward:core/storage.js -> storage/job_store.js",
     "dependency:core-outward:core/storage.js -> storage/message_learning_store.js",
+    "dependency:core-outward:core/storage.js -> storage/message_timeline_store.js",
     "dependency:core-outward:core/storage.js -> storage/message_reply_send_store.js",
     "dependency:core-outward:core/storage.js -> storage/migrations.js",
     "dependency:core-outward:core/storage.js -> storage/mock_interview_store.js",

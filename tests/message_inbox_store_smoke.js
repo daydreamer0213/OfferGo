@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { openDb, SCHEMA_VERSION } = require("../src/core/storage");
+const { openDb, SCHEMA_VERSION, upsertMessageEvents, listMessageEvents } = require("../src/core/storage");
 const {
   upsertMessageInboxItem,
   listMessageInboxItems,
@@ -21,7 +21,7 @@ function digest(value) {
 }
 
 try {
-  assert.equal(SCHEMA_VERSION, 32);
+  assert.equal(SCHEMA_VERSION, 33);
   const createdAt = "2026-09-17T01:50:00.000Z";
   const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
       display_name, profile_json, source_hash, created_at, updated_at
@@ -47,6 +47,11 @@ try {
   assert.equal(item.actionGroup, "needs_action");
   assert.equal(item.firstObservedAt, input.observedAt);
   assert.equal(listMessageInboxItems(db, { profileId }).length, 1);
+  upsertMessageEvents(db, { profileId, platform: "boss", conversationKey, observedAt: input.observedAt, events: [{
+    messageKey: digest("message-1"), platformMessageId: "message-1", direction: "friend", kind: "text",
+    text: input.latestExcerpt, occurredAt: input.lastActivityAt, metadata: {}
+  }] });
+  assert.equal(listMessageEvents(db, { profileId, platform: "boss", conversationKey }).length, 1);
 
   item = upsertMessageInboxItem(db, {
     ...input,
