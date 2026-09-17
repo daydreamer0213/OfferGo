@@ -42,6 +42,7 @@ const RESUME_OPTIMIZATION_PLAN_BINDING_VERSION = 28;
 const PLATFORM_SEARCH_CONTEXT_VERSION = 29;
 const MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION = 30;
 const WORKSPACE_PLATFORM_PREFERENCES_VERSION = 31;
+const MESSAGE_INBOX_VERSION = 32;
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-migration-"));
 let db;
@@ -85,10 +86,11 @@ try {
       { version: RESUME_OPTIMIZATION_PLAN_BINDING_VERSION, name: "resume_optimization_plan_binding_v3", backup_path: null },
       { version: PLATFORM_SEARCH_CONTEXT_VERSION, name: "platform_search_contexts_and_workflow_source_v1", backup_path: null },
       { version: MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION, name: "message_discovery_unresolved_inbound_v1", backup_path: null },
-      { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1", backup_path: null }
+      { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1", backup_path: null },
+      { version: MESSAGE_INBOX_VERSION, name: "message_inbox_v1", backup_path: null }
     ]
   );
-  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "workspace_platform_preferences_v1");
+  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "message_inbox_v1");
   assert.strictEqual(freshMigrations[freshMigrations.length - 1].version, SCHEMA_VERSION);
   assert(db.prepare("PRAGMA table_info(resume_optimizations)").all()
     .some((column) => column.name === "plan_id"));
@@ -230,10 +232,17 @@ try {
     ],
     "unresolved storage must retain only approved job identity fields"
   );
+  for (const table of ["message_inbox_items", "message_inbox_sync_states"]) {
+    assert.strictEqual(
+      db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name = ?").get(table).n,
+      1,
+      `${table} must exist after unified inbox migration`
+    );
+  }
   assert(SCHEMA_VERSION >= 3);
   assert.strictEqual(SHARED_BOSS_PACING_VERSION, 16);
   assert.strictEqual(MESSAGE_REPLY_LEARNING_VERSION, 17);
-  assert.strictEqual(SCHEMA_VERSION, WORKSPACE_PLATFORM_PREFERENCES_VERSION);
+  assert.strictEqual(SCHEMA_VERSION, MESSAGE_INBOX_VERSION);
   assert.strictEqual(
     db.prepare("SELECT count(*) AS n FROM workspace_platform_preferences").get().n,
     0,
@@ -769,7 +778,8 @@ try {
       { version: RESUME_OPTIMIZATION_PLAN_BINDING_VERSION, name: "resume_optimization_plan_binding_v3" },
       { version: PLATFORM_SEARCH_CONTEXT_VERSION, name: "platform_search_contexts_and_workflow_source_v1" },
       { version: MESSAGE_DISCOVERY_UNRESOLVED_INBOUND_VERSION, name: "message_discovery_unresolved_inbound_v1" },
-      { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1" }
+      { version: WORKSPACE_PLATFORM_PREFERENCES_VERSION, name: "workspace_platform_preferences_v1" },
+      { version: MESSAGE_INBOX_VERSION, name: "message_inbox_v1" }
     ]
   );
   assert.strictEqual(db.prepare("SELECT source FROM keyword_sources WHERE keyword = 'v1-preserved'").get().source, "migration-smoke");

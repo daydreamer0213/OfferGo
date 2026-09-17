@@ -822,6 +822,49 @@ CREATE INDEX IF NOT EXISTS idx_mock_interview_retries_turn
   ON mock_interview_retries(session_id, turn_id, retry_index, id);
 `;
 
+const MESSAGE_INBOX_SCHEMA = `
+CREATE TABLE IF NOT EXISTS message_inbox_items (
+  profile_id INTEGER NOT NULL,
+  platform TEXT NOT NULL CHECK(platform IN ('boss','zhaopin')),
+  conversation_key TEXT NOT NULL,
+  source_job_id TEXT NOT NULL DEFAULT '',
+  job_id INTEGER,
+  card_id INTEGER,
+  last_message_id TEXT NOT NULL DEFAULT '',
+  last_activity_at TEXT NOT NULL,
+  last_direction TEXT NOT NULL CHECK(last_direction IN ('friend','myself','platform','unknown')),
+  unread INTEGER NOT NULL DEFAULT 0 CHECK(unread IN (0,1)),
+  position_title TEXT NOT NULL DEFAULT '',
+  company TEXT NOT NULL DEFAULT '',
+  latest_excerpt TEXT NOT NULL DEFAULT '',
+  action_group TEXT NOT NULL CHECK(action_group IN ('needs_action','waiting','needs_review','done')),
+  action_code TEXT NOT NULL DEFAULT '',
+  reason_code TEXT NOT NULL DEFAULT '',
+  first_observed_at TEXT NOT NULL,
+  last_observed_at TEXT NOT NULL,
+  resolved_at TEXT,
+  PRIMARY KEY(profile_id, platform, conversation_key),
+  FOREIGN KEY(profile_id) REFERENCES candidate_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY(card_id) REFERENCES candidate_progress_cards(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_message_inbox_items_action
+  ON message_inbox_items(profile_id, action_group, last_activity_at DESC, conversation_key);
+
+CREATE TABLE IF NOT EXISTS message_inbox_sync_states (
+  profile_id INTEGER NOT NULL,
+  platform TEXT NOT NULL CHECK(platform IN ('boss','zhaopin')),
+  last_attempted_at TEXT NOT NULL,
+  last_successful_at TEXT,
+  coverage_start_at TEXT,
+  coverage_complete INTEGER NOT NULL DEFAULT 0 CHECK(coverage_complete IN (0,1)),
+  watermark_at TEXT,
+  stop_code TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(profile_id, platform),
+  FOREIGN KEY(profile_id) REFERENCES candidate_profiles(id) ON DELETE CASCADE
+);
+`;
+
 module.exports = {
   buildSchema,
   MATCHING_CARD_SCHEMA,
@@ -829,6 +872,7 @@ module.exports = {
   MESSAGE_PREVIEW_STATES_SCHEMA,
   MESSAGE_DISCOVERY_UNRESOLVED_ITEMS_SCHEMA,
   MESSAGE_DISCOVERY_RUNTIME_STATES_SCHEMA,
+  MESSAGE_INBOX_SCHEMA,
   SHARED_SITE_PACING_STATES_SCHEMA,
   ONBOARDING_RUN_SCHEMA,
   MESSAGE_REPLY_LEARNING_SCHEMA,
