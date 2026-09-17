@@ -275,14 +275,24 @@ async function zhaopinCompanyUnverifiedIsolationSmoke() {
         messages: [{ direction: "friend", messageId: target.lastMessageId, text: "终止分支合成消息。", contentKind: "text" }] };
     }
   };
+  const terminalResolver = createZhaopinMessageJobContextResolver({ db, profileId: terminalFixture.profileId, now: () => NOW });
   const terminal = await runBossMessageDiscovery({
     db, profileId: terminalFixture.profileId, platform: "zhaopin", reader: terminalReader,
-    resolveJobContext: async () => { throw Object.assign(new Error("target mismatch"), { code: "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH" }); },
-    classifyMessageGroup: async () => { throw new Error("target mismatch must stop before drafting"); },
+    resolveJobContext: async (input) => {
+      if (input.target.sourceJobId === "zhaopin:ZLTERMINAL001") {
+        throw Object.assign(new Error("target mismatch"), { code: "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH" });
+      }
+      return terminalResolver(input);
+    },
+    classifyMessageGroup: async () => classification(["第二条会话仍然可以生成草稿。"]),
     now: () => NOW, sleepFn: async () => {}
   });
-  assert.equal(terminal.reasonCode, "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH");
-  assert.deepEqual(opened, ["zhaopin:ZLTERMINAL001"], "a target mismatch must stop before the second queued conversation");
+  assert.equal(terminal.processed, 1);
+  assert.deepEqual(opened, ["zhaopin:ZLTERMINAL001", "zhaopin:ZLTERMINAL002"], "an item-local target mismatch must not block the next conversation");
+  assert.deepEqual(terminal.continuedFailures, [{
+    conversationKey: safeDigest(["zhaopin", "terminal-first"]),
+    reasonCode: "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
+  }]);
 }
 
 async function zhaopinDetailControllerSmoke() {

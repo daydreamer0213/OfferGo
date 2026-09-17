@@ -22,11 +22,16 @@ const UNRESOLVED_REASON_CODES = new Set([
   "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE",
   "MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE",
   "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE"
+  ,"BOSS_MESSAGE_CONTENT_UNSUPPORTED"
+  ,"BOSS_MESSAGE_TARGET_MISMATCH"
+  ,"BOSS_MESSAGE_DETAIL_TARGET_MISMATCH"
   ,"ZHAOPIN_MESSAGE_CONTENT_PENDING"
   ,"ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED"
   ,"ZHAOPIN_MESSAGE_STRUCTURE_CHANGED"
   ,"ZHAOPIN_MESSAGE_TIMELINE_FAILED"
   ,"ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED"
+  ,"ZHAOPIN_MESSAGE_TARGET_MISMATCH"
+  ,"ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
 ]);
 function listPreviewStates(db, { profileId, platform = "boss" } = {}) {
   const id = positiveInteger(profileId, "profileId");
@@ -172,7 +177,7 @@ function saveMessageDiscoveryRuntimeState(db, input = {}) {
   return getMessageDiscoveryRuntimeState(db, { profileId, platform });
 }
 
-function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolved = new Map() } = {}) {
+function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolved = new Map(), firstSync = false, cutoffAt = null } = {}) {
   const targets = new Map();
   for (const row of rows || []) {
     if (!row || typeof row !== "object") continue;
@@ -196,6 +201,22 @@ function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolve
     }
     const baseline = baselines.get(conversationKey);
     if (!baseline) {
+      if (firstSync) {
+        if (row.identityVerified === true
+          && row.lastMessageDirection === "friend"
+          && activityWithinCutoff(row.lastActivityAt, cutoffAt)) {
+          replaceHigherPriorityTarget(targets, conversationKey, {
+            priority: 1,
+            target: queueTarget("initial_incoming", row, conversationKey, previewDigest, previewKind)
+          });
+          continue;
+        }
+        replaceHigherPriorityTarget(targets, conversationKey, {
+          priority: 0,
+          baseline: baselineWrite(conversationKey, previewDigest, previewKind)
+        });
+        continue;
+      }
       if (row.identityVerified === true && row.lastMessageDirection === "friend") {
         replaceHigherPriorityTarget(targets, conversationKey, {
           priority: 1,
@@ -233,6 +254,13 @@ function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolve
   };
 }
 
+function activityWithinCutoff(value, cutoffAt) {
+  const activity = Date.parse(String(value || ""));
+  const cutoff = Date.parse(String(cutoffAt || ""));
+  if (!Number.isFinite(cutoff)) return false;
+  return !Number.isFinite(activity) || activity >= cutoff;
+}
+
 function replaceHigherPriorityTarget(targets, conversationKey, next) {
   const previous = targets.get(conversationKey);
   if (!previous || next.priority > previous.priority) targets.set(conversationKey, next);
@@ -255,6 +283,10 @@ function queueTarget(operation, row, conversationKey, previewDigest, previewKind
     lastMessageId: String(row.lastMessageId || ""),
     lastMessageDirection: String(row.lastMessageDirection || "unknown"),
     lastMessageStatus: String(row.lastMessageStatus || "unknown"),
+    lastActivityAt: Number.isFinite(Date.parse(String(row.lastActivityAt || ""))) ? new Date(row.lastActivityAt).toISOString() : null,
+    positionTitle: shortText(row.positionTitle, 240),
+    company: shortText(row.company, 240),
+    previewText: shortText(row.previewText, 1000),
     identityVerified: row.identityVerified === true
   });
 }

@@ -11,7 +11,11 @@ const {
   listCandidateAnswerMemories,
   recordMessageReplyDrafts,
   saveMessageInboundContext,
-  immediateTransaction
+  immediateTransaction,
+  upsertMessageInboxItem,
+  getMessageInboxSyncState,
+  saveMessageInboxSyncState,
+  markMessageInboxItemDone
 } = require("./storage");
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
@@ -41,20 +45,19 @@ const TERMINAL_MODEL_OUTPUT_CODES = new Set([
   "MODEL_OUTPUT_TRUNCATED",
   "MODEL_INVALID_JSON"
 ]);
-const CONTEXT_TERMINAL_CODES = new Set([
+const PLATFORM_TERMINAL_CODES = new Set([
   "BOSS_LOGIN_REQUIRED",
+  "BOSS_MESSAGE_LOGIN_REQUIRED",
   "BOSS_MESSAGE_PAGE_LOST",
   "BOSS_MESSAGE_STRUCTURE_CHANGED",
   "BOSS_MESSAGE_TAB_AMBIGUOUS",
   "BOSS_MESSAGE_TAB_MISSING",
-  "BOSS_MESSAGE_TARGET_MISMATCH",
   "BOSS_MESSAGE_DETAIL_BASELINE_INVALID",
   "BOSS_MESSAGE_DETAIL_BASELINE_NOT_RESTORED",
   "BOSS_MESSAGE_DETAIL_BINDING_INVALID",
   "BOSS_MESSAGE_DETAIL_BROWSER_FAILED",
   "BOSS_MESSAGE_DETAIL_CLOSE_FAILED",
   "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND",
-  "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
   "BOSS_OPERATOR_TABS_CHANGED",
   "BOSS_SEARCH_TAB_CHANGED",
   "BOSS_TAB_REQUIRED",
@@ -64,15 +67,29 @@ const CONTEXT_TERMINAL_CODES = new Set([
   "ZHAOPIN_MESSAGE_RISK_CONTROL",
   "ZHAOPIN_MESSAGE_STRUCTURE_CHANGED",
   "ZHAOPIN_MESSAGE_TAB_BINDING_LOST",
-  "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
   "ZHAOPIN_MESSAGE_DETAIL_BASELINE_NOT_RESTORED",
   "ZHAOPIN_MESSAGE_DETAIL_BINDING_INVALID",
   "ZHAOPIN_MESSAGE_DETAIL_BROWSER_FAILED",
   "ZHAOPIN_MESSAGE_DETAIL_CLOSE_FAILED",
   "ZHAOPIN_MESSAGE_DETAIL_NOT_BACKGROUND",
   "ZHAOPIN_MESSAGE_DETAIL_PAGE_LOST",
-  "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH",
-  "BROWSER_COMMAND_FAILED"
+  "BROWSER_COMMAND_FAILED",
+  "BROWSER_DISCONNECTED",
+  "BROWSER_TIMEOUT"
+]);
+const ITEM_LOCAL_CODES = new Set([
+  "BOSS_MESSAGE_CONTENT_UNSUPPORTED",
+  "BOSS_MESSAGE_TARGET_MISMATCH",
+  "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
+  "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE",
+  "MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE",
+  "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE",
+  "ZHAOPIN_MESSAGE_CONTENT_PENDING",
+  "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED",
+  "ZHAOPIN_MESSAGE_TIMELINE_FAILED",
+  "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
+  "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
 ]);
 
 async function runBossMessageDiscovery({
@@ -96,13 +113,27 @@ async function runBossMessageDiscovery({
     throw discoveryError("MESSAGE_DISCOVERY_PROFILE_NOT_FOUND", "candidate profile was not found");
   }
   const profile = messageReplyProfile(storedProfile.profile);
+  const runStartedAt = now();
+  const previousSync = getMessageInboxSyncState(db, { profileId, platform: source });
+  const firstSync = !previousSync?.lastSuccessfulAt;
+  const cutoffAt = firstSync ? new Date(Date.parse(runStartedAt) - 72 * 60 * 60 * 1000).toISOString() : null;
   let retained = unresolvedSummary(db, profileId, source);
   let scan;
   try {
     throwIfAborted(signal);
-    scan = await reader.scanConversationRows(signal);
+    scan = await reader.scanConversationRows(signal, { cutoffAt });
   } catch (error) {
     if (shouldInterrupt(error, signal)) throw error;
+    saveMessageInboxSyncState(db, {
+      profileId,
+      platform: source,
+      lastAttemptedAt: runStartedAt,
+      lastSuccessfulAt: previousSync?.lastSuccessfulAt || null,
+      coverageStartAt: previousSync?.coverageStartAt || cutoffAt,
+      coverageComplete: false,
+      watermarkAt: previousSync?.watermarkAt || null,
+      stopCode: errorCode(error)
+    });
     return emitStopped(errorCode(error), 0, [], logger, onStatus, retained);
   }
   if (!scan || !Array.isArray(scan.rows)) {
@@ -121,7 +152,34 @@ async function runBossMessageDiscovery({
     .map((state) => [state.conversationKey, state]));
   const unresolvedByConversation = new Map(listUnresolvedMessageDiscoveryItems(db, { profileId, platform: source })
     .map((item) => [item.conversationKey, item]));
-  const planned = planMessageDiscoveryQueue({ rows: scan.rows, baselines, unresolved: unresolvedByConversation });
+  const coverage = normalizedCoverage(scan.coverage, scan.rows, cutoffAt);
+  const syncState = saveMessageInboxSyncState(db, {
+    profileId,
+    platform: source,
+    lastAttemptedAt: runStartedAt,
+    lastSuccessfulAt: coverage.complete ? runStartedAt : previousSync?.lastSuccessfulAt || null,
+    coverageStartAt: previousSync?.coverageStartAt || cutoffAt,
+    coverageComplete: coverage.complete,
+    watermarkAt: newestActivityAt(scan.rows) || previousSync?.watermarkAt || null,
+    stopCode: coverage.complete ? "" : "MESSAGE_COVERAGE_PARTIAL"
+  });
+  const planned = planMessageDiscoveryQueue({
+    rows: scan.rows,
+    baselines,
+    unresolved: unresolvedByConversation,
+    firstSync,
+    cutoffAt
+  });
+  projectScannedInboxRows(db, {
+    profileId,
+    platform: source,
+    rows: scan.rows,
+    baselines,
+    unresolved: unresolvedByConversation,
+    firstSync,
+    cutoffAt,
+    observedAt: runStartedAt
+  });
   for (const baseline of planned.baselineWrites) {
     recordPreviewState(db, {
       profileId,
@@ -137,12 +195,27 @@ async function runBossMessageDiscovery({
   let results = [];
   let processed = 0;
   let openedCount = 0;
+  const continuedFailures = [];
   emitStatus(safeStatus("running", { queued: queue.length, unresolved: retained.count, reasonCode: retained.reasonCode, counters }), logger, onStatus);
   for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
     const target = queue[queueIndex];
     throwIfAborted(signal);
     if (target.previewKind === "unsupported") {
-      return emitStopped(source === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED" : "BOSS_MESSAGE_CONTENT_UNSUPPORTED", queue.length, results, logger, onStatus, retained, processed, counters);
+      const code = source === "zhaopin" ? "ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED" : "BOSS_MESSAGE_CONTENT_UNSUPPORTED";
+      recordUnresolvedMessageDiscoveryItem(db, {
+        profileId,
+        platform: source,
+        conversationKey: target.conversationKey,
+        previewDigest: target.previewDigest,
+        previewKind: target.previewKind,
+        reasonCode: code,
+        observedAt: now(),
+        identity: {}
+      });
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now() });
+      continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: code });
+      retained = unresolvedSummary(db, profileId, source);
+      continue;
     }
     let selected;
     try {
@@ -150,15 +223,20 @@ async function runBossMessageDiscovery({
       selected = await reader.openQueuedConversation(target, signal);
     } catch (error) {
       if (shouldInterrupt(error, signal)) throw error;
-      if (source === "zhaopin" && zhaopinReadFailure(error)) {
+      if (!isPlatformTerminalFailure(error)) {
+        const localReasonCode = durableLocalReasonCode(errorCode(error));
         recordUnresolvedMessageDiscoveryItem(db, {
           profileId, platform: source, conversationKey: target.conversationKey,
           previewDigest: target.previewDigest, previewKind: target.previewKind,
-          reasonCode: errorCode(error), observedAt: now(), identity: {}
+          reasonCode: localReasonCode, observedAt: now(), identity: {}
         });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now() });
+        continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: localReasonCode });
         retained = unresolvedSummary(db, profileId, source);
+        await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+        continue;
       }
-      return emitStopped(errorCode(error), queue.length, results, logger, onStatus, retained, processed, counters);
+      return emitStopped(errorCode(error), queue.length, results, logger, onStatus, retained, processed, counters, { coverage, syncState, continuedFailures });
     }
     if (selected?.skipped) {
       await paceBeforeNext({
@@ -225,6 +303,15 @@ async function runBossMessageDiscovery({
           lastMessageId: selectedTarget.lastMessageId
         } : {})
       });
+      recordLocalInboxFailure(db, {
+        profileId,
+        platform: source,
+        target,
+        reasonCode: resolved.reasonCode,
+        observedAt: now(),
+        selected: identity
+      });
+      continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: resolved.reasonCode });
       retained = unresolvedSummary(db, profileId, source);
       emitStatus(safeStatus("running", {
         queued: queue.length,
@@ -235,7 +322,7 @@ async function runBossMessageDiscovery({
         counters
       }), logger, onStatus);
       if (contextStopCode) {
-        return emitStopped(contextStopCode, queue.length, results, logger, onStatus, retained, processed, counters);
+        return emitStopped(contextStopCode, queue.length, results, logger, onStatus, retained, processed, counters, { coverage, syncState, continuedFailures });
       }
       await paceBeforeNext({
         queueIndex,
@@ -273,6 +360,12 @@ async function runBossMessageDiscovery({
           conversationKey: target.conversationKey
         });
         retained = unresolvedSummary(db, profileId, source);
+        markMessageInboxItemDone(db, {
+          profileId,
+          platform: source,
+          conversationKey: target.conversationKey,
+          resolvedAt: now()
+        });
         await paceBeforeNext({
           queueIndex,
           queueLength: queue.length,
@@ -294,6 +387,8 @@ async function runBossMessageDiscovery({
             sourceJobId: selectedTarget.sourceJobId, lastMessageId: selectedTarget.lastMessageId
           } : {})
         });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: incoming.reasonCode, observedAt: now(), selected: selectedIdentityValue });
+        continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: incoming.reasonCode });
         retained = unresolvedSummary(db, profileId, source);
         await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
         continue;
@@ -437,7 +532,10 @@ async function runBossMessageDiscovery({
     });
     if (!committed) {
       retained = unresolvedSummary(db, profileId, source);
-      return emitStopped("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", queue.length, results, logger, onStatus, retained, processed, counters);
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", observedAt: now(), selected: capturedIdentity });
+      continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" });
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+      continue;
     }
     const { card, drafts } = committed;
     retained = unresolvedSummary(db, profileId, source);
@@ -454,6 +552,25 @@ async function runBossMessageDiscovery({
       source,
       selectedTarget.sourceJobId
     ));
+    upsertMessageInboxItem(db, {
+      profileId,
+      platform: source,
+      conversationKey: target.conversationKey,
+      sourceJobId: selectedTarget.sourceJobId,
+      jobId: card.jobId,
+      cardId: card.id,
+      lastMessageId: selectedTarget.lastMessageId,
+      lastActivityAt: target.lastActivityAt || now(),
+      lastDirection: "friend",
+      unread: true,
+      positionTitle: resolved.job.title,
+      company: resolved.job.company,
+      latestExcerpt: inboundMessages.at(-1)?.text || target.previewText || "",
+      actionGroup: "needs_action",
+      actionCode: "reply",
+      reasonCode: "",
+      observedAt: now()
+    });
     emitStatus(
       safeStatus("running", { queued: queue.length, processed, results, unresolved: retained.count, reasonCode: retained.reasonCode, counters }),
       logger,
@@ -475,7 +592,10 @@ async function runBossMessageDiscovery({
     unresolved: retained.count,
     reasonCode: retained.reasonCode,
     results,
-    counters
+    counters,
+    coverage,
+    syncState,
+    continuedFailures
   });
   emitStatus(completed, logger, onStatus);
   return completed;
@@ -612,14 +732,27 @@ function contextFailureReason(error) {
     "MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE",
     "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE",
     "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
-    "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED"
+    "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
+    "BOSS_MESSAGE_TARGET_MISMATCH",
+    "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
+    "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
+    "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
   ].includes(code)
     ? code
     : "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE";
 }
 
 function shouldStopAfterContextFailure(error) {
-  return CONTEXT_TERMINAL_CODES.has(errorCode(error));
+  return isPlatformTerminalFailure(error);
+}
+
+function isPlatformTerminalFailure(error) {
+  const code = errorCode(error);
+  return PLATFORM_TERMINAL_CODES.has(code) || !ITEM_LOCAL_CODES.has(code);
+}
+
+function durableLocalReasonCode(code) {
+  return ITEM_LOCAL_CODES.has(code) ? code : "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE";
 }
 
 function selectUnprocessedFriendMessageGroup(db, cardId, selected, threadKey, platform = "boss") {
@@ -1070,6 +1203,14 @@ function safeStatus(status, value = {}) {
     unresolved: Number(value.unresolved || 0),
     reasonCode: String(value.reasonCode || ""),
     counters: safeCounters(value.counters),
+    coverage: safeCoverage(value.coverage),
+    syncState: value.syncState && typeof value.syncState === "object" ? { ...value.syncState } : null,
+    continuedFailures: Array.isArray(value.continuedFailures)
+      ? value.continuedFailures.map((item) => ({
+        conversationKey: String(item?.conversationKey || ""),
+        reasonCode: String(item?.reasonCode || "")
+      }))
+      : [],
     results: Array.isArray(value.results)
       ? value.results.map((item) => ({
         ...item,
@@ -1078,6 +1219,14 @@ function safeStatus(status, value = {}) {
         messages: Array.isArray(item.messages) ? [...item.messages] : []
       }))
       : []
+  };
+}
+
+function safeCoverage(value = {}) {
+  return {
+    complete: value?.complete === true,
+    oldestActivityAt: Number.isFinite(Date.parse(String(value?.oldestActivityAt || ""))) ? new Date(value.oldestActivityAt).toISOString() : null,
+    cutoffAt: Number.isFinite(Date.parse(String(value?.cutoffAt || ""))) ? new Date(value.cutoffAt).toISOString() : null
   };
 }
 
@@ -1129,10 +1278,107 @@ function stoppedSummary(reasonCode, queued, results, retained = {}, processed = 
   });
 }
 
-function emitStopped(reasonCode, queued, results, logger, onStatus, retained, processed, counters) {
-  const stopped = stoppedSummary(reasonCode, queued, results, retained, processed, counters);
+function emitStopped(reasonCode, queued, results, logger, onStatus, retained, processed, counters, extra = {}) {
+  const stopped = safeStatus("needs_user_action", {
+    reasonCode,
+    queued,
+    processed,
+    unresolved: retained?.count,
+    results,
+    counters,
+    ...extra
+  });
   emitStatus(stopped, logger, onStatus);
   return stopped;
+}
+
+function normalizedCoverage(value, rows, cutoffAt) {
+  const source = value && typeof value === "object" ? value : {};
+  const cutoff = Number.isFinite(Date.parse(String(source.cutoffAt || cutoffAt || "")))
+    ? new Date(source.cutoffAt || cutoffAt).toISOString()
+    : null;
+  const timestamps = (rows || []).map((row) => Date.parse(String(row?.lastActivityAt || ""))).filter(Number.isFinite);
+  const oldest = Number.isFinite(Date.parse(String(source.oldestActivityAt || "")))
+    ? new Date(source.oldestActivityAt).toISOString()
+    : timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null;
+  return {
+    complete: source.complete === true || cutoff === null,
+    oldestActivityAt: oldest,
+    cutoffAt: cutoff
+  };
+}
+
+function newestActivityAt(rows) {
+  const timestamps = (rows || []).map((row) => Date.parse(String(row?.lastActivityAt || ""))).filter(Number.isFinite);
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+}
+
+function projectScannedInboxRows(db, {
+  profileId,
+  platform,
+  rows,
+  baselines,
+  unresolved,
+  firstSync,
+  cutoffAt,
+  observedAt
+}) {
+  const cutoffMillis = Date.parse(String(cutoffAt || ""));
+  for (const row of rows || []) {
+    const baseline = baselines.get(row.conversationKey);
+    const unresolvedItem = unresolved.get(row.conversationKey);
+    const activityMillis = Date.parse(String(row.lastActivityAt || ""));
+    const recent = firstSync && (!Number.isFinite(activityMillis)
+      || (Number.isFinite(cutoffMillis) && activityMillis >= cutoffMillis));
+    const changed = !firstSync && (!baseline || baseline.previewDigest !== row.previewDigest);
+    if (!row.unread && !unresolvedItem && !recent && !changed) continue;
+    const needsReview = Boolean(unresolvedItem);
+    const waiting = row.lastMessageDirection === "myself" && !needsReview;
+    upsertMessageInboxItem(db, {
+      profileId,
+      platform,
+      conversationKey: row.conversationKey,
+      sourceJobId: row.sourceJobId,
+      lastMessageId: row.lastMessageId,
+      lastActivityAt: row.lastActivityAt || observedAt,
+      lastDirection: row.lastMessageDirection || "unknown",
+      unread: row.unread === true,
+      positionTitle: row.positionTitle || "",
+      company: row.company || "",
+      latestExcerpt: row.previewText || "",
+      actionGroup: needsReview ? "needs_review" : waiting ? "waiting" : "needs_action",
+      actionCode: needsReview ? "retry" : waiting ? "wait" : "reply",
+      reasonCode: unresolvedItem?.reasonCode || "",
+      observedAt
+    });
+  }
+}
+
+function recordLocalInboxFailure(db, {
+  profileId,
+  platform,
+  target,
+  reasonCode,
+  observedAt,
+  selected = {}
+}) {
+  upsertMessageInboxItem(db, {
+    profileId,
+    platform,
+    conversationKey: target.conversationKey,
+    sourceJobId: target.sourceJobId,
+    lastMessageId: target.lastMessageId,
+    lastActivityAt: target.lastActivityAt || observedAt,
+    lastDirection: target.lastMessageDirection || "unknown",
+    unread: true,
+    positionTitle: selected.positionTitle || selected.positionName || target.positionTitle || "",
+    company: selected.company || selected.companyName || target.company || "",
+    latestExcerpt: target.previewText || "",
+    actionGroup: "needs_review",
+    actionCode: "retry",
+    reasonCode,
+    observedAt
+  });
 }
 
 function emitStatus(status, logger, onStatus) {

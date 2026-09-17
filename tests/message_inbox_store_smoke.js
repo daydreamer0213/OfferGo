@@ -16,7 +16,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "offergo-message-inbox-store-
 const db = openDb(path.join(root, "jobs.sqlite"));
 
 function digest(value) {
-  return crypto.createHash("sha256").update(String(value)).digest("hex");
+  return `sha256:${crypto.createHash("sha256").update(String(value)).digest("hex")}`;
 }
 
 try {

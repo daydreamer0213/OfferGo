@@ -103,6 +103,39 @@ try {
   assert.strictEqual(planned.queue[0].sourceJobId, "boss:encrypt-job-first");
   assert.strictEqual(planned.queue[0].lastMessageId, "378917037748740");
   assert.strictEqual(planned.baselineWrites.length, 0);
+  const firstSyncCutoff = "2026-07-29T08:00:00.000Z";
+  const recentReadFriend = {
+    ...firstVerifiedFriend,
+    unread: false,
+    conversationKey: digest("conversation-recent-friend"),
+    previewDigest: digest("recent-friend"),
+    lastActivityAt: "2026-08-01T07:00:00.000Z"
+  };
+  const recentOutgoing = {
+    ...readRow(digest("conversation-recent-outgoing"), digest("recent-outgoing"), "self_read"),
+    identityVerified: true,
+    lastMessageDirection: "myself",
+    lastActivityAt: "2026-08-01T06:00:00.000Z"
+  };
+  const oldReadFriend = {
+    ...firstVerifiedFriend,
+    unread: false,
+    conversationKey: digest("conversation-old-friend"),
+    previewDigest: digest("old-friend"),
+    lastActivityAt: "2026-07-20T06:00:00.000Z"
+  };
+  planned = planMessageDiscoveryQueue({
+    rows: [recentReadFriend, recentOutgoing, oldReadFriend],
+    baselines: new Map(),
+    firstSync: true,
+    cutoffAt: firstSyncCutoff
+  });
+  assert.deepStrictEqual(planned.queue.map((item) => item.conversationKey), [recentReadFriend.conversationKey]);
+  assert.deepStrictEqual(
+    planned.baselineWrites.map((item) => item.conversationKey).sort(),
+    [recentOutgoing.conversationKey, oldReadFriend.conversationKey].sort(),
+    "recent outgoing conversations become waiting state without opening a detail, while old read history becomes baseline only"
+  );
   recordPreviewState(db, {
     profileId,
     platform,

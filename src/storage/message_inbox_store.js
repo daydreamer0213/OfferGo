@@ -209,7 +209,7 @@ function platformValue(value) {
 
 function digestValue(value, name) {
   const digest = String(value || "").trim().toLowerCase();
-  if (!/^[a-f0-9]{64}$/.test(digest)) throw inboxError("MESSAGE_INBOX_INPUT_INVALID", `${name} must be a sha256 digest`);
+  if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw inboxError("MESSAGE_INBOX_INPUT_INVALID", `${name} must be a sha256 digest`);
   return digest;
 }
 
