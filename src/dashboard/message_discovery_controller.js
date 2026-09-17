@@ -197,8 +197,8 @@ function createMessageDiscoveryController(deps = {}) {
         const inWorkspace = matches.filter((tab) => workspaceWindowIds.has(tab.windowId));
         const selected = stableMessageTab(inWorkspace.length ? inWorkspace : matches);
         const riskControl = platform === "boss" && tabs.some((tab) => isBossRiskControlUrl(tab?.url));
-        return { platform, status: selected ? "pending" : riskControl ? "needs_user_action" : "not_connected",
-          reasonCode: selected ? "" : riskControl ? "BOSS_RISK_CONTROL" : "",
+        return { platform, status: riskControl ? "needs_user_action" : selected ? "pending" : "not_connected",
+          reasonCode: riskControl ? "BOSS_RISK_CONTROL" : "",
           bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
       });
       for (const entry of run.platformRuns) {
