@@ -205,6 +205,31 @@ try {
   assert.strictEqual(planned.queue[0].operation, "unread");
   assert.strictEqual(planned.queue[0].conversationKey, digest("conversation-b"));
 
+  const actionCutoffAt = "2026-07-25T08:00:00.000Z";
+  const expiredUnread = {
+    ...unreadRow(digest("conversation-expired"), digest("expired")),
+    lastActivityAt: "2026-07-25T07:59:59.999Z"
+  };
+  const boundaryUnread = {
+    ...unreadRow(digest("conversation-boundary"), digest("boundary")),
+    lastActivityAt: actionCutoffAt
+  };
+  planned = planMessageDiscoveryQueue({
+    rows: [expiredUnread, boundaryUnread],
+    baselines: new Map(),
+    actionCutoffAt
+  });
+  assert.deepStrictEqual(
+    planned.queue.map((item) => item.conversationKey),
+    [boundaryUnread.conversationKey],
+    "only messages strictly older than seven days must leave the actionable queue"
+  );
+  assert.deepStrictEqual(
+    planned.baselineWrites.map((item) => item.conversationKey),
+    [expiredUnread.conversationKey],
+    "expired messages must become history baselines instead of reopening on every sync"
+  );
+
   recordUnresolvedMessageDiscoveryItem(db, {
     profileId,
     platform,

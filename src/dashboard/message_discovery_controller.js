@@ -1134,6 +1134,7 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
 }
 
 function presentInboxItem(item) {
+  const expired = item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED";
   const presentation = {
     needs_action: { statusText: "需要你处理", label: "查看建议回复" },
     waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
@@ -1142,7 +1143,7 @@ function presentInboxItem(item) {
   }[item.actionGroup];
   return {
     ...item,
-    statusText: presentation.statusText,
+    statusText: expired ? "超过 7 天，已结束处理" : presentation.statusText,
     primaryAction: { label: presentation.label }
   };
 }

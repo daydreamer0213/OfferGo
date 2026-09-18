@@ -26,10 +26,11 @@ const {
   saveWorkspacePlatformPreference,
   upsertMessageEvents
 } = require("../src/core/storage");
-const { upsertMessageInboxItem } = require("../src/application/message_inbox");
+const { upsertMessageInboxItem, markMessageInboxItemDone } = require("../src/application/message_inbox");
 const {
   ensureProgressCard,
   transitionProgressCard,
+  recordDiscoveredMessageGroupClassification,
   listProgressCardsWithEvents
 } = require("../src/core/candidate_progress");
 const {
@@ -567,6 +568,97 @@ async function main() {
     observedAt: "2026-07-31T01:05:00.000Z"
   });
   const zhaopinActionConversationKey = `sha256:${"9".repeat(64)}`;
+  const zhaopinBatchId = createBatch(db, "zhaopin", "AI应用开发", "dashboard zhaopin message", {
+    profileId: fixture.profileId,
+    searchPlanId: fixture.planId,
+    filterSnapshot: { execution: { scanKind: "daily" } }
+  });
+  for (const [index, title] of ["面试岗位", "待补事实岗位"].entries()) {
+    const fillerJobId = upsertJob(db, {
+      source: "zhaopin",
+      sourceId: `dashboard-zhaopin-filler-${index + 1}`,
+      keyword: "AI应用开发",
+      title,
+      company: "示例公司",
+      location: "广州",
+      salary: "10-18K",
+      experience: "1-3年",
+      education: "本科",
+      url: `https://sou.zhaopin.com/job/dashboard-zhaopin-filler-${index + 1}`,
+      tags: ["Python"],
+      description: "负责 AI 应用开发。".repeat(20),
+      score: 20,
+      level: "优先",
+      matches: ["Python"],
+      risks: [],
+      qualityTags: [],
+      analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply" }
+    }, zhaopinBatchId);
+    ensureProgressCard(db, {
+      profileId: fixture.profileId,
+      planId: fixture.planId,
+      jobId: fillerJobId,
+      source: "zhaopin"
+    });
+  }
+  const zhaopinJobId = upsertJob(db, {
+    source: "zhaopin",
+    sourceId: "dashboard-zhaopin-message-job",
+    keyword: "AI应用开发",
+    title: "智联左侧日期测试",
+    company: "示例公司",
+    location: "广州",
+    salary: "10-18K",
+    experience: "1-3年",
+    education: "本科",
+    url: "https://sou.zhaopin.com/job/dashboard-zhaopin-message-job",
+    tags: ["Python"],
+    description: "负责 AI 应用开发。".repeat(20),
+    score: 20,
+    level: "优先",
+    matches: ["Python"],
+    risks: [],
+    qualityTags: [],
+    analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply" }
+  }, zhaopinBatchId);
+  const zhaopinCard = ensureProgressCard(db, {
+    profileId: fixture.profileId,
+    planId: fixture.planId,
+    jobId: zhaopinJobId,
+    source: "zhaopin"
+  });
+  const zhaopinDateConversationKey = `sha256:${"c".repeat(64)}`;
+  recordDiscoveredMessageGroupClassification(db, {
+    cardId: zhaopinCard.id,
+    platform: "zhaopin",
+    threadKey: zhaopinDateConversationKey,
+    messageKeys: [`sha256:${"e".repeat(64)}`],
+    messageGroupKey: `sha256:${"d".repeat(64)}`,
+    messageIntent: "information_request",
+    messageCategory: "other",
+    manualActions: [{ kind: "resume_request" }],
+    progressUpdate: { stage: "needs_user_action" },
+    occurredAt: "2026-09-17T02:30:00.000Z"
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinDateConversationKey,
+    sourceJobId: "zhaopin:dashboardZhaopinMessageJob",
+    jobId: zhaopinJobId,
+    cardId: zhaopinCard.id,
+    jobSource: "zhaopin",
+    lastMessageId: "207",
+    lastActivityAt: "2026-09-17T02:30:00.000Z",
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: "智联左侧日期测试",
+    company: "示例公司",
+    latestExcerpt: RESUME_REQUEST_SUMMARY,
+    actionGroup: "needs_action",
+    actionCode: "resume_request",
+    observedAt: "2026-09-17T02:30:00.000Z"
+  });
   upsertMessageEvents(db, {
     profileId: fixture.profileId,
     platform: "zhaopin",
@@ -596,6 +688,13 @@ async function main() {
   const understoodPage = await request(base, `/messages?profileId=${fixture.profileId}`);
   const understoodPreviews = [...understoodPage.body.matchAll(/<em>(.*?)<\/em>/g)].map(match => match[1]);
   assert(understoodPreviews.some(text => text.includes(RESUME_REQUEST_SUMMARY)), "resume request card must be visible in the preview");
+  const zhaopinCards = [...understoodPage.body.matchAll(/<label class="message-list-item"[\s\S]*?<\/label>/g)]
+    .map((match) => match[0]).filter((card) => card.includes("<strong>智联左侧日期测试</strong>"));
+  assert(zhaopinCards.length > 0, "zhaopin message card must render in the left list");
+  assert(
+    zhaopinCards.some((card) => /智联<\/span> · 9\/17 10:30 · 索要简历/.test(card)),
+    "the zhaopin message time must be visible in the left job card"
+  );
   assert(understoodPreviews.some(text => text.includes(OPEN_HR_TEXT)), "newest question must precede an older long greeting");
   assert(understoodPreviews.some(text => text.includes("有 &lt;证书&gt; 吗？")), "same intent must still show its distinct question with HTML escaping");
   assert(!understoodPage.body.includes("有 <证书> 吗？"));
@@ -635,6 +734,17 @@ async function main() {
   assert.match(understoodPage.body, /收到一条语音消息，本版本暂不读取内容/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
+  markMessageInboxItemDone(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinActionConversationKey,
+    reasonCode: "MESSAGE_REPLY_WINDOW_EXPIRED",
+    resolvedAt: "2026-09-18T01:06:00.000Z"
+  });
+  const expiredActionPage = await request(base, `/messages?profileId=${fixture.profileId}`);
+  assert(expiredActionPage.body.includes("超过 7 天，已结束处理"));
+  assert.doesNotMatch(expiredActionPage.body, /data-message-action-confirm[^>]+data-action-kind="(?:accept_resume|decline_resume)"/,
+    "expired resume invitations must keep their history without actionable platform controls");
   assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
   assert(
     understoodPage.body.indexOf("<h4>HR 邀请你发送简历</h4>")

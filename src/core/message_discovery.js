@@ -39,6 +39,7 @@ const {
 
 const BOSS_MESSAGE_GROUP_LIMIT = 5;
 const BOSS_MESSAGE_GROUP_TEXT_LIMIT = 1000;
+const MESSAGE_ACTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const TERMINAL_MODEL_OUTPUT_CODES = new Set([
   "MODEL_EMPTY_RESPONSE",
   "MODEL_INVALID_RESPONSE",
@@ -147,6 +148,15 @@ async function runBossMessageDiscovery({
     timeline
   });
   const runStartedAt = now();
+  const actionCutoffAt = new Date(Date.parse(runStartedAt) - MESSAGE_ACTION_WINDOW_MS).toISOString();
+  reconcileExpiredMessageActions({
+    db,
+    profileId,
+    platform: source,
+    resolvedAt: runStartedAt,
+    actionCutoffAt,
+    messageInbox: { listMessageInboxItems, markMessageInboxItemDone }
+  });
   const previousSync = getMessageInboxSyncState(db, { profileId, platform: source });
   const firstSync = !previousSync?.lastSuccessfulAt;
   const cutoffAt = firstSync ? new Date(Date.parse(runStartedAt) - 72 * 60 * 60 * 1000).toISOString() : null;
@@ -204,8 +214,16 @@ async function runBossMessageDiscovery({
     baselines,
     unresolved: unresolvedByConversation,
     firstSync,
-    cutoffAt
+    cutoffAt,
+    actionCutoffAt
   });
+  clearExpiredScannedMessageActions(db, {
+    profileId,
+    platform: source,
+    rows: scan.rows,
+    actionCutoffAt
+  });
+  retained = unresolvedSummary(db, profileId, source);
   projectScannedInboxRows(db, {
     profileId,
     platform: source,
@@ -1615,6 +1633,62 @@ function reconcileTerminalMessageHistory({
         conversationKey: item.conversationKey,
         resolvedAt: occurredAt
       });
+    });
+  }
+}
+
+function reconcileExpiredMessageActions({
+  db,
+  profileId,
+  platform,
+  resolvedAt,
+  actionCutoffAt,
+  messageInbox
+}) {
+  const cutoffMillis = Date.parse(String(actionCutoffAt || ""));
+  if (!Number.isFinite(cutoffMillis)) return;
+  const items = messageInbox.listMessageInboxItems(db, { profileId })
+    .filter((item) => item.platform === platform
+      && ["needs_action", "needs_review"].includes(item.actionGroup)
+      && item.lastDirection === "friend"
+      && Number.isFinite(Date.parse(String(item.lastActivityAt || "")))
+      && Date.parse(item.lastActivityAt) < cutoffMillis);
+  for (const item of items) {
+    immediateTransaction(db, () => {
+      if (Number.isSafeInteger(Number(item.cardId)) && Number(item.cardId) > 0) {
+        closeMessageReplyDrafts(db, {
+          profileId,
+          cardId: Number(item.cardId),
+          closedAt: resolvedAt
+        });
+      }
+      clearUnresolvedMessageDiscoveryItem(db, {
+        profileId,
+        platform,
+        conversationKey: item.conversationKey
+      });
+      messageInbox.markMessageInboxItemDone(db, {
+        profileId,
+        platform,
+        conversationKey: item.conversationKey,
+        reasonCode: "MESSAGE_REPLY_WINDOW_EXPIRED",
+        resolvedAt
+      });
+    });
+  }
+}
+
+function clearExpiredScannedMessageActions(db, { profileId, platform, rows, actionCutoffAt }) {
+  const cutoffMillis = Date.parse(String(actionCutoffAt || ""));
+  if (!Number.isFinite(cutoffMillis)) return;
+  for (const row of rows || []) {
+    const activityMillis = Date.parse(String(row?.lastActivityAt || ""));
+    if (!Number.isFinite(activityMillis) || activityMillis >= cutoffMillis
+      || !/^sha256:[a-f0-9]{64}$/.test(String(row?.conversationKey || ""))) continue;
+    clearUnresolvedMessageDiscoveryItem(db, {
+      profileId,
+      platform,
+      conversationKey: row.conversationKey
     });
   }
 }

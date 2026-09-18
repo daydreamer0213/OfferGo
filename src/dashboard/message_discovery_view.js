@@ -91,7 +91,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       && Number(item.cardId) === Number(result.cardId)
       && item.conversationKey === result.conversationKey);
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
-    const pending = resultPending(result);
+    const expired = inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED";
+    const pending = !expired && resultPending(result);
     const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
     const interviewInvited = Boolean(matchingContact?.interviewInvited || result.messageIntent === "interview_invitation");
     const durableDrafts = Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0) : [];
@@ -121,7 +122,12 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       return messageIndex === 0 ? card : `<details class="message-draft-alternatives"><summary>查看其他回复版本</summary>${card}</details>`;
     }).join("");
     const inboundMessages = Array.isArray(result.inboundMessages) ? result.inboundMessages : [];
-    const timelineSection = renderConversationTimeline(inboxItem?.timeline, { escapeHtml, escapeAttr, messageActions });
+    const timelineSection = renderConversationTimeline(inboxItem?.timeline, {
+      escapeHtml,
+      escapeAttr,
+      messageActions,
+      allowActions: !expired
+    });
     const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
       : "");
@@ -149,9 +155,11 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       .some((event) => event.kind === "resume_request" && event.direction === "friend");
     const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
-    const nextSection = `${manualSection}${replySection}`
+    const nextSection = expired
+      ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
+      : `${manualSection}${replySection}`
       || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
-    const sentForm = sendable && drafts && !durableDrafts.length
+    const sentForm = !expired && sendable && drafts && !durableDrafts.length
       ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
       : "";
     const viewId = `message-view-${viewKey}`;
@@ -163,7 +171,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       identity: `${result.platform}\0${result.conversationKey}`,
       actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
-      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
+      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
       detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)} · 阶段：${escapeHtml(progressStageLabel(result.stage))}</p>${inboundSection}${decisionCard}<h3>下一步</h3>${nextSection}${sentForm}</section>`
     };
   });
@@ -190,7 +198,12 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     .map((item) => {
       const inboxItem = inboxByConversation.get(`${item.platform}\0${item.conversationKey}`) || null;
       const actionGroup = inboxItem?.actionGroup || (item.pending ? "needs_action" : "done");
-      return renderIncomingContactView(item, {
+      return renderIncomingContactView({
+        ...item,
+        lastActivityAt: inboxItem?.lastActivityAt || item.observedAt,
+        statusText: inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? inboxItem.statusText : "",
+        reasonCode: inboxItem?.reasonCode || ""
+      }, {
         selected: false,
         actionGroup,
         timeline: inboxItem?.timeline,
@@ -286,15 +299,17 @@ function renderIncomingContactView(item, { selected, actionGroup = "done", timel
   const key = messageViewKey("incoming", [item.key]);
   const inputId = `message-view-${key}`;
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
-  const status = item.resumeRequested ? "索要简历" : item.interviewInvited ? "面试邀请" : "已记录联系";
+  const status = item.statusText || (item.resumeRequested ? "索要简历" : item.interviewInvited ? "面试邀请" : "已记录联系");
+  const activityAt = item.lastActivityAt || item.observedAt;
+  const activity = Number.isFinite(Date.parse(String(activityAt || ""))) ? messageTimeLabel(activityAt) : "";
   const original = (item.inboundMessages || []).map((message) => message.text).filter(Boolean);
   return {
     key,
     identity: `${item.platform}\0${item.conversationKey}`,
     actionGroup,
     contactKey: item.key,
-    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${actionGroup}" data-pending="${actionGroup === "needs_action" || actionGroup === "needs_review"}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "needs_action" ? "这条消息仍在等待你处理。" : actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : "当前没有需要你处理的操作。"}</p></section>`
+    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${actionGroup}" data-pending="${actionGroup === "needs_action" || actionGroup === "needs_review"}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
+    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "needs_action" ? "这条消息仍在等待你处理。" : actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? "这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。" : "当前没有需要你处理的操作。"}</p></section>`
   };
 }
 
@@ -315,11 +330,11 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
     actionGroup: item.actionGroup,
     contactKey: "",
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section></section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section></section>`
   };
 }
 
-function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageActions = [] }) {
+function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageActions = [], allowActions = true }) {
   if (!Array.isArray(events) || !events.length) return "";
   const bubbles = events.filter((event) => !isCompetitionPromotion(event)).map((event) => {
     const side = event.direction === "myself" ? "self" : event.direction === "friend" ? "friend" : "platform";
@@ -329,7 +344,7 @@ function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageAct
     const time = event.occurredAt ? `<time datetime="${escapeAttr(event.occurredAt)}">${escapeHtml(messageTimeLabel(event.occurredAt))}</time>` : "";
     const action = event.kind === "resume_request" ? messageActions.find((item) => item.platform === event.platform
       && item.conversationKey === event.conversationKey && item.messageKey === event.messageKey) : null;
-    const controls = event.kind === "resume_request" ? renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) : "";
+    const controls = allowActions && event.kind === "resume_request" ? renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) : "";
     return `<article class="message-bubble message-bubble--${side}" data-message-key="${escapeAttr(event.messageKey || "")}"><p>${escapeHtml(content)}</p>${time}${controls}</article>`;
   }).join("");
   if (!bubbles) return "";

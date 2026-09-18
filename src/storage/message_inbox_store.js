@@ -86,9 +86,10 @@ function listMessageInboxItems(db, { profileId } = {}) {
 
 function markMessageInboxItemDone(db, input = {}) {
   const result = db.prepare(`UPDATE message_inbox_items
-    SET action_group = 'done', action_code = '', reason_code = '', unread = 0,
+    SET action_group = 'done', action_code = '', reason_code = ?, unread = 0,
       resolved_at = ?, last_observed_at = ?
     WHERE profile_id = ? AND platform = ? AND conversation_key = ?`).run(
+    inlineText(input.reasonCode, 120),
     isoValue(input.resolvedAt, "resolvedAt"),
     isoValue(input.resolvedAt, "resolvedAt"),
     positiveInteger(input.profileId, "profileId"),

@@ -80,6 +80,7 @@ async function main() {
   await directRejectionRoutingSmoke();
   await historicalRejectionReconciliationSmoke();
   await historicalInboundContextRejectionReconciliationSmoke();
+  await expiredActionReconciliationSmoke();
   await readerStopSmoke();
   await terminalAfterProcessedSmoke();
   await abortAfterClassificationSmoke();
@@ -1721,6 +1722,92 @@ async function historicalInboundContextRejectionReconciliationSmoke() {
     platform: "boss",
     conversationKey: reopenedConversationKey
   }).actionGroup, "needs_action", "an older rejection must not hide a later reopened conversation");
+}
+
+async function expiredActionReconciliationSmoke() {
+  const fixture = createFixture({ suffix: "expired-action", title: "Expired Resume Request Engineer" });
+  const conversationKey = safeDigest(["expired-action-conversation"]);
+  const messageGroupKey = safeDigest(["expired-action-group"]);
+  const oldActivityAt = "2026-07-22T00:59:59.999Z";
+  recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: fixture.card.id,
+    jobId: fixture.jobId,
+    messageGroupKey,
+    questionSummary: "HR 邀请你发送简历",
+    messageIntent: "information_request",
+    messageCategory: "other",
+    messages: ["历史简历邀请不应继续生成待处理草稿"],
+    createdAt: oldActivityAt
+  });
+  recordUnresolvedMessageDiscoveryItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    previewDigest: safeDigest(["expired-action-preview"]),
+    previewKind: "possible_hr_reply",
+    reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE",
+    observedAt: oldActivityAt,
+    identity: { positionTitle: fixture.title, company: fixture.company }
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    sourceJobId: "boss:expired-action",
+    jobId: fixture.jobId,
+    cardId: fixture.card.id,
+    lastMessageId: "123456789012895",
+    lastActivityAt: oldActivityAt,
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: fixture.title,
+    company: fixture.company,
+    latestExcerpt: "HR 邀请你发送简历",
+    actionGroup: "needs_action",
+    actionCode: "resume_request",
+    observedAt: oldActivityAt
+  });
+  let opened = 0;
+  let modelCalls = 0;
+  const summary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: {
+      async scanConversationRows() {
+        return {
+          tabId: "fake-tab",
+          path: "/web/geek/chat",
+          rows: [Object.freeze({
+            ...messageRow(0, true, conversationKey, safeDigest(["expired-action-preview"])),
+            sourceJobId: "boss:expired-action",
+            lastMessageId: "123456789012895",
+            lastMessageDirection: "friend",
+            lastActivityAt: oldActivityAt,
+            identityVerified: true
+          })]
+        };
+      },
+      async openQueuedConversation() {
+        opened += 1;
+        throw new Error("expired messages must not open the platform conversation");
+      }
+    },
+    classifyMessageGroup: async () => {
+      modelCalls += 1;
+      throw new Error("expired messages must not call the model");
+    },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  const item = getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey });
+  assert.strictEqual(summary.queued, 0);
+  assert.strictEqual(opened, 0);
+  assert.strictEqual(modelCalls, 0);
+  assert.strictEqual(item.actionGroup, "done");
+  assert.strictEqual(item.reasonCode, "MESSAGE_REPLY_WINDOW_EXPIRED");
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  assert.deepStrictEqual(listUnresolvedMessageDiscoveryItems(db, { profileId: fixture.profileId }), []);
 }
 
 async function timelineBeforeJobContextSmoke() {

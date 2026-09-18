@@ -180,7 +180,14 @@ function saveMessageDiscoveryRuntimeState(db, input = {}) {
   return getMessageDiscoveryRuntimeState(db, { profileId, platform });
 }
 
-function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolved = new Map(), firstSync = false, cutoffAt = null } = {}) {
+function planMessageDiscoveryQueue({
+  rows = [],
+  baselines = new Map(),
+  unresolved = new Map(),
+  firstSync = false,
+  cutoffAt = null,
+  actionCutoffAt = null
+} = {}) {
   const targets = new Map();
   for (const row of rows || []) {
     if (!row || typeof row !== "object") continue;
@@ -188,6 +195,13 @@ function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolve
     const previewDigest = String(row.previewDigest || "").trim();
     const previewKind = previewKindValue(row.previewKind || "unknown");
     if (!isDigest(conversationKey) || !isDigest(previewDigest)) continue;
+    if (!activityWithinActionWindow(row.lastActivityAt, actionCutoffAt)) {
+      replaceHigherPriorityTarget(targets, conversationKey, {
+        priority: 0,
+        baseline: baselineWrite(conversationKey, previewDigest, previewKind)
+      });
+      continue;
+    }
     if (row.unread === true) {
       replaceHigherPriorityTarget(targets, conversationKey, {
         priority: 3,
@@ -255,6 +269,13 @@ function planMessageDiscoveryQueue({ rows = [], baselines = new Map(), unresolve
       .filter((item) => item.priority === 0)
       .map((item) => item.baseline))
   };
+}
+
+function activityWithinActionWindow(value, cutoffAt) {
+  const activity = Date.parse(String(value || ""));
+  const cutoff = Date.parse(String(cutoffAt || ""));
+  if (!Number.isFinite(cutoff) || !Number.isFinite(activity)) return true;
+  return activity >= cutoff;
 }
 
 function activityWithinCutoff(value, cutoffAt) {
