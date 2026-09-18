@@ -85,6 +85,8 @@ main().catch((error) => {
 async function main() {
   liveBossRuntimeRecoverySmoke();
   durableDraftRecoverySmoke();
+  await durableMissingFactRecoverySmoke();
+  await pendingDurableAnalysisRepairSmoke();
   await controllerBrowserAuthoritySmoke();
   await detailSafetyCompositionSmoke();
   await dashboardSignalShutdownSmoke();
@@ -802,9 +804,10 @@ async function main() {
   ]) {
     assert(!understoodPage.body.includes(removed), `message result must not render analysis/internal label: ${removed}`);
   }
-  assert(understoodPage.body.includes("缺少事实，暂不生成草稿"));
+  assert(understoodPage.body.includes("需要你确认一项个人信息"));
+  assert(understoodPage.body.includes("生成回复草稿"));
   assert.strictEqual((understoodPage.body.match(/name="action" value="reply_confirmed_sent"/g) || []).length, 3);
-  assert.strictEqual((understoodPage.body.match(/<textarea/g) || []).length, 3);
+  assert.strictEqual((understoodPage.body.match(/<textarea/g) || []).length, 4);
   assert.strictEqual((understoodPage.body.match(/type="radio" name="message-send-choice-\d+" data-send-select="\d+"/g) || []).length, 2,
     "alternative drafts for one HR conversation must use one radio group");
   assert.strictEqual((understoodPage.body.match(/type="radio" name="message-send-choice-\d+" data-send-select="\d+" checked/g) || []).length, 0,
@@ -2372,6 +2375,205 @@ async function messageDiscoveryPollingSmoke(markup) {
   assert.strictEqual(terminalPoll.reloads(), 1);
   assert.strictEqual(terminalPoll.storedSelection(), null,
     "a completed sync must reset stale selection so the refreshed list and detail start on the same first item");
+}
+
+async function durableMissingFactRecoverySmoke() {
+  const durableDb = openDb(":memory:");
+  try {
+    const now = "2026-09-18T03:00:00.000Z";
+    const profileId = Number(durableDb.prepare(`INSERT INTO candidate_profiles(
+      display_name, profile_json, source_hash, created_at, updated_at
+    ) VALUES ('Missing fact candidate', '{}', NULL, ?, ?)`).run(now, now).lastInsertRowid);
+    const planId = Number(durableDb.prepare(`INSERT INTO search_plans(
+      profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at
+    ) VALUES (?, 'Missing fact plan', '{}', NULL, 1, ?, ?)`).run(profileId, now, now).lastInsertRowid);
+    const jobId = Number(durableDb.prepare(`INSERT INTO jobs(
+      source, source_id, title, company, salary, description, analysis_json, first_seen_at, last_seen_at
+    ) VALUES ('boss', 'missing-fact-job', '产品经理助理', '示例公司', '10-15K', ?, ?, ?, ?)`)
+      .run("完整岗位职责和任职要求。".repeat(30), JSON.stringify({
+        semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
+        roleSummary: "协助产品需求与项目推进"
+      }), now, now).lastInsertRowid);
+    const card = ensureProgressCard(durableDb, {
+      profileId, planId, jobId, source: "boss", stage: "contact_started", occurredAt: now
+    });
+    const messageGroupKey = `sha256:${"e".repeat(64)}`;
+    const conversationKey = `sha256:${"f".repeat(64)}`;
+    const threadKey = `sha256:${"a".repeat(64)}`;
+    recordDiscoveredMessageGroupClassification(durableDb, {
+      cardId: card.id,
+      platform: "boss",
+      threadKey,
+      messageKeys: [`sha256:${"b".repeat(64)}`],
+      messageGroupKey,
+      messageIntent: "interview_invitation",
+      messageCategory: "availability",
+      missingFactKey: "availability_date",
+      missingFactQuestion: "你什么时候方便电话或视频沟通？",
+      manualActions: [],
+      progressUpdate: { stage: "needs_user_action" },
+      occurredAt: now
+    });
+    saveMessageInboundContext(durableDb, {
+      profileId,
+      cardId: card.id,
+      messageGroupKey,
+      conversationKey,
+      sourceJobId: "boss:missing-fact-job",
+      lastMessageId: "123456789012345",
+      messageIntent: "interview_invitation",
+      messageCategory: "availability",
+      inboundMessages: [{ kind: "text", text: "何时方便我们电话或者视频沟通下吗？" }],
+      manualActions: [],
+      createdAt: now,
+      updatedAt: now
+    });
+    upsertMessageInboxItem(durableDb, {
+      profileId, platform: "boss", conversationKey, sourceJobId: "boss:missing-fact-job",
+      jobId, cardId: card.id, lastMessageId: "123456789012345", lastActivityAt: now,
+      lastDirection: "friend", unread: true, positionTitle: "产品经理助理", company: "示例公司",
+      latestExcerpt: "何时方便我们电话或者视频沟通下吗？", actionGroup: "needs_action",
+      actionCode: "reply_required", reasonCode: "", observedAt: now
+    });
+    const controller = createMessageDiscoveryController({ db: durableDb });
+    const result = controller.pageState(profileId).results[0];
+    assert.strictEqual(result.missingFactKey, "availability_date",
+      "restart must retain the exact user fact needed by a message without a draft");
+    assert.strictEqual(result.missingFactQuestion, "你什么时候方便电话或视频沟通？",
+      "restart must retain the concrete question instead of a generic pending label");
+    const markup = renderMessageDiscoveryPage({
+      db: durableDb,
+      searchParams: new URLSearchParams({ profileId: String(profileId) }),
+      controller,
+      helpers: {
+        getCandidateProfile: () => ({}),
+        renderErrorPage: (message) => message,
+        renderFramedPage: ({ content, scripts = [] }) => `${content}${scripts.join("")}`,
+        escapeHtml: String,
+        escapeAttr: String,
+        progressStageLabel: String,
+        newProgressRequestKey: () => "missing-fact-request"
+      }
+    });
+    assert.match(markup, /你什么时候方便电话或视频沟通/);
+    assert.match(markup, /value="answer_fact"/);
+    assert.match(markup, /生成回复草稿/);
+    assert.doesNotMatch(markup, /这条消息仍在等待你处理/);
+    const answering = createMessageDiscoveryController({
+      db: durableDb,
+      modelReady: () => true,
+      getModelConfig: () => ({ provider: "mock", providers: { mock: {} } }),
+      createAnalyzer: () => async (input) => {
+        assert(input.facts.some((fact) => fact.factKey === "availability_date"
+          && fact.factValue === "本周工作日下午都方便电话沟通"));
+        return {
+          messageIntent: "interview_invitation",
+          messageCategory: "availability",
+          messageSummary: "确认电话或视频沟通时间",
+          missingFact: null,
+          messages: ["您好，本周工作日下午我都方便电话沟通，请问您哪天合适？"],
+          progressUpdate: { stage: "interview_invited" }
+        };
+      }
+    });
+    const answered = await answering.answerFact({
+      profileId,
+      cardId: card.id,
+      messageGroupKey,
+      factKey: "availability_date",
+      factValue: "本周工作日下午都方便电话沟通"
+    });
+    assert.strictEqual(answered.body.status, "completed");
+    const answeredResult = answering.pageState(profileId).results[0];
+    assert.strictEqual(answeredResult.missingFactKey, "");
+    assert.strictEqual(answeredResult.drafts[0].text, "您好，本周工作日下午我都方便电话沟通，请问您哪天合适？");
+  } finally {
+    durableDb.close();
+  }
+}
+
+async function pendingDurableAnalysisRepairSmoke() {
+  const durableDb = openDb(":memory:");
+  try {
+    const now = "2026-09-18T04:00:00.000Z";
+    const profileId = Number(durableDb.prepare(`INSERT INTO candidate_profiles(
+      display_name, profile_json, source_hash, created_at, updated_at
+    ) VALUES ('Repair candidate', '{}', NULL, ?, ?)`).run(now, now).lastInsertRowid);
+    const planId = Number(durableDb.prepare(`INSERT INTO search_plans(
+      profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at
+    ) VALUES (?, 'Repair plan', '{}', NULL, 1, ?, ?)`).run(profileId, now, now).lastInsertRowid);
+    const jobId = Number(durableDb.prepare(`INSERT INTO jobs(
+      source, source_id, title, company, salary, description, analysis_json, first_seen_at, last_seen_at
+    ) VALUES ('boss', 'repair-job', '待修复岗位', '修复公司', '15-20K', ?, ?, ?, ?)`)
+      .run("完整岗位职责与任职要求。".repeat(30), JSON.stringify({
+        semanticStatus: "pending", recommendation: "analysis_pending"
+      }), now, now).lastInsertRowid);
+    const cardId = Number(durableDb.prepare(`INSERT INTO candidate_progress_cards(
+      profile_id, plan_id, job_id, source, stage, next_action, last_event_at, created_at, updated_at
+    ) VALUES (?, ?, ?, 'boss', 'reply_ready', 'Review reply', ?, ?, ?)`)
+      .run(profileId, planId, jobId, now, now, now).lastInsertRowid);
+    const messageGroupKey = `sha256:${"1".repeat(64)}`;
+    const conversationKey = `sha256:${"2".repeat(64)}`;
+    recordMessageReplyDrafts(durableDb, {
+      profileId, cardId, jobId, messageGroupKey,
+      questionSummary: "对方询问项目经验。", messageIntent: "information_request",
+      messageCategory: "project_fact", messages: ["这是已经生成的回复草稿。"], createdAt: now
+    });
+    saveMessageInboundContext(durableDb, {
+      profileId, cardId, messageGroupKey, conversationKey, sourceJobId: "boss:repair-job",
+      lastMessageId: "123456789012346", messageIntent: "information_request",
+      messageCategory: "project_fact", inboundMessages: [{ kind: "text", text: "介绍一下项目经验" }],
+      manualActions: [], createdAt: now, updatedAt: now
+    });
+    upsertMessageInboxItem(durableDb, {
+      profileId, platform: "boss", conversationKey, sourceJobId: "boss:repair-job", jobId, cardId,
+      lastMessageId: "123456789012346", lastActivityAt: now, lastDirection: "friend", unread: true,
+      positionTitle: "待修复岗位", company: "修复公司", latestExcerpt: "介绍一下项目经验",
+      actionGroup: "needs_action", actionCode: "reply_required", reasonCode: "", observedAt: now
+    });
+    let analysisCalls = 0;
+    const controller = createMessageDiscoveryController({
+      db: durableDb,
+      modelReady: () => true,
+      getModelConfig: () => ({ provider: "mock", providers: { mock: {} } }),
+      getEnabledPlatforms: () => ["boss"],
+      acquireLease() {}, renewLease() {}, releaseLease() {},
+      createBrowser: async () => ({
+        async listTabs() { return [{ id: 11, url: "https://www.zhipin.com/web/geek/chat", windowId: 7 }]; },
+        async disconnect() {}
+      }),
+      createReader: () => ({}),
+      createDetailSafety: () => ({}),
+      createDetailReader: () => ({}),
+      createJobContextResolver: () => ({}),
+      createAnalyzer: () => async () => ({}),
+      runDiscovery: async () => ({
+        status: "completed", queued: 0, processed: 0, unresolved: 0,
+        counters: { visible: 0, newReplies: 0, currentRead: 0, currentDelivered: 0, unbound: 0 },
+        results: []
+      }),
+      analyzeMessageJob: async ({ input }) => {
+        analysisCalls += 1;
+        assert.deepStrictEqual(input, { planId, jobId });
+        durableDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?").run(JSON.stringify({
+          semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
+          roleSummary: "完成修复后的岗位理解"
+        }), jobId);
+        return { completed: 1, failed: 0 };
+      },
+      setInterval: () => 1,
+      clearInterval() {}
+    });
+    controller.start(profileId);
+    await waitFor(() => controller.status(profileId).status !== "running");
+    assert.strictEqual(analysisCalls, 1, "sync must repair a durable pending job analysis even when the platform has no new preview");
+    const repaired = controller.pageState(profileId).results[0];
+    assert.strictEqual(repaired.contextComplete, true);
+    assert.strictEqual(repaired.drafts[0].text, "这是已经生成的回复草稿。");
+    await controller.close();
+  } finally {
+    durableDb.close();
+  }
 }
 
 function liveBossRuntimeRecoverySmoke() {

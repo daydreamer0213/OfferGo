@@ -155,9 +155,14 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       .some((event) => event.kind === "resume_request" && event.direction === "friend");
     const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
+    const missingFactSection = result.missingFactKey ? renderMissingFactForm(result, {
+      profileId,
+      escapeHtml,
+      escapeAttr
+    }) : "";
     const nextSection = expired
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
-      : `${manualSection}${replySection}`
+      : `${manualSection}${missingFactSection}${replySection}`
       || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
     const sentForm = !expired && sendable && drafts && !durableDrafts.length
       ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
@@ -189,9 +194,13 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     <div class="button-row"><button type="button" data-send-batch hidden disabled>确认并串行发送 0 条</button><button type="button" data-send-batch-exit hidden>退出批量</button><button type="button" data-send-stop hidden disabled>停止后续发送</button></div>
   </section>` : "";
   const resultIdentities = new Set(allResults.filter(result => /^sha256:[a-f0-9]{64}$/.test(result.conversationKey || "")).map((result) => `${result.platform}\0${result.conversationKey}`));
+  const incompleteResultIdentities = new Set(status.results.filter((result) => result?.contextComplete !== true
+    && /^sha256:[a-f0-9]{64}$/.test(result?.conversationKey || ""))
+    .map((result) => `${result.platform}\0${result.conversationKey}`));
   const incomingViews = incomingContacts.filter((item) => {
     const identity = `${item.platform}\0${item.conversationKey}`;
     if (resultIdentities.has(identity)) return false;
+    if (incompleteResultIdentities.has(identity)) return false;
     if ((item.sourceKinds || []).length === 1 && item.sourceKinds[0] === "unresolved") return false;
     return true;
   })
@@ -213,7 +222,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       });
     });
   const representedIdentities = new Set([...resultViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
-  const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
+  const inboxOnlyViews = inboxItems.filter((item) => !incompleteResultIdentities.has(`${item.platform}\0${item.conversationKey}`)
+    && !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
     .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }));
   const allViews = [...resultViews, ...incomingViews, ...inboxOnlyViews];
   const requestedView = contactMatchesScope ? allViews.find((view) => view.contactKey === requestedContact.key) : null;
@@ -309,7 +319,7 @@ function renderIncomingContactView(item, { selected, actionGroup = "done", timel
     actionGroup,
     contactKey: item.key,
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${actionGroup}" data-pending="${actionGroup === "needs_action" || actionGroup === "needs_review"}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "needs_action" ? "这条消息仍在等待你处理。" : actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? "这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。" : "当前没有需要你处理的操作。"}</p></section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? "这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。" : "当前没有需要你处理的操作。"}</p></section>`
   };
 }
 
@@ -568,7 +578,7 @@ function messageIntentLabel(value) {
 }
 
 function messageDiscoveryManualActionText(result) {
-  if (result?.missingFactKey) return "缺少事实，暂不生成草稿。请先人工确认后再回复。";
+  if (result?.missingFactKey) return missingFactQuestion(result);
   if (result?.messageIntent === "manual_review") {
     return result?.manualActionReason || "当前消息需要人工判断，暂不生成草稿。";
   }
@@ -577,6 +587,25 @@ function messageDiscoveryManualActionText(result) {
   if (category === "sensitive") return "消息涉及敏感信息，需要人工判断后再回复。";
   if (category === "identity_uncertain") return "岗位或会话身份仍需人工核对，暂不生成草稿。";
   return result?.manualActionReason || "当前结果需要人工处理，暂不生成草稿。";
+}
+
+function renderMissingFactForm(result, { profileId, escapeHtml, escapeAttr }) {
+  const question = missingFactQuestion(result);
+  return `<section class="message-missing-fact"><h4>需要你确认一项个人信息</h4><p class="line">${escapeHtml(question)}</p><p class="line">OfferGo 不会替你编造这个答案。填写后会立即生成可确认的回复草稿。</p><form class="form-stack" data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="answer_fact"><input type="hidden" name="profileId" value="${Number(profileId)}"><input type="hidden" name="cardId" value="${Number(result.cardId)}"><input type="hidden" name="messageGroupKey" value="${escapeAttr(result.messageGroupKey || "")}"><input type="hidden" name="factKey" value="${escapeAttr(result.missingFactKey || "")}"><label>你的回答<textarea name="factValue" required placeholder="例如：本周工作日下午都方便电话沟通"></textarea></label><button>生成回复草稿</button></form></section>`;
+}
+
+function missingFactQuestion(result) {
+  const explicit = String(result?.missingFactQuestion || "").trim();
+  if (explicit) return explicit;
+  return ({
+    employment_status: "你目前是在职、离职，还是正在寻找新机会？",
+    availability_date: "你什么时候方便沟通或到岗？",
+    current_city: "你目前所在的城市是哪里？",
+    expected_salary: "你的期望薪资范围是多少？",
+    accepts_travel: "你是否能接受出差？",
+    accepts_relocation: "你是否能接受异地工作？",
+    accepts_overtime: "你对加班的接受范围是什么？"
+  })[String(result?.missingFactKey || "")] || "请补充 HR 当前询问的个人信息。";
 }
 
 function messageDiscoveryPhaseText(status) {

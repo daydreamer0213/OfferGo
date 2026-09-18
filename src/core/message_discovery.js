@@ -690,6 +690,7 @@ async function runBossMessageDiscovery({
       messageIntent: classification.messageIntent,
       messageCategory: classification.messageCategory,
       missingFactKey: classification.missingFact?.key || "",
+      missingFactQuestion: classification.missingFact?.question || "",
       manualActions: classification.manualActions || [],
       progressUpdate: classification.progressUpdate,
       occurredAt: now()
@@ -1975,6 +1976,7 @@ function profileText(value) {
 module.exports = {
   runBossMessageDiscovery,
   projectMessageDecisionCard,
+  messageReplyProfile,
   selectUnprocessedFriendMessageGroup,
   abortableSleep,
   randomBetween

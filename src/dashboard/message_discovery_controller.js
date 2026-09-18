@@ -8,6 +8,7 @@ const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_
 const { BossSiteAdapter, inspectBossSessionState } = require("../adapters/sites/boss");
 const { createMessageDiscoveryJobContextResolver } = require("../application/message_discovery/job_context");
 const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../application/message_discovery/run");
+const { answerMissingMessageFact } = require("../application/message_discovery/answer_fact");
 const { retryOneJobAnalysis } = require("../application/analysis");
 const { createMessageReplyAnalyzer } = require("../core/message_reply_analyzer");
 const {
@@ -35,6 +36,7 @@ const {
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
   getDurableMessageDraftContext,
+  getMessageGroupClassification,
   messageReplyDraftExists,
   messageReplyDraftGroupExists,
   hasBlockingReplySendItemForCard
@@ -120,6 +122,7 @@ function createMessageDiscoveryController(deps = {}) {
     dismiss,
     status,
     pageState,
+    answerFact,
     clearDraftForCard,
     close
   };
@@ -307,6 +310,7 @@ function createMessageDiscoveryController(deps = {}) {
         }
       }
       for (const entry of run.platformRuns) if (entry.status === "pending") entry.status = "stopped";
+      await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal);
       const issue = run.platformRuns.find(entry => entry.status === "needs_user_action" || entry.status === "stopped");
       const stopped = abortController.signal.aborted || run.platformRuns.some(entry => entry.status === "stopped");
       updateRun(run, { ...run, status: stopped ? "stopped" : issue || !run.platformRuns.some(entry => entry.status === "completed") ? "needs_user_action" : "completed",
@@ -412,6 +416,32 @@ function createMessageDiscoveryController(deps = {}) {
         now: nowDate()
       })
     };
+  }
+
+  async function answerFact(input = {}) {
+    const profileId = messageDiscoveryProfileId(input.profileId);
+    const active = runs.get(profileId);
+    if (active?.status === "running") {
+      throw messageDiscoveryError("MESSAGE_DISCOVERY_ALREADY_RUNNING", "message discovery is already running", 409);
+    }
+    if (!modelReady()) {
+      throw messageDiscoveryError("MESSAGE_DISCOVERY_MODEL_NOT_READY", "message discovery requires a verified deep analysis model", 409);
+    }
+    const modelConfig = getModelConfig();
+    const result = await answerMissingMessageFact({
+      db,
+      profileId,
+      cardId: input.cardId,
+      messageGroupKey: input.messageGroupKey,
+      factKey: input.factKey,
+      factValue: input.factValue,
+      classifyMessageGroup: createAnalyzer({
+        modelConfig: boundedMessageDraftModelConfig(modelConfig),
+        logger
+      }),
+      now: () => nowDate().toISOString()
+    });
+    return { statusCode: 200, body: { status: "completed", draftCount: result.drafts.length } };
   }
 
   function clearDraftForCard(profileIdValue, cardIdValue) {
@@ -534,6 +564,7 @@ function createMessageDiscoveryController(deps = {}) {
         messageCategory: String(item?.messageCategory || "").slice(0, 80),
         messageSummary: safeInlineText(item?.messageSummary, 160),
         missingFactKey: String(item?.missingFactKey || "").slice(0, 80),
+        missingFactQuestion: safeInlineText(item?.missingFactQuestion, 160),
         manualActionReason: safeText(item?.manualActionReason, 240),
         manualActions: sanitizeManualActions(item?.manualActions, platform),
         contextSource: ["local_cache", "message_discovery_detail"].includes(item?.contextSource)
@@ -772,6 +803,10 @@ function createMessageDiscoveryController(deps = {}) {
     if (!row) throw messageDiscoveryError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "durable draft context is missing", 500);
     const platform = row.source === row.card_source && ["boss", "zhaopin"].includes(row.source) ? row.source : "";
     const first = drafts[0] || contexts[0] || {};
+    const selectedGroupKey = safeDigest(first.messageGroupKey) || safeDigest(contexts[0]?.messageGroupKey);
+    const classification = selectedGroupKey
+      ? getMessageGroupClassification(db, { profileId, cardId, messageGroupKey: selectedGroupKey }) || {}
+      : {};
     const openGroupKeys = new Set(drafts.map((draft) => draft.messageGroupKey));
     const activeContexts = contexts.filter((context) => openGroupKeys.has(context.messageGroupKey)
       || !messageReplyDraftGroupExists(db, { profileId, cardId, messageGroupKey: context.messageGroupKey }));
@@ -803,13 +838,16 @@ function createMessageDiscoveryController(deps = {}) {
       jobId: Number(row.job_id),
       platform,
       sourceJobId: row.source_id,
-      messageGroupKey: safeDigest(first.messageGroupKey) || safeDigest(activeContexts[0]?.messageGroupKey),
+      messageGroupKey: selectedGroupKey || safeDigest(activeContexts[0]?.messageGroupKey),
       conversationKey: safeDigest(first.conversationKey) || safeDigest(activeContexts[0]?.conversationKey),
-      stage: String(row.stage || "reply_ready"),
-      messageIntent: MESSAGE_INTENTS.has(first.messageIntent) ? first.messageIntent : "manual_review",
-      messageCategory: String(first.messageCategory || "other"),
+      stage: String(classification.stage || row.stage || "reply_ready"),
+      messageIntent: MESSAGE_INTENTS.has(first.messageIntent)
+        ? first.messageIntent
+        : MESSAGE_INTENTS.has(classification.messageIntent) ? classification.messageIntent : "manual_review",
+      messageCategory: String(first.messageCategory || classification.messageCategory || "other"),
       messageSummary: safeInlineText(first.questionSummary, 160),
-      missingFactKey: "",
+      missingFactKey: safeDrafts.length ? "" : safeText(classification.missingFactKey, 80),
+      missingFactQuestion: safeDrafts.length ? "" : safeInlineText(classification.missingFactQuestion, 160),
       manualActionReason: "",
       manualActions: sanitizeManualActions(activeContexts.flatMap((context) => context.manualActions), row.source),
       contextSource: "local_cache",
@@ -819,6 +857,41 @@ function createMessageDiscoveryController(deps = {}) {
       drafts: safeDrafts,
       messages: safeDrafts.map((draft) => draft.text)
     };
+  }
+
+  async function repairDurableJobAnalyses(run, profileId, modelConfig, signal) {
+    if (typeof analyzeMessageJob !== "function" || signal?.aborted) return;
+    const actionableCards = new Set(listMessageInboxItems(db, { profileId })
+      .filter((item) => item.actionGroup === "needs_action" && Number(item.cardId) > 0)
+      .map((item) => Number(item.cardId)));
+    const pending = durableStatus(profileId).results
+      .filter((result) => !result.contextComplete && actionableCards.has(Number(result.cardId)));
+    const repaired = new Set();
+    for (const result of pending) {
+      if (signal?.aborted) return;
+      const row = getDurableMessageDraftContext(db, { profileId, cardId: result.cardId });
+      const activePlan = getActiveSearchPlan(db, profileId);
+      const planId = Number(row?.source === "zhaopin" ? activePlan?.id : row?.plan_id);
+      const jobId = Number(row?.job_id);
+      const key = `${planId}:${jobId}`;
+      if (!Number.isSafeInteger(planId) || planId <= 0 || !Number.isSafeInteger(jobId) || jobId <= 0 || repaired.has(key)) continue;
+      repaired.add(key);
+      setDetailPhase(run, "analyzing_job", now);
+      try {
+        await analyzeMessageJob({
+          db,
+          input: { planId, jobId },
+          deps: { modelReady: true, root, modelConfig, logger, signal, messageContextAnalysis: true }
+        });
+      } catch (error) {
+        logger?.warn?.("message_discovery_durable_analysis_repair_failed", {
+          profileId,
+          jobId,
+          code: messageDiscoveryErrorCode(error)
+        });
+      }
+    }
+    if (!signal?.aborted) setDetailPhase(run, "analyzing_messages", now);
   }
 
   function clearExpiredRun(profileId) {

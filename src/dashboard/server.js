@@ -3654,6 +3654,7 @@ async function handleMessageDiscovery(req, res, controller, { ensureBrowserWorks
     }
     else if (action === "stop") result = controller.stop(params.profileId);
     else if (action === "dismiss") result = controller.dismiss(params.profileId);
+    else if (action === "answer_fact") result = await controller.answerFact(params);
     else throw appError("MESSAGE_DISCOVERY_ACTION_INVALID", "消息发现操作无效。", { statusCode: 400 });
     sendJson(res, result.statusCode, result.body);
   } catch (error) {

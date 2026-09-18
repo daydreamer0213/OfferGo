@@ -70,6 +70,22 @@ function getDurableMessageDraftContext(db, { profileId, cardId } = {}) {
     WHERE c.id = ? AND c.profile_id = ?`).get(Number(cardId), Number(profileId)) || null;
 }
 
+function getMessageGroupClassification(db, { profileId, cardId, messageGroupKey } = {}) {
+  const rows = db.prepare(`SELECT events.metadata_json
+    FROM candidate_progress_events events
+    JOIN candidate_progress_cards cards ON cards.id = events.card_id
+    WHERE cards.profile_id = ? AND cards.id = ? AND events.type = 'message_group_classified'
+    ORDER BY events.occurred_at DESC, events.id DESC`).all(Number(profileId), Number(cardId));
+  const expected = String(messageGroupKey || "");
+  for (const row of rows) {
+    try {
+      const metadata = JSON.parse(String(row.metadata_json || "{}"));
+      if (metadata && typeof metadata === "object" && metadata.messageGroupKey === expected) return metadata;
+    } catch {}
+  }
+  return null;
+}
+
 module.exports = {
   listIncomingLinkedContexts,
   listClassifiedMessageHistory,
@@ -78,5 +94,6 @@ module.exports = {
   findExactIdentityCandidates,
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
-  getDurableMessageDraftContext
+  getDurableMessageDraftContext,
+  getMessageGroupClassification
 };

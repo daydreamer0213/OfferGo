@@ -46,6 +46,7 @@ const ALLOWED_METADATA_KEYS = new Set([
   "messageCategory",
   "factKey",
   "missingFactKey",
+  "missingFactQuestion",
   "stage",
   "fromStage",
   "toStage",
@@ -454,6 +455,9 @@ function recordDiscoveredMessageGroupClassification(db, input = {}) {
     : {};
   const stage = legalStage(progressUpdate.stage);
   const missingFactKey = safeMissingFactKey(input.missingFactKey);
+  const missingFactQuestion = missingFactKey
+    ? String(input.missingFactQuestion || "").replace(/\s+/g, " ").trim().slice(0, 160)
+    : "";
   const summary = sanitizedMessageSummary(messageCategory, { missingFactKey, messageIntent });
   const classificationMetadata = {
     platform,
@@ -462,6 +466,7 @@ function recordDiscoveredMessageGroupClassification(db, input = {}) {
     messageIntent,
     messageCategory,
     missingFactKey,
+    missingFactQuestion,
     stage
   };
   const groupIdempotencyKey = messageGroupIdempotencyKey(platform, messageGroupKey);
