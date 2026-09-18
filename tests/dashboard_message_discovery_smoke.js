@@ -42,6 +42,7 @@ const { createDashboardServer } = require("../src/dashboard/server");
 const {
   createMessageDiscoveryController,
   createMessageDiscoveryDetailSafety,
+  buildMessageInboxPageState,
   clearResolvedMessageDiscoveryRuntimeBlock
 } = require("../src/dashboard/message_discovery_controller");
 const {
@@ -861,6 +862,20 @@ async function main() {
   assert.strictEqual(durableStatus.unresolved, 1);
   assert.strictEqual(durableStatus.reasonCode, "BOSS_MESSAGE_CARD_NOT_FOUND");
   assertNoPrivateData(durableStatus);
+  const capturedMessageFreshness = buildMessageInboxPageState(db, {
+    profileId: retainedFixture.profileId,
+    platformRuns: [{
+      platform: "zhaopin",
+      status: "needs_user_action",
+      reasonCode: "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED"
+    }]
+  }).freshness.zhaopin;
+  assert.deepStrictEqual(capturedMessageFreshness, {
+    platform: "zhaopin",
+    label: "消息已读取",
+    detail: "消息内容已保留，部分岗位资料仍在补充",
+    state: "partial"
+  }, "a job-detail verification gap must not be presented as a message sync failure");
   let durablePage = await request(base, `/messages?profileId=${retainedFixture.profileId}`);
   assert(!durablePage.body.includes('class="panel message-state"'), "one unresolved contact belongs in its own list item, not a page-wide error panel");
   for (const reasonCode of ["BOSS_LOGIN_REQUIRED", "BOSS_RISK_CONTROL", "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "ZHAOPIN_MESSAGE_RISK_CONTROL", "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND"]) {

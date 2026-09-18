@@ -49,6 +49,24 @@ const MESSAGE_INTENTS = new Set([
   "general_communication",
   "manual_review"
 ]);
+const MESSAGE_CONTENT_CAPTURED_REASON_CODES = new Set([
+  "BOSS_MESSAGE_CARD_NOT_FOUND",
+  "BOSS_MESSAGE_CARD_AMBIGUOUS",
+  "BOSS_MESSAGE_SALARY_MISMATCH",
+  "BOSS_MESSAGE_CITY_MISMATCH",
+  "BOSS_MESSAGE_COMPANY_MISMATCH",
+  "BOSS_MESSAGE_THREAD_MISMATCH",
+  "BOSS_MESSAGE_JOB_TARGET_UNAVAILABLE",
+  "BOSS_MESSAGE_TARGET_MISMATCH",
+  "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH",
+  "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE",
+  "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE",
+  "ZHAOPIN_MESSAGE_DETAIL_COMPANY_UNVERIFIED",
+  "ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE",
+  "ZHAOPIN_MESSAGE_TARGET_MISMATCH",
+  "ZHAOPIN_MESSAGE_DETAIL_TARGET_MISMATCH"
+]);
 
 function createMessageDiscoveryController(deps = {}) {
   const {
@@ -1092,6 +1110,14 @@ function presentFreshness(platform, run, sync, now) {
   }
   if (run?.reasonCode) {
     const state = /LOGIN_REQUIRED|RISK_CONTROL|TAB_|PAGE_LOST|BROWSER/.test(run.reasonCode) ? "needs_user_action" : "partial";
+    if (state === "partial" && messageContentWasCaptured(run.reasonCode)) {
+      return {
+        platform,
+        label: "消息已读取",
+        detail: "消息内容已保留，部分岗位资料仍在补充",
+        state
+      };
+    }
     return { platform, label: state === "partial" ? "部分同步" : "需要处理", detail: messageDiscoveryFreshnessText(run.reasonCode), state };
   }
   if (!sync) return { platform, label: "尚未同步", detail: `首次同步将衔接 ${platformLabel} 最近 3 天消息`, state: "idle" };
@@ -1103,6 +1129,10 @@ function presentFreshness(platform, run, sync, now) {
     ? Math.max(0, Math.floor((now.getTime() - successfulAt) / 60000)) : null;
   const label = minutes === null ? "已同步" : minutes < 1 ? "刚刚同步" : minutes < 60 ? `${minutes} 分钟前同步` : "已同步";
   return { platform, label, detail: "最近 3 天范围已确认", state: "complete" };
+}
+
+function messageContentWasCaptured(reasonCode) {
+  return MESSAGE_CONTENT_CAPTURED_REASON_CODES.has(String(reasonCode || ""));
 }
 
 function messageDiscoveryFreshnessText(code) {
