@@ -54,6 +54,29 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(calls.filter((item) => item === "detail").length, 1);
     assert(calls.filter((item) => item === "target").length >= 2, "selection is revalidated before persistence/binding");
 
+    const offlineFixture = seedPlan("removed-job");
+    const offlineThread = digest("removed-job-thread");
+    const offlineTarget = { tabId: 202, conversationKey: offlineThread, sourceJobId: `zhaopin:${JOB_ID}`,
+      positionTitle: "已下线的软件岗位", company: "合成科技有限公司", salary: "20-30K", city: "北京" };
+    const offlineSelected = Object.freeze({ positionName: "已下线的软件岗位", companyName: "合成科技有限公司", salary: "20-30K", city: "北京" });
+    const unavailableResolver = createZhaopinMessageJobContextResolver({
+      db,
+      profileId: offlineFixture.profileId,
+      messageReader: messageReader([], offlineSelected, "offline"),
+      detailReader: { async readSelectedJobDetail() {
+        throw Object.assign(new Error("job was removed"), { code: "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE" });
+      } },
+      now: () => NOW
+    });
+    const unavailableResult = await unavailableResolver({ target: offlineTarget, selected: offlineSelected });
+    assert.equal(unavailableResult.contextSource, "message_discovery_unavailable");
+    assert.equal(unavailableResult.job.title, "已下线的软件岗位");
+    assert.equal(unavailableResult.job.description, "");
+    assert.equal(unavailableResult.job.analysis.provider, "message-discovery-unavailable");
+    assert.equal(unavailableResult.job.analysis.semanticStatus, "unavailable");
+    assert.equal(unavailableResult.job.analysis.sourceAvailability, "offline");
+    assert.equal(unavailableResult.card.threadKey, offlineThread);
+
     const stored = listReportJobs(db, { planId: fixture.planId, site: "zhaopin", batch: "all", limit: 20 })
       .find((job) => job.sourceId === JOB_ID);
     assert.equal(stored.analysis.sourceAvailability, "offline", "existing analysis write preserves source evidence, not model output");

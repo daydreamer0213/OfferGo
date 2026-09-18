@@ -65,13 +65,13 @@ function row(rowIndex, {
   };
 }
 
-function snapshot({ rows = [row(0, { unread: true }), row(1)], selectedRowIndex = 0, risk = false, login = false, path = "/web/geek/chat", messages = null } = {}) {
+function snapshot({ rows = [row(0, { unread: true }), row(1)], selectedRowIndex = 0, risk = false, login = false, path = "/web/geek/chat", messages = null, companyName = "Fixture Company" } = {}) {
   return {
     path,
     rows: rows.map((item) => ({ ...item, selected: item.rowIndex === selectedRowIndex })),
     headerText: "Alex Example",
     positionName: "Java Engineer",
-    companyName: "Fixture Company",
+    companyName,
     salary: "20-30K",
     city: "Shenzhen",
     risk,
@@ -292,6 +292,27 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   assert.strictEqual(rowsScan.coverage.complete, false);
   assert(rowsBrowser.calls.some(([name]) => name === "reload"));
 
+  let mountWaits = 0;
+  const mountingBrowser = fakeBrowser({ snapshots: [snapshot({ rows: [] }), snapshot()] });
+  const mountingScan = await createBossMessageReader({
+    browser: mountingBrowser,
+    sleepFn: async () => { mountWaits += 1; }
+  }).scanConversationRows();
+  assert.equal(mountingScan.rows.length, 2, "a briefly empty frame after refresh must wait for the conversation list to mount");
+  assert.equal(mountWaits, 1);
+
+  let slowMountWaits = 0;
+  const slowMountingBrowser = fakeBrowser({ snapshots: [
+    ...Array.from({ length: 8 }, () => snapshot({ rows: [] })),
+    snapshot()
+  ] });
+  const slowMountingScan = await createBossMessageReader({
+    browser: slowMountingBrowser,
+    sleepFn: async () => { slowMountWaits += 1; }
+  }).scanConversationRows();
+  assert.equal(slowMountingScan.rows.length, 2, "a slow BOSS refresh must wait for the conversation list instead of treating the account as empty");
+  assert.equal(slowMountWaits, 8);
+
   const olderRow = row(2, { recruiterLabel: "Older Example", lastActivityAt: "2026-09-13T23:00:00.000Z" });
   const expandedBrowser = fakeBrowser({ snapshots: [
     snapshot(),
@@ -309,6 +330,20 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   assert.equal(expandedScan.coverage.complete, true, "the first sync must load until it crosses the 72-hour cutoff");
   assert.equal(listReservations, 1);
   assert(expandedBrowser.calls.some(([, , expression]) => expression === BOSS_MESSAGE_LOAD_MORE_EXPRESSION));
+
+  const requiredOlder = row(3, { recruiterLabel: "Required unresolved", lastActivityAt: "2026-09-01T00:00:00.000Z" });
+  const requiredBrowser = fakeBrowser({ snapshots: [
+    snapshot(),
+    { state: "issued", reachedEnd: false },
+    snapshot({ rows: [row(0, { unread: true }), row(1), requiredOlder] })
+  ] });
+  const requiredScan = await createBossMessageReader({
+    browser: requiredBrowser,
+    sleepFn: async () => {},
+    beforeLoadMore: async () => {}
+  }).scanConversationRows(undefined, { requiredConversationKeys: [requiredOlder.conversationKey] });
+  assert.equal(requiredScan.rows.length, 3, "a durable unresolved conversation must be loaded even after the initial 72-hour sync");
+  assert.equal(requiredScan.coverage.requiredComplete, true);
 
   const verifiedRow = row(0, {
     unread: true,
@@ -381,6 +416,57 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   assert.strictEqual(initialIncomingOpened.positionName, "Java Engineer");
   assert.strictEqual(initialIncomingBrowser.guardedDomClicks, 1,
     "a verified first incoming conversation must use the existing guarded DOM click");
+
+  const rowCompany = row(0, { unread: true, company: "Company From Verified Row" });
+  const blankHeaderReader = createBossMessageReader({
+    browser: fakeBrowser({ snapshots: [
+      snapshot({ rows: [rowCompany], companyName: "" }),
+      guardedSuccess,
+      snapshot({ rows: [rowCompany], companyName: "" }),
+      snapshot({ rows: [rowCompany], companyName: "" }),
+      { state: "ready", jobId: "companyFallbackJob", securityId: "company-fallback-token" },
+      snapshot({ rows: [rowCompany], companyName: "" })
+    ] }),
+    sleepFn: async () => {}
+  });
+  const blankHeaderScan = await blankHeaderReader.scanConversationRows();
+  const blankHeaderSelected = await blankHeaderReader.openQueuedConversation({ ...blankHeaderScan.rows[0], tabId: blankHeaderScan.tabId, operation: "durable_unresolved" });
+  assert.equal(blankHeaderSelected.companyName, "Company From Verified Row", "a verified conversation-row company fills an empty selected header");
+  assert.equal((await blankHeaderReader.readSelectedJobTarget(blankHeaderSelected)).jobId, "companyFallbackJob",
+    "a verified row-company fallback must remain stable while resolving the selected job target");
+
+  const movingRow = row(0, { unread: false, recruiterLabel: "Moving conversation" });
+  const movedRow = { ...movingRow, rowIndex: 1,
+    transientSignature: safeDigest([1, movingRow.recruiterLabel, movingRow.previewText, movingRow.unread]) };
+  const reorderedReader = createBossMessageReader({
+    browser: fakeBrowser({ snapshots: [
+      snapshot({ rows: [movingRow] }),
+      { clicked: true, operation: "__bossGuardedMessageConversationClick", rowIndex: 1 },
+      snapshot({ rows: [row(0, { recruiterLabel: "Other conversation" }), movedRow], selectedRowIndex: 1 })
+    ] }),
+    sleepFn: async () => {}
+  });
+  const reorderedScan = await reorderedReader.scanConversationRows();
+  const reorderedSelected = await reorderedReader.openQueuedConversation({ ...reorderedScan.rows[0], tabId: reorderedScan.tabId, operation: "durable_unresolved" });
+  assert.equal(reorderedSelected.rows.find(item => item.selected).conversationKey, movingRow.conversationKey,
+    "a conversation that moves after another row is read must still be selected by its verified identity");
+
+  for (const operation of ["durable_unresolved", "initial_incoming"]) {
+    const retryAfterDriftReader = createBossMessageReader({
+      browser: fakeBrowser({ snapshots: [
+        snapshot({ rows: [movingRow] }),
+        { clicked: false, operation: "__bossGuardedMessageConversationClick", reason: "row_drifted" },
+        snapshot({ rows: [row(0, { recruiterLabel: "Other conversation" }), movedRow], selectedRowIndex: 0 }),
+        { clicked: true, operation: "__bossGuardedMessageConversationClick", rowIndex: 1 },
+        snapshot({ rows: [row(0, { recruiterLabel: "Other conversation" }), movedRow], selectedRowIndex: 1 })
+      ] }),
+      sleepFn: async () => {}
+    });
+    const retryAfterDriftScan = await retryAfterDriftReader.scanConversationRows();
+    const retriedAfterDrift = await retryAfterDriftReader.openQueuedConversation({ ...retryAfterDriftScan.rows[0], tabId: retryAfterDriftScan.tabId, operation });
+    assert.equal(retriedAfterDrift.rows.find(item => item.selected).conversationKey, movingRow.conversationKey,
+      `${operation} row drift is refreshed and retried once by the same verified conversation identity`);
+  }
 
   const followUpRow = row(0, {
     unread: false,
@@ -618,7 +704,11 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   );
   assert.strictEqual(interactiveChildRow.ownerCalls, 1);
 
-  const driftBrowser = fakeBrowser({ snapshots: [snapshot(), { clicked: false, operation: "__bossGuardedMessageConversationClick", reason: "row_drifted" }] });
+  const driftBrowser = fakeBrowser({ snapshots: [
+    snapshot(),
+    { clicked: false, operation: "__bossGuardedMessageConversationClick", reason: "row_drifted" },
+    snapshot({ rows: [row(0, { conversationId: "different-conversation" })] })
+  ] });
   const drift = await scan(driftBrowser);
   await assert.rejects(() => drift.reader.openQueuedConversation(drift.scan.queue[0]), (error) => error.code === "BOSS_MESSAGE_ROW_DRIFTED");
   assert.strictEqual(driftBrowser.guardedDomClicks, 0);

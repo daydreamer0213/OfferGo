@@ -64,8 +64,9 @@ function fixtureHtml() {
             if (current.type === 'text') { const text = document.createElement('span'); text.className = 'im-msg-text'; text.textContent = current.body; row.append(text); }
             else if (['131','303'].includes(String(current.cardType))) { const rich = document.createElement('div'); rich.className = 'im-msg-rich'; rich.textContent = current.body; row.append(rich); }
             else if (String(current.cardType) === '346') { const notice = document.createElement('div'); notice.className = 'im-msg-346__text'; notice.textContent = current.body; row.append(notice); }
+            else if (String(current.cardType) === '167') { const notice = document.createElement('div'); notice.className = 'im-msg-167'; notice.textContent = current.body; row.append(notice); }
             else if (String(current.cardType) === '11') { const card = document.createElement('div'); card.className = 'im-msg-11-wrap'; card.innerHTML = '<strong>邀请发送简历</strong><button class="im-msg-11__btn--refuse">拒绝</button><button class="im-msg-11__btn--agree">同意</button>'; row.append(card); }
-            else if (String(current.cardType) === '255' && !current.noFallback) { const fallback = document.createElement('div'); fallback.className = 'im-msg-255-fallback'; fallback.textContent = current.body; row.append(fallback); }
+            else if (current.tip && !current.noFallback) { const fallback = document.createElement('div'); fallback.className = 'im-msg-' + current.cardType + '-fallback'; fallback.textContent = current.body; row.append(fallback); }
             else { const card = document.createElement('div'); card.className = 'unknown-card'; card.textContent = current.body || '隐藏卡片'; row.append(card); }
             timeline.append(row);
           }
@@ -130,6 +131,8 @@ async function main() {
       message({ idServer: "104", type: "custom", cardType: "255", body: "系统提示", tip: true, flow: "out", fromMe: true, from: 900 }),
       message({ idServer: "105", type: "custom", cardType: "303", body: "合成富文本" }),
       message({ idServer: "106", type: "custom", cardType: "346", body: "合成平台提示", tip: true }),
+      message({ idServer: "107", type: "custom", cardType: "167", body: "感谢你的关注，很遗憾岗位与你不是很匹配，祝早日找到心仪的工作" }),
+      message({ idServer: "108", type: "custom", cardType: "266", body: "PC暂不支持显示该内容，请前往智联App查看", tip: true, flow: "out", fromMe: true, from: 900 }),
       message({ idServer: "999", body: "不得重复", nested: true })
     ];
     await setFixture(page, { sessions: [first, second], active: first, timeline: richTimeline, loading: true });
@@ -146,12 +149,12 @@ async function main() {
     const selected = await reader.openQueuedConversation({ ...scanned.rows[0], tabId: scanned.tabId });
     assert.deepStrictEqual(selected.messages.map(m => [m.direction, m.contentKind]), [
       ["friend", "text"], ["friend", "resume_request"], ["friend", "text"], ["platform", "platform_notice"],
-      ["friend", "text"], ["platform", "platform_notice"]
+      ["friend", "text"], ["platform", "platform_notice"], ["friend", "text"], ["platform", "platform_notice"]
     ]);
-    assert.strictEqual(selected.messages.filter(m => m.contentKind === "text").length, 3);
+    assert.strictEqual(selected.messages.filter(m => m.contentKind === "text").length, 4);
     assert(selected.messages.every(message => /^sha256:[a-f0-9]{64}$/.test(message.messageKey)));
     assert.strictEqual(selected.sourceJobId, "zhaopin:CCL1234567890J00123456789");
-    assert.equal(selected.lastMessageId, "106", "the detail reader returns a real final meaningful ID");
+    assert.equal(selected.lastMessageId, "108", "the detail reader returns a real final meaningful ID");
 
     const older = session({
       sessionId: "d".repeat(32),
@@ -306,6 +309,13 @@ async function main() {
     const pendingReader = readerFor(fakeBrowser(page), { timeoutMs: 10 });
     const pendingScan = await pendingReader.scanConversationRows();
     await assert.rejects(() => pendingReader.openQueuedConversation({ ...pendingScan.rows[0], tabId: IM_TAB_ID }), error => error.code === "ZHAOPIN_MESSAGE_CONTENT_PENDING");
+
+    const durableEmptyReader = readerFor(fakeBrowser(page), { timeoutMs: 30 });
+    const durableEmptyScan = await durableEmptyReader.scanConversationRows();
+    const durableEmpty = await durableEmptyReader.openQueuedConversation({
+      ...durableEmptyScan.rows[0], tabId: IM_TAB_ID, allowEmptyTimeline: true
+    });
+    assert.deepEqual(durableEmpty.messages, [], "only an explicitly durable unresolved conversation may reuse its stored timeline");
 
     assert.throws(() => createZhaopinMessageReader({
       browser: fakeBrowser(page),

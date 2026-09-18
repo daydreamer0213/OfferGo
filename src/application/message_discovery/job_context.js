@@ -52,12 +52,24 @@ function createMessageDiscoveryJobContextResolver({
       return bindContext(known, target?.conversationKey, "local_cache", now());
     }
 
-    const detail = trustedDetail(await detailReader.readSelectedJobDetail({
-      communicationTabId: target?.tabId,
-      selected,
-      jobTarget,
-      signal
-    }), jobTarget);
+    let rawDetail;
+    try {
+      rawDetail = await detailReader.readSelectedJobDetail({
+        communicationTabId: target?.tabId,
+        selected,
+        jobTarget,
+        signal
+      });
+    } catch (error) {
+      if (error?.code !== "BOSS_MESSAGE_DETAIL_UNAVAILABLE") throw error;
+      return bindContext(
+        persistUnavailableContext(plan, localSourceId, jobTarget, selected, target),
+        target?.conversationKey,
+        "message_discovery_unavailable",
+        now()
+      );
+    }
+    const detail = trustedDetail(rawDetail, jobTarget);
     const batchId = createBatch(db, "boss", "message-discovery-detail", "message discovery detail", {
       profileId: normalizedProfileId,
       searchPlanId: plan.id,
@@ -107,6 +119,31 @@ function createMessageDiscoveryJobContextResolver({
       threadKey: card.threadKey,
       contextSource
     };
+  }
+
+  function persistUnavailableContext(plan, sourceId, jobTarget, selected, target) {
+    const title = boundedText(selected?.positionName || target?.positionTitle, 240);
+    const company = boundedText(selected?.companyName || target?.company, 240);
+    if (!title) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "removed job identity is incomplete");
+    const batchId = createBatch(db, "boss", "message-discovery-unavailable", "removed message job", {
+      profileId: normalizedProfileId,
+      searchPlanId: plan.id,
+      filterSnapshot: { mode: "message-discovery-unavailable", sourceId }
+    });
+    upsertJob(db, {
+      source: "boss", sourceId, keyword: "message-discovery-unavailable", title, company,
+      location: boundedText(selected?.city || target?.city, 120),
+      salary: boundedText(selected?.salary || target?.salary, 120),
+      experience: "", education: "", bossActiveText: "", url: jobTarget.canonicalUrl,
+      tags: [], description: "", qualityTags: ["source_unavailable"],
+      analysis: { provider: "message-discovery-unavailable", semanticStatus: "unavailable",
+        decisionSource: "source_unavailable", recommendation: null, sourceAvailability: "offline" }
+    }, batchId);
+    const context = findMessageDiscoveryJobContext(db, {
+      profileId: normalizedProfileId, planId: plan.id, sourceId
+    });
+    if (!context?.contextComplete) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "removed job context is unavailable");
+    return context;
   }
 }
 

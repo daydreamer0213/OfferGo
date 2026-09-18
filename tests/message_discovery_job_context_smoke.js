@@ -24,6 +24,7 @@ let db;
     await cacheHitSmoke();
     await cacheBindingFailureSmoke();
     await fetchedContextSmoke();
+    await unavailableContextSmoke();
     await incompleteContextSmoke();
     console.log("message_discovery_job_context_smoke ok");
   } finally {
@@ -82,6 +83,38 @@ async function cacheHitSmoke() {
   assert.strictEqual(result.job.analysis.semanticStatus, "complete");
   assert.strictEqual(result.threadKey, conversationKey);
   assert.strictEqual(result.contextSource, "local_cache");
+}
+
+async function unavailableContextSmoke() {
+  const fixture = seedProfilePlan("unavailable");
+  const sourceId = "unavailable-job";
+  const resolver = createMessageDiscoveryJobContextResolver({
+    db,
+    profileId: fixture.profileId,
+    messageReader: {
+      async readSelectedJobTarget() { return trustedTarget(sourceId); },
+      async assertActiveBindings() {}
+    },
+    detailReader: {
+      async readSelectedJobDetail() {
+        throw Object.assign(new Error("the platform says this job no longer exists"), { code: "BOSS_MESSAGE_DETAIL_UNAVAILABLE" });
+      }
+    },
+    now: () => fixture.now
+  });
+  const conversationKey = digest("unavailable-thread");
+  const result = await resolver({
+    target: { tabId: 47, conversationKey, positionTitle: "Offline AI Engineer", company: "Offline Context Co", salary: "20-30K", city: "Guangzhou" },
+    selected: { positionName: "Offline AI Engineer", companyName: "", salary: "20-30K", city: "Guangzhou" }
+  });
+  assert.equal(result.contextSource, "message_discovery_unavailable");
+  assert.equal(result.job.title, "Offline AI Engineer");
+  assert.equal(result.job.company, "Offline Context Co");
+  assert.equal(result.job.description, "");
+  assert.equal(result.job.analysis.provider, "message-discovery-unavailable");
+  assert.equal(result.job.analysis.semanticStatus, "unavailable");
+  assert.equal(result.job.analysis.sourceAvailability, "offline");
+  assert.equal(result.card.threadKey, conversationKey);
 }
 
 async function cacheBindingFailureSmoke() {

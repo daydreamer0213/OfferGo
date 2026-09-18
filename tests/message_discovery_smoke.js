@@ -687,6 +687,30 @@ async function threadAndContextResolutionSmoke() {
   assert.strictEqual(summary.status, "completed");
   assert.strictEqual(completeResolverCalls, 1, "a complete candidate still requires stable job ID verification");
 
+  const companyMismatch = createFixture({ suffix: "resolve-company-mismatch", title: "Resolve Company Mismatch Engineer" });
+  const companyMismatchCandidate = listMessageDiscoveryCandidates(db, { profileId: companyMismatch.profileId })
+    .find((item) => item.jobId === companyMismatch.jobId);
+  let companyMismatchResolverCalls = 0;
+  summary = await runBossMessageDiscovery({
+    db,
+    profileId: companyMismatch.profileId,
+    reader: fakeReader([selectedConversation({
+      title: companyMismatch.title,
+      companyName: "Current Conversation Company",
+      messageId: "123456789012409"
+    })]),
+    resolveJobContext: async ({ target, candidate }) => {
+      companyMismatchResolverCalls += 1;
+      assert.strictEqual(candidate, null, "a company mismatch must re-read the selected conversation job instead of reusing another company");
+      return resolvedContext(companyMismatchCandidate, target.conversationKey);
+    },
+    classifyMessageGroup: async () => classification(),
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.status, "completed");
+  assert.strictEqual(companyMismatchResolverCalls, 1, "a company mismatch must enter trusted job-context recovery");
+
   const legacy = createFixture({ suffix: "legacy-thread", title: "Legacy Thread Engineer" });
   const legacyThreadKey = safeDigest(["boss", PRIVATE_RECRUITER, legacy.title]);
   const legacyCanonicalKey = safeDigest(["conversation", "0"]);

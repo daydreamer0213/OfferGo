@@ -20,6 +20,7 @@ const IM_URL = "https://i.zhaopin.com/im?refcode=synthetic";
 const NAVIGATION_URL = `https://www.zhaopin.com/jobdetail/${JOB_ID}.html`;
 const CANONICAL_URL = `https://www.zhaopin.com/jobdetail/${JOB_ID}.htm`;
 const DESCRIPTION = "负责合成系统的设计、开发、测试、上线与稳定性治理，参与需求分析和技术方案评审，持续改善工程质量、监控告警、故障诊断与跨团队交付效率。".repeat(3);
+const SHORT_COMPLETE_DESCRIPTION = "1、本科及以上学历；2、熟悉Java、Python、C++或Go；3、熟练软件开发流程；4、善于沟通协作，能够独立完成需求分析、编码、测试和上线维护工作。";
 
 function snapshot(overrides = {}) {
   return {
@@ -176,6 +177,9 @@ let companyUnverifiedSnapshot;
   assert.equal(parsed.company, "合成科技有限公司");
   assert.equal(parsed.description, DESCRIPTION);
 
+  const shortComplete = parseZhaopinMessageDetailSnapshot(snapshot({ description: SHORT_COMPLETE_DESCRIPTION }));
+  assert.equal(shortComplete.description, SHORT_COMPLETE_DESCRIPTION, "a concise but complete real job description remains usable");
+
   const browser = fakeBrowser();
   const success = makeReader(browser);
   assert.deepStrictEqual(await read(success.reader), {
@@ -189,6 +193,19 @@ let companyUnverifiedSnapshot;
   assert.deepStrictEqual(browser.tabs, baselineTabs());
   assert.equal(browser.calls.filter(([name]) => name === "createTab").length, 1);
   assert.equal(browser.calls.some(([name]) => name === "bringToFront"), false);
+
+  const concise = fakeBrowser({ samples: [snapshot({ description: SHORT_COMPLETE_DESCRIPTION })] });
+  assert.equal((await read(makeReader(concise).reader)).description, SHORT_COMPLETE_DESCRIPTION);
+
+  for (const [selectedCompany, detailCompany] of [
+    ["外企德科数字", "外企德科数字技术有限公司"],
+    ["理程(北京)装饰", "理程（北京）装饰有限公司深圳分公司"]
+  ]) {
+    const selected = Object.freeze({ positionName: "合成软件工程师", companyName: selectedCompany });
+    const detail = fakeBrowser({ samples: [snapshot({ company: detailCompany })] });
+    assert.equal((await read(makeReader(detail, { selected }).reader, null, selected)).company, detailCompany,
+      "a verified company short name must match its legal name or branch name");
+  }
 
   const dashboardReload = fakeBrowser();
   await read(makeReader(dashboardReload, {
@@ -270,7 +287,7 @@ let companyUnverifiedSnapshot;
     assert.deepStrictEqual(badBrowser.tabs, baselineTabs());
   }
 
-  const companySelected = Object.freeze({ positionName: "合成软件工程师", companyName: "合成数字" });
+  const companySelected = Object.freeze({ positionName: "合成软件工程师", companyName: "合成智能" });
   const companyUnverified = fakeBrowser({ samples: [companyUnverifiedSnapshot] });
   await assert.rejects(
     () => read(makeReader(companyUnverified, { selected: companySelected }).reader, null, companySelected),

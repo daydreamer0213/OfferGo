@@ -239,24 +239,30 @@ function buildGuardedConversationClickExpression(target) {
     if (snapshot.risk === true) return fail("risk_control");
     if (snapshot.login === true) return fail("login_required");
     const rows = Array.from(document.querySelectorAll(".friend-content-warp"));
-    const row = rows[expected.rowIndex];
-    if (!row || !row.isConnected) return fail("row_drifted");
+    const describe = (row, rowIndex) => {
+      if (!row || !row.isConnected) return null;
+      const visible = lines(row.innerText);
+      const rowTitle = normalize(row.querySelector(".title-box")?.textContent) || visible[0] || "";
+      const preview = normalize(row.querySelector(".last-msg-text")?.textContent) || visible[visible.length - 1] || "";
+      const source = row.__vue__?.source || row.__vue__?.$props?.source || {};
+      const uniqueId = String(source.uniqueId || "").trim();
+      const conversationId = String(row.getAttribute("data-conversation-id") || row.getAttribute("data-encid") || "").trim();
+      const conversationKey = "sha256:" + sha256(canonical(["conversation", uniqueId ? "id:" + uniqueId : conversationId ? "id:" + conversationId : "label:" + rowTitle]));
+      return { row, rowIndex, visible, rowTitle, preview, source, conversationKey };
+    };
+    let actual = describe(rows[expected.rowIndex], expected.rowIndex);
+    if (actual?.conversationKey !== expected.conversationKey) {
+      const matches = rows.map(describe).filter((item) => item?.conversationKey === expected.conversationKey);
+      if (matches.length !== 1) return fail("row_drifted");
+      actual = matches[0];
+    }
+    const { row, rowIndex, rowTitle, preview, source } = actual;
     const unread = Boolean(row.querySelector(".notice-badge"));
     if (expected.operation === "unread" && !unread) return fail("no_longer_unread");
-    const visible = lines(row.innerText);
-    const rowTitle = normalize(row.querySelector(".title-box")?.textContent) || visible[0] || "";
-    const preview = normalize(row.querySelector(".last-msg-text")?.textContent) || visible[visible.length - 1] || "";
-    const actualSignature = "sha256:" + sha256(canonical([expected.rowIndex, rowTitle, preview, unread]));
-    if (actualSignature !== expected.transientSignature) return fail("row_drifted");
-    if (expected.operation === "preview_changed") {
-      const previewDigest = "sha256:" + sha256(canonical(["preview", preview]));
-      if (previewDigest !== expected.previewDigest) return fail("preview_drifted");
-    }
-    const source = row.__vue__?.source || row.__vue__?.$props?.source || {};
-    const uniqueId = String(source.uniqueId || "").trim();
-    const conversationId = String(row.getAttribute("data-conversation-id") || row.getAttribute("data-encid") || "").trim();
-    const actualConversationKey = "sha256:" + sha256(canonical(["conversation", uniqueId ? "id:" + uniqueId : conversationId ? "id:" + conversationId : "label:" + rowTitle]));
-    if (actualConversationKey !== expected.conversationKey) return fail("row_drifted");
+    const actualSignature = "sha256:" + sha256(canonical([rowIndex, rowTitle, preview, unread]));
+    if (rowIndex === expected.rowIndex && actualSignature !== expected.transientSignature) return fail("row_drifted");
+    const previewDigest = "sha256:" + sha256(canonical(["preview", preview]));
+    if (expected.previewDigest && previewDigest !== expected.previewDigest) return fail("preview_drifted");
     if (expected.identityVerified) {
       const sourceJobId = /^[A-Za-z0-9_-]{6,160}$/.test(String(source.encryptJobId || "")) ? "boss:" + source.encryptJobId : "";
       const lastMessageId = /^\\d{15}$/.test(String(source.lastMsgId || "")) ? String(source.lastMsgId) : "";
@@ -288,7 +294,7 @@ function buildGuardedConversationClickExpression(target) {
       || actualFriendKey !== expected.friendKey
       || typeof owner.handleClick !== "function") return fail("row_not_clickable");
     owner.handleClick(component.boss);
-    return { clicked: true, operation, rowIndex: expected.rowIndex };
+    return { clicked: true, operation, rowIndex };
   })()`;
 }
 
@@ -328,24 +334,20 @@ function selectedTargetMatches(snapshot, target) {
 
 function selectedTargetIdentityMatches(snapshot, target) {
   const selected = snapshot.rows.filter((row) => row.selected);
-  const operation = target.operation || "unread";
   return selected.length === 1
-    && selected[0].rowIndex === target.rowIndex
-    && selected[0].conversationKey === target.conversationKey
-    && (operation !== "unread"
-      ? selected[0].transientSignature === target.transientSignature
-      : conversationSignature({ ...selected[0], unread: true }) === target.transientSignature);
+    && selected[0].conversationKey === target.conversationKey;
 }
 
 function sameSelectedConversation(actual, expected) {
   const actualRows = actual.rows.filter((row) => row.selected);
   const expectedRows = expected.rows.filter((row) => row.selected);
+  const actualCompany = actual.companyName || actualRows[0]?.company || "";
+  const expectedCompany = expected.companyName || expectedRows[0]?.company || "";
   return actualRows.length === 1
     && expectedRows.length === 1
     && actualRows[0].conversationKey === expectedRows[0].conversationKey
-    && actualRows[0].rowIndex === expectedRows[0].rowIndex
     && actual.positionName === expected.positionName
-    && actual.companyName === expected.companyName;
+    && actualCompany === expectedCompany;
 }
 
 function trustedMessageJobTarget(raw) {
@@ -457,29 +459,51 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
         await assertCurrentBinding();
         await browser.setPageLifecycleActive(activeTabId);
         await assertCurrentBinding();
-        const guarded = normalizeGuardedClickResult(await browser.evalValue(target.tabId, buildGuardedConversationClickExpression(target)));
+        let activeTarget = target;
+        let guarded = normalizeGuardedClickResult(await browser.evalValue(target.tabId, buildGuardedConversationClickExpression(activeTarget)));
+        const canRetryDrift = guarded.reason === "row_drifted"
+          || (target.operation === "durable_unresolved" && guarded.reason === "preview_drifted");
+        if (!guarded.clicked && canRetryDrift) {
+          const refreshed = assertSafeSnapshot(normalizeBrowserSnapshot(
+            await browser.evalValue(target.tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)
+          ));
+          const matches = refreshed.rows.filter((row) => row.conversationKey === target.conversationKey);
+          const current = matches.length === 1 ? matches[0] : null;
+          const sameFriend = !target.friendKey || current?.friendKey === target.friendKey;
+          const sameJob = !target.sourceJobId || !current?.sourceJobId || current.sourceJobId === target.sourceJobId;
+          if (current && sameFriend && sameJob) {
+            activeTarget = { ...target, ...current, operation: target.operation };
+            guarded = normalizeGuardedClickResult(await browser.evalValue(
+              target.tabId,
+              buildGuardedConversationClickExpression(activeTarget)
+            ));
+          }
+        }
         if (!guarded.clicked) {
           if (guarded.reason === "no_longer_unread") return { skipped: true, reasonCode: "BOSS_MESSAGE_NO_LONGER_UNREAD" };
           throw guardedResultError(guarded.reason);
         }
-        if (guarded.rowIndex !== target.rowIndex) throw codedError("BOSS_MESSAGE_GUARD_RESULT_INVALID", "message selection guard returned an invalid result");
         for (let attempt = 0; attempt < SELECTED_CONTENT_ATTEMPTS; attempt += 1) {
           if (attempt) await sleepFn(SELECTED_CONTENT_INTERVAL_MS, signal);
           await assertCurrentBinding();
           const after = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(target.tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
-          if (selectedTargetMatches(after, target)) {
+          if (selectedTargetMatches(after, activeTarget)) {
             await assertCurrentBinding();
             const normalized = {
               ...after,
+              positionName: normalizedText(after.positionName) || normalizedText(activeTarget.positionTitle),
+              companyName: normalizedText(after.companyName) || normalizedText(activeTarget.company),
+              salary: normalizedText(after.salary) || normalizedText(activeTarget.salary),
+              city: normalizedText(after.city) || normalizedText(activeTarget.city),
               messages: after.messages.map((item) => ({
                 ...item,
-                messageKey: messageKey({ platform: "boss", threadKey: target.conversationKey, messageId: item.messageId })
+                messageKey: messageKey({ platform: "boss", threadKey: activeTarget.conversationKey, messageId: item.messageId })
               }))
             };
             activeSelectedSnapshot = normalized;
             return normalized;
           }
-          if (!selectedTargetIdentityMatches(after, target)
+          if (!selectedTargetIdentityMatches(after, activeTarget)
             && attempt + 1 >= SELECTED_IDENTITY_ATTEMPTS) break;
         }
         throw codedError("BOSS_MESSAGE_TARGET_MISMATCH", "selected conversation identity did not match");
@@ -487,7 +511,7 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
     }
   };
 
-  async function scanRows(signal, { cutoffAt = null } = {}) {
+  async function scanRows(signal, { cutoffAt = null, requiredConversationKeys = [] } = {}) {
     activeTabId = null;
     activeBinding = null;
     activeRowKeys = new Set();
@@ -505,11 +529,21 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
     throwIfAborted(signal);
     activeTabId = tabId;
     activeBinding = binding;
-    let snapshot = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
-    assertRestoredBaseline(await browser.listTabs(), binding);
+    let snapshot;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      snapshot = assertSafeSnapshot(normalizeBrowserSnapshot(await browser.evalValue(tabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)));
+      assertRestoredBaseline(await browser.listTabs(), binding);
+      if (snapshot.rows.length > 0) break;
+      if (attempt + 1 >= 60) break;
+      await sleepFn(250, signal);
+      throwIfAborted(signal);
+    }
     let endConfirmed = false;
-    if (Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(snapshot.rows, cutoffAt).complete) {
-      const expanded = await loadOlderRows(snapshot, signal, cutoffAt);
+    const required = new Set((Array.isArray(requiredConversationKeys) ? requiredConversationKeys : [])
+      .filter((key) => /^sha256:[a-f0-9]{64}$/.test(String(key || ""))));
+    if ((Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(snapshot.rows, cutoffAt).complete)
+      || !hasRequiredRows(snapshot.rows, required)) {
+      const expanded = await loadOlderRows(snapshot, signal, cutoffAt, required);
       snapshot = expanded.snapshot;
       endConfirmed = expanded.endConfirmed;
     }
@@ -519,10 +553,10 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
     activeRowKeys = new Set(rows.map((row) => `${tabId}:${row.rowIndex}:${row.conversationKey}`));
     activeUnreadTargets = new Set();
     activeSelectedSnapshot = null;
-    return { tabId, path: snapshot.path, rows, coverage: coverageForRows(rows, cutoffAt, endConfirmed) };
+    return { tabId, path: snapshot.path, rows, coverage: { ...coverageForRows(rows, cutoffAt, endConfirmed), requiredComplete: hasRequiredRows(rows, required) } };
   }
 
-  async function loadOlderRows(initial, signal, cutoffAt) {
+  async function loadOlderRows(initial, signal, cutoffAt, required = new Set()) {
     let current = initial;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       throwIfAborted(signal);
@@ -547,7 +581,7 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
       }
       const grew = next.rows.length > current.rows.length;
       current = next;
-      if (coverageForRows(current.rows, cutoffAt).complete) return { snapshot: current, endConfirmed: false };
+      if (coverageForRows(current.rows, cutoffAt).complete && hasRequiredRows(current.rows, required)) return { snapshot: current, endConfirmed: false };
       if (issued.reachedEnd === true && !grew) return { snapshot: current, endConfirmed: true };
     }
     return { snapshot: current, endConfirmed: false };
@@ -559,6 +593,12 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
     }
     return assertRestoredBaseline(await browser.listTabs(), activeBinding);
   }
+}
+
+function hasRequiredRows(rows, required) {
+  if (!(required instanceof Set) || required.size === 0) return true;
+  const found = new Set((rows || []).map((row) => row.conversationKey));
+  return [...required].every((key) => found.has(key));
 }
 
 function coverageForRows(rows, cutoffAt, endConfirmed = false) {

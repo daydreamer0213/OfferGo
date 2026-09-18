@@ -793,13 +793,23 @@ function listMessageDiscoveryCandidates(db, { profileId, platform = "boss" } = {
       WHERE observations.job_id = jobs.id
         AND context_batches.profile_id = cards.profile_id
         AND context_batches.search_plan_id = cards.plan_id
-        AND length(trim(COALESCE(observations.description, ''))) >= 120
+        AND (
+          length(trim(COALESCE(observations.description, ''))) >= CASE WHEN jobs.source = 'zhaopin' THEN 60 ELSE 120 END
+          OR (
+            json_extract(observations.analysis_json, '$.provider') = 'message-discovery-unavailable'
+            AND json_extract(observations.analysis_json, '$.semanticStatus') = 'unavailable'
+          )
+        )
         AND json_valid(observations.analysis_json) = 1
         AND (
           json_extract(observations.analysis_json, '$.semanticStatus') = 'complete'
           OR (
             json_extract(observations.analysis_json, '$.provider') = 'message-discovery-detail'
             AND json_extract(observations.analysis_json, '$.semanticStatus') = 'pending'
+          )
+          OR (
+            json_extract(observations.analysis_json, '$.provider') = 'message-discovery-unavailable'
+            AND json_extract(observations.analysis_json, '$.semanticStatus') = 'unavailable'
           )
         )
       ORDER BY observations.seen_at DESC, observations.id DESC
@@ -858,13 +868,23 @@ function findMessageDiscoveryJobContext(db, { profileId, planId, sourceId, platf
       AND jobs.source_id = ?
       AND context_batches.profile_id = ?
       AND context_batches.search_plan_id = ?
-      AND length(trim(COALESCE(context.description, ''))) >= 120
+      AND (
+        length(trim(COALESCE(context.description, ''))) >= CASE WHEN jobs.source = 'zhaopin' THEN 60 ELSE 120 END
+        OR (
+          json_extract(context.analysis_json, '$.provider') = 'message-discovery-unavailable'
+          AND json_extract(context.analysis_json, '$.semanticStatus') = 'unavailable'
+        )
+      )
       AND json_valid(context.analysis_json) = 1
       AND (
         json_extract(context.analysis_json, '$.semanticStatus') = 'complete'
         OR (
           json_extract(context.analysis_json, '$.provider') = 'message-discovery-detail'
           AND json_extract(context.analysis_json, '$.semanticStatus') = 'pending'
+        )
+        OR (
+          json_extract(context.analysis_json, '$.provider') = 'message-discovery-unavailable'
+          AND json_extract(context.analysis_json, '$.semanticStatus') = 'unavailable'
         )
       )
     ORDER BY context.seen_at DESC, context.id DESC

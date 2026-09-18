@@ -43,6 +43,7 @@ const MESSAGE_DETAIL_SNAPSHOT_EXPRESSION = `(function __bossMessageDetailSnapsho
     || root?.querySelector("[class*='job-sec-text']");
   const metadata = (window.__bossJobMetadata || (() => ({})))(decode(header?.innerText || ""));
   return {
+    unavailable: /页面不存在|职位已关闭|岗位已下线/.test(document.title + " " + (document.body?.innerText || "")),
     currentJobId: (location.pathname.match(/\\/job_detail\\/([^/?#]+)\\.html/i) || [])[1] || "",
     rootCount: roots.length,
     hasRoot: Boolean(root),
@@ -265,6 +266,9 @@ function createBossMessageDetailReader({
       if (communication?.login) throw detailError("BOSS_LOGIN_REQUIRED", "BOSS login is required");
       setPhase("read_job_snapshot");
       const detail = await browser.evalValue(tabId, MESSAGE_DETAIL_SNAPSHOT_EXPRESSION);
+      if (detail?.unavailable === true) {
+        throw detailError("BOSS_MESSAGE_DETAIL_UNAVAILABLE", "the selected BOSS job is no longer available");
+      }
       setPhase("verify_live_binding_after_job_snapshot");
       await assertLiveBinding();
       setPhase("read_job_snapshot");

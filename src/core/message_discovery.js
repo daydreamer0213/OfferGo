@@ -136,11 +136,16 @@ async function runBossMessageDiscovery({
   const previousSync = getMessageInboxSyncState(db, { profileId, platform: source });
   const firstSync = !previousSync?.lastSuccessfulAt;
   const cutoffAt = firstSync ? new Date(Date.parse(runStartedAt) - 72 * 60 * 60 * 1000).toISOString() : null;
+  const unresolvedItems = listUnresolvedMessageDiscoveryItems(db, { profileId, platform: source });
+  const unresolvedByConversation = new Map(unresolvedItems.map((item) => [item.conversationKey, item]));
   let retained = unresolvedSummary(db, profileId, source);
   let scan;
   try {
     throwIfAborted(signal);
-    scan = await reader.scanConversationRows(signal, { cutoffAt });
+    scan = await reader.scanConversationRows(signal, {
+      cutoffAt,
+      requiredConversationKeys: unresolvedItems.map((item) => item.conversationKey)
+    });
   } catch (error) {
     if (shouldInterrupt(error, signal)) throw error;
     saveMessageInboxSyncState(db, {
@@ -169,8 +174,6 @@ async function runBossMessageDiscovery({
   const counters = visibleCounters(scan.rows, observationCounts.unbound, source);
   const baselines = new Map(listPreviewStates(db, { profileId, platform: source })
     .map((state) => [state.conversationKey, state]));
-  const unresolvedByConversation = new Map(listUnresolvedMessageDiscoveryItems(db, { profileId, platform: source })
-    .map((item) => [item.conversationKey, item]));
   const coverage = normalizedCoverage(scan.coverage, scan.rows, cutoffAt);
   const syncState = saveMessageInboxSyncState(db, {
     profileId,
@@ -210,7 +213,14 @@ async function runBossMessageDiscovery({
       observedAt: now()
     });
   }
-  const queue = planned.queue.map((target) => Object.freeze({ ...target, tabId: scan.tabId }));
+  const queue = planned.queue.map((target) => {
+    const unresolved = unresolvedByConversation.get(target.conversationKey);
+    const allowEmptyTimeline = source === "zhaopin"
+      && Array.isArray(unresolved?.inboundMessages) && unresolved.inboundMessages.length > 0
+      && /^zhaopin:[A-Za-z0-9]{1,160}$/.test(String(unresolved?.sourceJobId || ""))
+      && /^\d{1,32}$/.test(String(unresolved?.lastMessageId || ""));
+    return Object.freeze({ ...target, tabId: scan.tabId, ...(allowEmptyTimeline ? { allowEmptyTimeline: true } : {}) });
+  });
 
   let results = [];
   let processed = 0;
@@ -298,6 +308,13 @@ async function runBossMessageDiscovery({
     }
 
     const selectedSnapshot = mutableSelectedSnapshot(selected);
+    restoreDurableZhaopinTimeline(timeline, db, {
+      profileId,
+      platform: source,
+      conversationKey: target.conversationKey,
+      selected: selectedSnapshot,
+      unresolved: unresolvedByConversation.get(target.conversationKey)
+    });
     const timelineObservedAt = now();
     const persistedEvents = persistSelectedTimeline(timeline, db, {
       profileId,
@@ -334,7 +351,11 @@ async function runBossMessageDiscovery({
       : { ok: false, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" };
     let contextStopCode = "";
     const canResolveContext = source === "zhaopin" || resolved.ok
-      || ["BOSS_MESSAGE_CARD_NOT_FOUND", "BOSS_MESSAGE_CARD_AMBIGUOUS"].includes(resolved.reasonCode);
+      || [
+        "BOSS_MESSAGE_CARD_NOT_FOUND",
+        "BOSS_MESSAGE_CARD_AMBIGUOUS",
+        "BOSS_MESSAGE_COMPANY_MISMATCH"
+      ].includes(resolved.reasonCode);
     if (canResolveContext && typeof resolveJobContext === "function") {
       try {
         const candidate = resolved.ok ? resolved.candidate : null;
@@ -784,8 +805,12 @@ function hasCompleteJobContext(job) {
   const analysis = job?.analysis || {};
   const trustedMessageDetail = analysis.provider === "message-discovery-detail"
     && analysis.semanticStatus === "pending";
-  return String(job?.description || "").trim().length >= 120
-    && (analysis.semanticStatus === "complete" || trustedMessageDetail);
+  const unavailableMessageDetail = analysis.provider === "message-discovery-unavailable"
+    && analysis.semanticStatus === "unavailable"
+    && analysis.sourceAvailability === "offline";
+  const minimumLength = job?.source === "zhaopin" ? 60 : 120;
+  return unavailableMessageDetail || (String(job?.description || "").trim().length >= minimumLength
+    && (analysis.semanticStatus === "complete" || trustedMessageDetail));
 }
 
 function validResolvedContext(value, canonicalThreadKey, platform) {
@@ -1431,7 +1456,7 @@ function normalizedCoverage(value, rows, cutoffAt) {
     ? new Date(source.oldestActivityAt).toISOString()
     : timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null;
   return {
-    complete: source.complete === true || cutoff === null,
+    complete: (source.complete === true || cutoff === null) && source.requiredComplete !== false,
     oldestActivityAt: oldest,
     cutoffAt: cutoff
   };
@@ -1530,6 +1555,36 @@ function messageTimelinePort(value) {
     throw discoveryError("MESSAGE_TIMELINE_PORT_REQUIRED", "message discovery requires a message timeline persistence port");
   }
   return value;
+}
+
+function restoreDurableZhaopinTimeline(port, db, { profileId, platform, conversationKey, selected, unresolved } = {}) {
+  if (platform !== "zhaopin" || !selected || !Array.isArray(selected.messages) || selected.messages.length > 0
+    || typeof port.listMessageEvents !== "function" || !Array.isArray(unresolved?.inboundMessages)
+    || !/^zhaopin:[A-Za-z0-9]{1,160}$/.test(String(unresolved?.sourceJobId || ""))
+    || !/^\d{1,32}$/.test(String(unresolved?.lastMessageId || ""))) return;
+  const events = port.listMessageEvents(db, { profileId, platform, conversationKey, limit: 500 });
+  const restored = (Array.isArray(events) ? events : []).filter((event) =>
+    /^\d{1,32}$/.test(String(event?.platformMessageId || ""))
+    && validDigest(event?.messageKey)
+    && ["friend", "myself", "platform"].includes(String(event?.direction || ""))
+    && ["text", "platform_notice", "resume_request", "interview_invitation", "contact_exchange", "media_ignored"].includes(String(event?.kind || ""))
+  ).map((event) => ({
+    messageId: String(event.platformMessageId),
+    messageKey: event.messageKey,
+    direction: event.direction,
+    contentKind: event.kind,
+    text: String(event.text || ""),
+    occurredAt: event.occurredAt || null,
+    metadata: event.metadata && typeof event.metadata === "object" ? { ...event.metadata } : {}
+  }));
+  if (!restored.length || !restored.some((event) => event.messageId === String(unresolved.lastMessageId))) return;
+  selected.messages = restored;
+  selected.sourceJobId = unresolved.sourceJobId;
+  selected.lastMessageId = unresolved.lastMessageId;
+  selected.positionName = unresolved.positionTitle || selected.positionName;
+  selected.companyName = unresolved.company || selected.companyName;
+  selected.salary = unresolved.salary || selected.salary;
+  selected.city = unresolved.city || selected.city;
 }
 
 function persistSelectedTimeline(port, db, input) {

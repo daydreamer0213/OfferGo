@@ -34,9 +34,18 @@ function createZhaopinMessageJobContextResolver({
     }
     if (!liveReaders) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "zhaopin job context is unavailable");
 
-    const detail = trustedDetail(await detailReader.readSelectedJobDetail({
-      communicationTabId: target?.tabId, selected, jobTarget, signal
-    }), jobTarget);
+    let rawDetail;
+    try {
+      rawDetail = await detailReader.readSelectedJobDetail({
+        communicationTabId: target?.tabId, selected, jobTarget, signal
+      });
+    } catch (error) {
+      if (error?.code !== "ZHAOPIN_MESSAGE_DETAIL_TARGET_UNAVAILABLE") throw error;
+      assertSameActivePlan(plan.id);
+      const unavailable = persistUnavailableContext(plan, sourceId, jobTarget, selected, target);
+      return bindContext(unavailable, target?.conversationKey, "message_discovery_unavailable", signal);
+    }
+    const detail = trustedDetail(rawDetail, jobTarget);
     throwIfAborted(signal);
     assertSameActivePlan(plan.id);
     jobTarget = await verifySelectedTarget(sourceId, selected, signal);
@@ -124,6 +133,29 @@ function createZhaopinMessageJobContextResolver({
     card = bindProgressCardThread(db, { cardId: card.id, threadKey, now: occurredAt });
     return { cardId: card.id, card, job: contextJob(context), threadKey: card.threadKey, contextSource };
   }
+
+  function persistUnavailableContext(plan, sourceId, jobTarget, selected, target) {
+    const title = boundedText(selected?.positionName || target?.positionTitle, 240);
+    const company = boundedText(selected?.companyName || target?.company, 240);
+    if (!title) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "removed zhaopin job identity is incomplete");
+    const batchId = createBatch(db, "zhaopin", "message-discovery-unavailable", "removed message job", {
+      profileId: normalizedProfileId,
+      searchPlanId: plan.id,
+      filterSnapshot: { mode: "message-discovery-unavailable", sourceId }
+    });
+    upsertJob(db, {
+      source: "zhaopin", sourceId, keyword: "message-discovery-unavailable", title, company,
+      location: boundedText(selected?.city || target?.city, 120),
+      salary: boundedText(selected?.salary || target?.salary, 120),
+      experience: "", education: "", bossActiveText: "", url: jobTarget.canonicalUrl,
+      tags: [], description: "", qualityTags: ["source_unavailable"],
+      analysis: { provider: "message-discovery-unavailable", semanticStatus: "unavailable",
+        decisionSource: "source_unavailable", recommendation: null, sourceAvailability: "offline" }
+    }, batchId);
+    const context = findContext(plan.id, sourceId);
+    if (!context?.contextComplete) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "removed zhaopin job context is unavailable");
+    return context;
+  }
 }
 
 function zhaopinSourceId(value) {
@@ -161,7 +193,7 @@ function trustedDetail(value, target) {
   if (String(value?.canonicalUrl || "") !== expectedUrl) {
     throw contextError("MESSAGE_DISCOVERY_JOB_URL_INVALID", "zhaopin job detail URL is invalid");
   }
-  if (!boundedText(value.title, 240) || !boundedText(value.company, 240) || description.length < 120) {
+  if (!boundedText(value.title, 240) || !boundedText(value.company, 240) || description.length < 60) {
     throw contextError("MESSAGE_DISCOVERY_JOB_DETAIL_INCOMPLETE", "zhaopin job detail is incomplete");
   }
   return {

@@ -91,12 +91,14 @@ const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
         richText: node.querySelector(".im-msg-rich")?.textContent ?? "",
         has346Text: Boolean(node.querySelector(".im-msg-346__text")),
         text346: node.querySelector(".im-msg-346__text")?.textContent ?? "",
+        has167Text: Boolean(node.querySelector(".im-msg-167")),
+        text167: node.querySelector(".im-msg-167")?.textContent ?? "",
         resumeTitle: text(node.querySelector(".im-msg-11-wrap")?.textContent),
         resumeRefuse: text(node.querySelector(".im-msg-11__btn--refuse")?.textContent),
         resumeAgree: text(node.querySelector(".im-msg-11__btn--agree")?.textContent),
         tip: node.classList.contains("im-message--tip"),
-        hasFallback: Boolean(node.querySelector(".im-msg-255-fallback")),
-        fallbackText: node.querySelector(".im-msg-255-fallback")?.textContent ?? ""
+        hasFallback: Boolean(node.querySelector("[class^='im-msg-'][class$='-fallback']")),
+        fallbackText: node.querySelector("[class^='im-msg-'][class$='-fallback']")?.textContent ?? ""
       }];
     });
     const active = mainVm.activeSession;
@@ -328,10 +330,12 @@ function parseMessages(messages, raw) {
     }
     const validId = validMessageId(item?.idServer);
     const messageId = validId ? String(item.idServer) : "";
-    const platformNotice255 = item?.type === "custom" && item?.cardType === "255" && item?.tip === true && item?.hasFallback === true && typeof item?.fallbackText === "string";
+    const platformNoticeFallback = item?.type === "custom" && item?.tip === true && item?.hasFallback === true && typeof item?.fallbackText === "string";
     const platformNotice346 = item?.type === "custom" && item?.cardType === "346" && item?.tip === true
       && item?.has346Text === true && text(item?.text346) === text(item?.body);
-    const platformNotice = platformNotice255 || platformNotice346;
+    const trustedText167 = item?.type === "custom" && item?.cardType === "167"
+      && item?.has167Text === true && text(item?.text167) === text(item?.body);
+    const platformNotice = platformNoticeFallback || platformNotice346;
     const direction = platformNotice ? "platform"
       : item?.flow === "in" && item?.fromMe === false && numericId(item?.from) === raw.peerPartnerId ? "friend"
         : item?.flow === "out" && item?.fromMe === true && numericId(item?.from) === raw.userId ? "myself" : "unknown";
@@ -344,10 +348,13 @@ function parseMessages(messages, raw) {
       } else if (item.type === "custom" && ["131", "303"].includes(item.cardType) && item.hasRichText === true && typeof item.richText === "string" && text(item.richText) === text(item.body)) {
         contentKind = "text";
         messageText = text(item.richText);
+      } else if (trustedText167) {
+        contentKind = "text";
+        messageText = text(item.text167);
       } else if (item.type === "custom" && item.cardType === "11" && /简历/.test(item.resumeTitle || "") && item.resumeRefuse === "拒绝" && item.resumeAgree === "同意") {
         contentKind = "resume_request";
         messageText = "HR 邀请你发送简历";
-      } else if (platformNotice255) {
+      } else if (platformNoticeFallback) {
         contentKind = "platform_notice";
         messageText = text(item.fallbackText);
       } else if (platformNotice346) {
@@ -486,7 +493,7 @@ function createZhaopinMessageReader({
   }
 
   return {
-    scanConversationRows(signal, { cutoffAt = null } = {}) {
+    scanConversationRows(signal, { cutoffAt = null, requiredConversationKeys = [] } = {}) {
       return exclusive(async () => {
         binding = null;
         targetMap = new Map();
@@ -535,8 +542,11 @@ function createZhaopinMessageReader({
         }
         let endConfirmed = false;
         let initialRows = snapshot.rows.map((row) => rowFromSnapshot(snapshot, row));
-        if (Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(initialRows, cutoffAt).complete) {
-          const expanded = await loadOlderRows(snapshot, signal, cutoffAt);
+        const required = new Set((Array.isArray(requiredConversationKeys) ? requiredConversationKeys : [])
+          .filter((key) => /^sha256:[a-f0-9]{64}$/.test(String(key || ""))));
+        if ((Number.isFinite(Date.parse(String(cutoffAt || ""))) && !coverageForRows(initialRows, cutoffAt).complete)
+          || !hasRequiredRows(initialRows, required)) {
+          const expanded = await loadOlderRows(snapshot, signal, cutoffAt, required);
           snapshot = expanded.snapshot;
           endConfirmed = expanded.endConfirmed;
           initialRows = snapshot.rows.map((row) => rowFromSnapshot(snapshot, row));
@@ -545,7 +555,13 @@ function createZhaopinMessageReader({
         const rows = internalRows.map(publicRow);
         binding = next;
         targetMap = new Map(internalRows.map((row) => [targetKey(next.tabId, row), row]));
-        return Object.freeze({ tabId: next.tabId, platform: "zhaopin", scope: "loaded_conversations", rows: Object.freeze(rows), coverage: coverageForRows(rows, cutoffAt, endConfirmed) });
+        return Object.freeze({
+          tabId: next.tabId,
+          platform: "zhaopin",
+          scope: "loaded_conversations",
+          rows: Object.freeze(rows),
+          coverage: { ...coverageForRows(rows, cutoffAt, endConfirmed), requiredComplete: hasRequiredRows(rows, required) }
+        });
       });
     },
     assertActiveBindings(signal) { return exclusive(() => assertActiveBindings(signal)); },
@@ -598,6 +614,7 @@ function createZhaopinMessageReader({
         if (!guarded || guarded.clicked !== true) throw guardedSelectionError(guarded?.reason);
         const deadline = nowFn() + conversationTimeoutMs;
         let identityMismatch = false;
+        let stableEmptySamples = 0;
         while (true) {
           throwIfAborted(signal);
           await assertActiveBindings(signal);
@@ -610,6 +627,15 @@ function createZhaopinMessageReader({
             activeSelectedTarget = { ...internal, ...internal._raw };
             activeSelectedResult = selectedResult(snapshot, activeSelectedTarget);
             return activeSelectedResult;
+          } else if (!snapshot.timelineLoading && target.allowEmptyTimeline === true) {
+            stableEmptySamples += 1;
+            if (stableEmptySamples >= 3) {
+              activeSelectedTarget = { ...internal, ...internal._raw };
+              activeSelectedResult = selectedResult(snapshot, activeSelectedTarget);
+              return activeSelectedResult;
+            }
+          } else {
+            stableEmptySamples = 0;
           }
           if (nowFn() >= deadline) {
             if (identityMismatch) throw codedError("ZHAOPIN_MESSAGE_TARGET_MISMATCH", "zhaopin selected conversation changed");
@@ -621,7 +647,7 @@ function createZhaopinMessageReader({
     }
   };
 
-  async function loadOlderRows(initial, signal, cutoffAt) {
+  async function loadOlderRows(initial, signal, cutoffAt, required = new Set()) {
     let current = initial;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       await assertActiveBindings(signal);
@@ -645,11 +671,17 @@ function createZhaopinMessageReader({
       const grew = next.rows.length > current.rows.length;
       current = next;
       const rows = current.rows.map((row) => rowFromSnapshot(current, row));
-      if (coverageForRows(rows, cutoffAt).complete) return { snapshot: current, endConfirmed: false };
+      if (coverageForRows(rows, cutoffAt).complete && hasRequiredRows(rows, required)) return { snapshot: current, endConfirmed: false };
       if (issued.reachedEnd === true && !grew) return { snapshot: current, endConfirmed: true };
     }
     return { snapshot: current, endConfirmed: false };
   }
+}
+
+function hasRequiredRows(rows, required) {
+  if (!(required instanceof Set) || required.size === 0) return true;
+  const found = new Set((rows || []).map((row) => row.conversationKey));
+  return [...required].every((key) => found.has(key));
 }
 
 function coverageForRows(rows, cutoffAt, endConfirmed = false) {

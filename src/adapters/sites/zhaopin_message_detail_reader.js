@@ -215,7 +215,7 @@ function parseZhaopinMessageDetailSnapshot(raw) {
   const title = normalizedText(raw?.title);
   const company = normalizedText(raw?.company);
   const description = normalizedText(raw?.description).slice(0, 12000);
-  if (!/^[A-Za-z0-9]{1,160}$/.test(sourceId) || !title || !company || description.length < 120) {
+  if (!/^[A-Za-z0-9]{1,160}$/.test(sourceId) || !title || !company || description.length < 60) {
     throw detailError("ZHAOPIN_MESSAGE_DETAIL_INCOMPLETE", "zhaopin job detail is incomplete");
   }
   return {
@@ -350,12 +350,21 @@ function sameText(left, right) {
 }
 
 function compatibleCompany(left, right) {
-  const first = normalizedText(left).toLowerCase();
-  const second = normalizedText(right).toLowerCase();
+  const first = companyCore(left);
+  const second = companyCore(right);
   if (!first || !second) return false;
   if (first === second) return true;
-  const suffixes = ["有限责任公司", "股份有限公司", "有限公司"];
-  return suffixes.some((suffix) => first === `${second}${suffix}` || second === `${first}${suffix}`);
+  const longer = first.length > second.length ? first : second;
+  const shorter = first.length > second.length ? second : first;
+  return longer.startsWith(shorter) && new Set(["技术", "数字技术", "科技"]).has(longer.slice(shorter.length));
+}
+
+function companyCore(value) {
+  return normalizedText(value).toLowerCase()
+    .replace(/[（]/g, "(").replace(/[）]/g, ")")
+    .replace(/[\s·•.,，。]/g, "")
+    .replace(/(?:有限责任公司|股份有限公司|有限公司)(?:[\u4e00-\u9fa5a-z0-9]+分公司)?$/i, "")
+    .replace(/[\u4e00-\u9fa5a-z0-9]+分公司$/i, "");
 }
 
 function isTargetDetailTab(tab, target) {

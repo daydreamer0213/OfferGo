@@ -411,6 +411,7 @@ async function read(reader, signal = null) {
     [{ detailTabId: 42, returnedTabId: 42 }, "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND"],
     [{ listedUrl: "https://www.zhipin.com/web/geek/chat" }, "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND"],
     [{ communicationSnapshot: communication({ title: "Different job" }) }, "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH"],
+    [{ detailSnapshot: messageDetail({ unavailable: true, rootCount: 0, hasRoot: false, description: "" }) }, "BOSS_MESSAGE_DETAIL_UNAVAILABLE"],
     [{ communicationSnapshot: communication({ risk: true }) }, "BOSS_RISK_CONTROL"],
     [{ communicationSnapshot: communication({ login: true }) }, "BOSS_LOGIN_REQUIRED"],
     [{ detailSnapshot: messageDetail({ description: "too short" }) }, "BOSS_MESSAGE_DETAIL_INCOMPLETE"],
