@@ -15,6 +15,7 @@ const MESSAGE_INTENTS = new Set([
   "information_request",
   "information_update",
   "general_communication",
+  "rejection",
   "manual_review"
 ]);
 const MANUAL_ONLY_CATEGORIES = new Set([
@@ -74,6 +75,7 @@ function validateMessageReply(value, context = {}) {
   const safeStage = safeReplyStage(normalized);
   const messages = MANUAL_ONLY_CATEGORIES.has(normalized.messageCategory)
     || normalized.messageIntent === "manual_review"
+    || normalized.messageIntent === "rejection"
     ? []
     : normalized.messageIntent === "interview_invitation"
       ? [SAFE_INTERVIEW_DRAFT]
@@ -236,6 +238,7 @@ function safeMessageSummary(messageIntent, messageCategory) {
   if (messageIntent === "interest_check") return "对方正在询问候选人是否愿意了解或继续沟通该岗位。";
   if (messageIntent === "information_update") return "对方正在补充当前岗位、项目或流程信息。";
   if (messageIntent === "general_communication") return "对方正在进行普通沟通。";
+  if (messageIntent === "rejection") return "招聘方已明确结束本次机会。";
   if (messageIntent === "manual_review") return "这条消息暂时无法可靠判断，需要人工确认。";
   return {
     project_fact: "对方正在确认候选人的项目经历。",
@@ -250,11 +253,13 @@ function safeMessageSummary(messageIntent, messageCategory) {
 
 function safeReplyStage(normalized) {
   if (normalized.messageIntent === "interview_invitation") return "interview_invited";
+  if (normalized.messageIntent === "rejection") return "rejected";
   if (normalized.messageIntent === "manual_review") return "needs_user_action";
   return normalized.messages.length ? "reply_ready" : "needs_user_action";
 }
 
 function safeReplyNextAction(stage) {
+  if (stage === "rejected") return "";
   return {
     contact_started: "Review communication status",
     waiting_reply: "Wait for recruiter reply",

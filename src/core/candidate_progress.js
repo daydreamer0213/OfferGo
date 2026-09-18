@@ -28,6 +28,7 @@ const MESSAGE_INTENTS = new Set([
   "information_request",
   "information_update",
   "general_communication",
+  "rejection",
   "manual_review"
 ]);
 
@@ -58,7 +59,7 @@ const ALLOWED_METADATA_KEYS = new Set([
   "messageGroupKey"
 ]);
 const TRANSITIONS = new Map([
-  ["contact_started", new Set(["waiting_reply", "needs_user_action", "reply_ready", "interview_invited", "closed"])],
+  ["contact_started", new Set(["waiting_reply", "needs_user_action", "reply_ready", "interview_invited", "rejected", "closed"])],
   ["waiting_reply", new Set(["needs_user_action", "reply_ready", "interview_invited", "resume_submitted", "rejected", "closed"])],
   ["needs_user_action", new Set(["waiting_reply", "reply_ready", "interview_invited", "interview_scheduled", "resume_submitted", "rejected", "closed"])],
   ["reply_ready", new Set(["waiting_reply", "needs_user_action", "interview_invited", "rejected", "closed"])],

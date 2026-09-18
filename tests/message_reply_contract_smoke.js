@@ -6,6 +6,7 @@ const {
   createMessageReplyAnalyzer
 } = require("../src/core/message_reply_analyzer");
 const { MockModelAdapter } = require("../src/adapters/models/mock");
+const { isExplicitRecruiterRejection } = require("../src/core/message_routing_policy");
 
 const NOW = "2026-08-01T08:00:00.000Z";
 const validFacts = [
@@ -39,6 +40,19 @@ function safeReply(overrides = {}) {
 }
 
 async function main() {
+  assert.strictEqual(isExplicitRecruiterRejection([
+    { direction: "friend", text: "不好意思，不太合适哦" }
+  ]), true);
+  assert.strictEqual(isExplicitRecruiterRejection([
+    { direction: "friend", text: "目前暂不考虑了，祝你求职顺利" }
+  ]), true);
+  assert.strictEqual(isExplicitRecruiterRejection([
+    { direction: "friend", text: "这个时间不太合适，可以换明天吗" }
+  ]), false);
+  assert.strictEqual(isExplicitRecruiterRejection([
+    { direction: "myself", text: "我觉得岗位不太合适" }
+  ]), false);
+
   const validated = validateMessageReply(safeReply(), { facts: validFacts, now: NOW });
   assert.strictEqual(validated.messageIntent, "information_request");
   assert.deepStrictEqual(validated.progressUpdate, {
@@ -117,6 +131,20 @@ async function main() {
   }), { facts: validFacts, now: NOW });
   assert.deepStrictEqual(interview.messages, ["您好，感谢邀请，请问面试时间和形式如何安排？"]);
   assert.strictEqual(interview.progressUpdate.stage, "interview_invited");
+  const rejection = validateMessageReply(safeReply({
+    messageIntent: "rejection",
+    messageCategory: "other",
+    messageSummary: "不好意思，不太合适哦",
+    requiredFactKeys: [],
+    usedFactKeys: [],
+    responseItems: [],
+    coverage: [],
+    messages: ["好的，谢谢。"]
+  }), { facts: [], now: NOW });
+  assert.strictEqual(rejection.messageIntent, "rejection");
+  assert.strictEqual(rejection.messageSummary, "招聘方已明确结束本次机会。");
+  assert.deepStrictEqual(rejection.messages, []);
+  assert.deepStrictEqual(rejection.progressUpdate, { stage: "rejected", nextAction: "" });
   const interviewWithoutProviderDraft = validateMessageReply(safeReply({
     messageIntent: "interview_invitation",
     messageCategory: "other",

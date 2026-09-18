@@ -73,6 +73,7 @@ async function main() {
   await previewChannelSmoke();
   await unsupportedPreviewSmoke();
   await classificationOutcomeSmoke();
+  await semanticRejectionSmoke();
   await readerStopSmoke();
   await terminalAfterProcessedSmoke();
   await abortAfterClassificationSmoke();
@@ -1392,6 +1393,35 @@ async function messageSelectionSmoke() {
   assert.strictEqual(summary.status, "completed");
   assert.strictEqual(summary.processed, 1);
   assert.strictEqual(modelCalls, 1);
+}
+
+async function semanticRejectionSmoke() {
+  const fixture = createFixture({ suffix: "semantic-rejection", title: "Semantic Rejection Engineer" });
+  const summary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([selectedConversation({
+      title: fixture.title,
+      messageId: "123456789012889",
+      messages: [message("friend", "123456789012889", "经过综合评估，本次先不继续推进。")]
+    })]),
+    classifyMessageGroup: async () => classification({
+      messageIntent: "rejection",
+      messageCategory: "other",
+      messageSummary: "招聘方已明确结束本次机会。",
+      stage: "rejected",
+      messages: []
+    }),
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.status, "completed");
+  assert.strictEqual(summary.results[0].stage, "rejected");
+  assert.deepStrictEqual(summary.results[0].drafts, []);
+  assert.strictEqual(getProgressCardForJob(db, {
+    profileId: fixture.profileId,
+    jobId: fixture.jobId
+  }).stage, "rejected");
 }
 
 async function timelineBeforeJobContextSmoke() {

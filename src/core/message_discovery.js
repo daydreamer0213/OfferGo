@@ -534,7 +534,8 @@ async function runBossMessageDiscovery({
               ? { draftQualityRevision: qualityInput.draftQualityRevision }
               : {})
           }, { signal }),
-          shouldAssess: (result) => !result?.missingFact
+          shouldAssess: (result) => result?.messageIntent !== "rejection"
+            && !result?.missingFact
             && !MANUAL_ONLY_CATEGORIES.has(String(result?.messageCategory || "")),
           ...buildMessageDraftQualityContext(db, {
             profileId,
