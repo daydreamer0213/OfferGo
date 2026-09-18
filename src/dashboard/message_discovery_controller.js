@@ -758,9 +758,19 @@ function createMessageDiscoveryController(deps = {}) {
   function durableStatus(profileId) {
     const drafts = listOpenMessageReplyDrafts(db, { profileId, limit: 500 })
       .filter((draft) => draft.messageIntent !== "follow_up");
-    const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 }).filter(context =>
-      drafts.some(draft => draft.cardId === context.cardId && draft.messageGroupKey === context.messageGroupKey)
-      || !messageReplyDraftGroupExists(db, { profileId, cardId: context.cardId, messageGroupKey: context.messageGroupKey }));
+    const inboxIdentities = new Set(listMessageInboxItems(db, { profileId })
+      .map((item) => `${Number(item.cardId)}\0${item.conversationKey}`));
+    const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 }).filter(context => {
+      if (drafts.some(draft => draft.cardId === context.cardId && draft.messageGroupKey === context.messageGroupKey)) return true;
+      if (messageReplyDraftGroupExists(db, { profileId, cardId: context.cardId, messageGroupKey: context.messageGroupKey })) return false;
+      if (inboxIdentities.has(`${Number(context.cardId)}\0${context.conversationKey}`)) return true;
+      const classification = getMessageGroupClassification(db, {
+        profileId,
+        cardId: context.cardId,
+        messageGroupKey: context.messageGroupKey
+      });
+      return !classification?.missingFactKey || Boolean(classification.missingFactQuestion);
+    });
     const unresolved = listUnresolvedMessageDiscoveryItems(db, { profileId, platform: null });
     if (!drafts.length && !inboundContexts.length && unresolved.length === 0) return emptyStatus(profileId);
     const byCard = new Map();

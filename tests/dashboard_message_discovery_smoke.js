@@ -2435,8 +2435,51 @@ async function durableMissingFactRecoverySmoke() {
       latestExcerpt: "何时方便我们电话或者视频沟通下吗？", actionGroup: "needs_action",
       actionCode: "reply_required", reasonCode: "", observedAt: now
     });
+
+    const orphanJobId = Number(durableDb.prepare(`INSERT INTO jobs(
+      source, source_id, title, company, salary, description, analysis_json, first_seen_at, last_seen_at
+    ) VALUES ('boss', 'orphan-missing-fact-job', '旧岗位', '旧公司', '10-15K', ?, ?, ?, ?)`)
+      .run("完整岗位职责和任职要求。".repeat(30), JSON.stringify({
+        semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
+        roleSummary: "历史岗位"
+      }), now, now).lastInsertRowid);
+    const orphanCard = ensureProgressCard(durableDb, {
+      profileId, planId, jobId: orphanJobId, source: "boss", stage: "contact_started", occurredAt: now
+    });
+    const orphanGroupKey = `sha256:${"c".repeat(64)}`;
+    recordDiscoveredMessageGroupClassification(durableDb, {
+      cardId: orphanCard.id,
+      platform: "boss",
+      threadKey: `sha256:${"d".repeat(64)}`,
+      messageKeys: [`sha256:${"9".repeat(64)}`],
+      messageGroupKey: orphanGroupKey,
+      messageIntent: "information_request",
+      messageCategory: "qualification",
+      missingFactKey: "latest_resume",
+      missingFactQuestion: "",
+      manualActions: [],
+      progressUpdate: { stage: "needs_user_action" },
+      occurredAt: now
+    });
+    saveMessageInboundContext(durableDb, {
+      profileId,
+      cardId: orphanCard.id,
+      messageGroupKey: orphanGroupKey,
+      conversationKey: `sha256:${"7".repeat(64)}`,
+      sourceJobId: "boss:orphan-missing-fact-job",
+      lastMessageId: "987654321098765",
+      messageIntent: "information_request",
+      messageCategory: "qualification",
+      inboundMessages: [{ kind: "text", text: "09-02 10:10方便分享最新简历吗？" }],
+      manualActions: [],
+      createdAt: now,
+      updatedAt: now
+    });
     const controller = createMessageDiscoveryController({ db: durableDb });
-    const result = controller.pageState(profileId).results[0];
+    const pageState = controller.pageState(profileId);
+    assert.strictEqual(pageState.results.length, 1,
+      "a missing-fact context without a current inbox record must not return as actionable after restart");
+    const result = pageState.results[0];
     assert.strictEqual(result.missingFactKey, "availability_date",
       "restart must retain the exact user fact needed by a message without a draft");
     assert.strictEqual(result.missingFactQuestion, "你什么时候方便电话或视频沟通？",
