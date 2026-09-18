@@ -663,6 +663,8 @@ function messageDiscoveryRecoveryMessages() {
     MESSAGE_DISCOVERY_LEASE_BUSY: "BOSS 正被另一项任务使用。请等待或停止冲突任务后重试。",
     MESSAGE_DISCOVERY_LEASE_LOST: "BOSS 任务控制权已丢失。请等待或停止冲突任务后重试。",
     MESSAGE_DISCOVERY_MODEL_NOT_READY: "深度分析模型尚未就绪。请到模型设置测试深度分析模型。",
+    MESSAGE_DISCOVERY_MODEL_QUOTA_EXHAUSTED: "消息已全部读取，但模型服务额度不足，仍有岗位分析尚未完成。请到“模型与设置”检查服务额度后重新同步；已完成结果不会丢失。",
+    MESSAGE_DISCOVERY_JOB_ANALYSIS_FAILED: "消息已全部读取，但模型暂时未能完成部分岗位分析。未完成项已保留，请稍后重新同步；已完成结果不会丢失。",
     BOSS_MESSAGE_CARD_NOT_FOUND: verifyIdentity,
     BOSS_MESSAGE_CARD_AMBIGUOUS: verifyIdentity,
     BOSS_MESSAGE_SALARY_MISMATCH: verifyIdentity,

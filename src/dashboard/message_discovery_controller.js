@@ -310,11 +310,21 @@ function createMessageDiscoveryController(deps = {}) {
         }
       }
       for (const entry of run.platformRuns) if (entry.status === "pending") entry.status = "stopped";
-      await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal);
+      const analysisIssue = await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal);
       const issue = run.platformRuns.find(entry => entry.status === "needs_user_action" || entry.status === "stopped");
       const stopped = abortController.signal.aborted || run.platformRuns.some(entry => entry.status === "stopped");
-      updateRun(run, { ...run, status: stopped ? "stopped" : issue || !run.platformRuns.some(entry => entry.status === "completed") ? "needs_user_action" : "completed",
-        reasonCode: abortController.signal.aborted ? messageDiscoveryErrorCode(abortController.signal.reason) : issue?.reasonCode || "" });
+      const status = stopped
+        ? "stopped"
+        : analysisIssue || issue || !run.platformRuns.some(entry => entry.status === "completed")
+          ? "needs_user_action"
+          : "completed";
+      updateRun(run, {
+        ...run,
+        status,
+        reasonCode: abortController.signal.aborted
+          ? messageDiscoveryErrorCode(abortController.signal.reason)
+          : analysisIssue?.reasonCode || issue?.reasonCode || ""
+      });
     }).catch((error) => {
       const code = messageDiscoveryErrorCode(error);
       if (code === "BOSS_RISK_CONTROL") recordRiskOnce(run, "boss", code, error?.message);
@@ -860,7 +870,7 @@ function createMessageDiscoveryController(deps = {}) {
   }
 
   async function repairDurableJobAnalyses(run, profileId, modelConfig, signal) {
-    if (typeof analyzeMessageJob !== "function" || signal?.aborted) return;
+    if (typeof analyzeMessageJob !== "function" || signal?.aborted) return null;
     const actionableCards = new Set(listMessageInboxItems(db, { profileId })
       .filter((item) => item.actionGroup === "needs_action" && Number(item.cardId) > 0)
       .map((item) => Number(item.cardId)));
@@ -868,7 +878,7 @@ function createMessageDiscoveryController(deps = {}) {
       .filter((result) => !result.contextComplete && actionableCards.has(Number(result.cardId)));
     const repaired = new Set();
     for (const result of pending) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) return null;
       const row = getDurableMessageDraftContext(db, { profileId, cardId: result.cardId });
       const activePlan = getActiveSearchPlan(db, profileId);
       const planId = Number(row?.source === "zhaopin" ? activePlan?.id : row?.plan_id);
@@ -884,14 +894,18 @@ function createMessageDiscoveryController(deps = {}) {
           deps: { modelReady: true, root, modelConfig, logger, signal, messageContextAnalysis: true }
         });
       } catch (error) {
+        const reasonCode = messageDiscoveryAnalysisFailureCode(error);
         logger?.warn?.("message_discovery_durable_analysis_repair_failed", {
           profileId,
           jobId,
-          code: messageDiscoveryErrorCode(error)
+          code: messageDiscoveryErrorCode(error),
+          reasonCode
         });
+        return { reasonCode, jobId };
       }
     }
     if (!signal?.aborted) setDetailPhase(run, "analyzing_messages", now);
+    return null;
   }
 
   function clearExpiredRun(profileId) {
@@ -1124,6 +1138,12 @@ function safeCode(value) {
 
 function messageDiscoveryErrorCode(error) {
   return safeCode(error?.code) || "MESSAGE_DISCOVERY_FAILED";
+}
+
+function messageDiscoveryAnalysisFailureCode(error) {
+  return messageDiscoveryErrorCode(error) === "HTTP_402"
+    ? "MESSAGE_DISCOVERY_MODEL_QUOTA_EXHAUSTED"
+    : "MESSAGE_DISCOVERY_JOB_ANALYSIS_FAILED";
 }
 
 function parseArray(value) {

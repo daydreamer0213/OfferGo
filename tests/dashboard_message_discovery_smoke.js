@@ -2531,8 +2531,7 @@ async function pendingDurableAnalysisRepairSmoke() {
       positionTitle: "待修复岗位", company: "修复公司", latestExcerpt: "介绍一下项目经验",
       actionGroup: "needs_action", actionCode: "reply_required", reasonCode: "", observedAt: now
     });
-    let analysisCalls = 0;
-    const controller = createMessageDiscoveryController({
+    const createRepairController = (analyzeMessageJob) => createMessageDiscoveryController({
       db: durableDb,
       modelReady: () => true,
       getModelConfig: () => ({ provider: "mock", providers: { mock: {} } }),
@@ -2552,17 +2551,19 @@ async function pendingDurableAnalysisRepairSmoke() {
         counters: { visible: 0, newReplies: 0, currentRead: 0, currentDelivered: 0, unbound: 0 },
         results: []
       }),
-      analyzeMessageJob: async ({ input }) => {
-        analysisCalls += 1;
-        assert.deepStrictEqual(input, { planId, jobId });
-        durableDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?").run(JSON.stringify({
-          semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
-          roleSummary: "完成修复后的岗位理解"
-        }), jobId);
-        return { completed: 1, failed: 0 };
-      },
+      analyzeMessageJob,
       setInterval: () => 1,
       clearInterval() {}
+    });
+    let analysisCalls = 0;
+    const controller = createRepairController(async ({ input }) => {
+      analysisCalls += 1;
+      assert.deepStrictEqual(input, { planId, jobId });
+      durableDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?").run(JSON.stringify({
+        semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
+        roleSummary: "完成修复后的岗位理解"
+      }), jobId);
+      return { completed: 1, failed: 0 };
     });
     controller.start(profileId);
     await waitFor(() => controller.status(profileId).status !== "running");
@@ -2571,6 +2572,27 @@ async function pendingDurableAnalysisRepairSmoke() {
     assert.strictEqual(repaired.contextComplete, true);
     assert.strictEqual(repaired.drafts[0].text, "这是已经生成的回复草稿。");
     await controller.close();
+
+    durableDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?").run(JSON.stringify({
+      semanticStatus: "pending", recommendation: "analysis_pending"
+    }), jobId);
+    let failedAnalysisCalls = 0;
+    const failingController = createRepairController(async () => {
+      failedAnalysisCalls += 1;
+      throw Object.assign(new Error("Model request failed (HTTP 402)."), { code: "HTTP_402" });
+    });
+    failingController.start(profileId);
+    await waitFor(() => failingController.status(profileId).status !== "running");
+    const failedStatus = failingController.status(profileId);
+    assert.strictEqual(failedAnalysisCalls, 1,
+      "a model-wide repair failure must stop the batch instead of repeatedly spending requests");
+    assert.strictEqual(failedStatus.status, "needs_user_action",
+      "an incomplete durable analysis repair must not be reported as completed");
+    assert.strictEqual(failedStatus.reasonCode, "MESSAGE_DISCOVERY_MODEL_QUOTA_EXHAUSTED");
+    assert.match(messageDiscoveryReasonText(failedStatus.reasonCode), /模型服务额度不足/);
+    assert(failingController.pageState(profileId).results.every((result) => result.contextComplete !== true),
+      "an analysis failure must keep the incomplete result unavailable to the action inbox renderer");
+    await failingController.close();
   } finally {
     durableDb.close();
   }
