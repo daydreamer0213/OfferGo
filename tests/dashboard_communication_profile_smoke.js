@@ -304,9 +304,14 @@ function createFixture() {
     profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at
   ) VALUES (?, '测试方案', '{}', NULL, 1, ?, ?)`).run(profileId, now, now).lastInsertRowid);
   const jobId = Number(db.prepare(`INSERT INTO jobs(
-    source, source_id, title, company, salary, description, first_seen_at, last_seen_at
-  ) VALUES ('boss', 'learning-job', 'AI 应用专员', '测试公司', '15-25K', '负责 AI 应用落地。', ?, ?)`)
-    .run(now, now).lastInsertRowid);
+    source, source_id, title, company, salary, description, analysis_json, first_seen_at, last_seen_at
+  ) VALUES ('boss', 'learning-job', 'AI 应用专员', '测试公司', '15-25K', ?, ?, ?, ?)`)
+    .run(
+      "负责完整 AI 应用落地流程、业务需求梳理、方案实现、质量验证和跨团队协作，并持续跟踪上线效果与改进建议。".repeat(3),
+      JSON.stringify({ semanticStatus: "complete", provider: "fixture-model", recommendation: "consider" }),
+      now,
+      now
+    ).lastInsertRowid);
   const cardId = Number(db.prepare(`INSERT INTO candidate_progress_cards(
     profile_id, plan_id, job_id, source, stage, next_action, last_event_at, created_at, updated_at
   ) VALUES (?, ?, ?, 'boss', 'reply_ready', 'Review draft', ?, ?, ?)`)
