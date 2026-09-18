@@ -774,6 +774,11 @@ function createMessageDiscoveryController(deps = {}) {
     const activePlan = getActiveSearchPlan(db, profileId);
     const contextPlanId = row.source === "zhaopin" ? activePlan?.id : row.plan_id;
     const trusted = platform && contextPlanId ? findMessageDiscoveryJobContext(db, { profileId, planId: contextPlanId, sourceId: row.source_id, platform }) : null;
+    const rowAnalysis = parseObject(row.analysis_json);
+    const contextComplete = hasPublishableMessageContext(trusted)
+      || (row.source === "boss"
+        && String(row.description || "").trim().length >= 120
+        && hasPublishableMessageAnalysis(rowAnalysis));
     const job = projectMessageDecisionCard(trusted || (row.source === "zhaopin" ? { title: row.title, company: row.company, salary: row.salary } : {
       title: row.title,
       company: row.company,
@@ -781,7 +786,7 @@ function createMessageDiscoveryController(deps = {}) {
       description: row.description,
       qualityTags: parseArray(row.quality_tags_json),
       risks: parseArray(row.risks_json),
-      analysis: parseObject(row.analysis_json)
+      analysis: rowAnalysis
     }));
     return {
       cardId: Number(row.card_id),
@@ -798,7 +803,7 @@ function createMessageDiscoveryController(deps = {}) {
       manualActionReason: "",
       manualActions: sanitizeManualActions(activeContexts.flatMap((context) => context.manualActions), row.source),
       contextSource: "local_cache",
-      contextComplete: row.source === "zhaopin" ? trusted?.contextComplete === true : Boolean(row.description),
+      contextComplete,
       job,
       inboundMessages,
       drafts: safeDrafts,
@@ -1137,6 +1142,7 @@ function presentFreshness(platform, run, sync, now) {
   if (run?.status === "running" || run?.status === "pending") {
     return { platform, label: "正在同步", detail: `${platformLabel} 正在读取最新消息`, state: "running" };
   }
+
   if (run?.status === "not_connected") {
     return { platform, label: "尚未连接", detail: `请保持 ${platformLabel} 消息页打开`, state: "needs_user_action" };
   }
@@ -1161,6 +1167,16 @@ function presentFreshness(platform, run, sync, now) {
     ? Math.max(0, Math.floor((now.getTime() - successfulAt) / 60000)) : null;
   const label = minutes === null ? "已同步" : minutes < 1 ? "刚刚同步" : minutes < 60 ? `${minutes} 分钟前同步` : "已同步";
   return { platform, label, detail: "最近 3 天范围已确认", state: "complete" };
+}
+
+function hasPublishableMessageContext(value) {
+  return value?.contextComplete === true && hasPublishableMessageAnalysis(value.analysis);
+}
+
+function hasPublishableMessageAnalysis(value) {
+  const semanticStatus = String(value?.semanticStatus || "");
+  return semanticStatus === "complete"
+    || (semanticStatus === "unavailable" && value?.provider === "message-discovery-unavailable");
 }
 
 function messageContentWasCaptured(reasonCode) {

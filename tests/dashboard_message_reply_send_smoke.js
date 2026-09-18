@@ -70,6 +70,11 @@ const NOW = "2026-08-29T06:00:00.000Z";
     await listen(server);
     const base = `http://127.0.0.1:${server.address().port}`;
 
+    const incompleteFixture = seedDrafts(db, 1, "dashboard-incomplete-reply", false);
+    const incompletePage = await request(base, `/messages?profileId=${incompleteFixture.profileId}`);
+    assert.doesNotMatch(incompletePage.body, /data-send-single="\d+"/,
+      "a historical draft without complete job analysis must stay out of the action inbox");
+
     const page = await request(base, `/messages?profileId=${fixture.profileId}`);
     assert.equal(page.status, 200);
     assert.match(page.body, /消息发现与回复/);
@@ -368,7 +373,7 @@ async function clientSavesBeforeConfirmSmoke(html, drafts) {
   assert(fields.every((field) => field.disabled), "confirmed editors must be disabled");
 }
 
-function seedDrafts(db, count, prefix = "dashboard-reply") {
+function seedDrafts(db, count, prefix = "dashboard-reply", complete = true) {
   const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
     display_name, profile_json, source_hash, created_at, updated_at
   ) VALUES ('Dashboard reply fixture', '{}', NULL, ?, ?)`).run(NOW, NOW).lastInsertRowid);
@@ -379,9 +384,18 @@ function seedDrafts(db, count, prefix = "dashboard-reply") {
   for (let index = 0; index < count; index += 1) {
     const suffix = index + 1;
     const jobId = Number(db.prepare(`INSERT INTO jobs(
-      source, source_id, title, company, salary, first_seen_at, last_seen_at
-    ) VALUES ('boss', ?, ?, '示例公司', '15-20K', ?, ?)`).run(
-      `boss:${prefix}-${suffix}`, `内容运营 ${suffix}`, NOW, NOW
+      source, source_id, title, company, salary, description, analysis_json, first_seen_at, last_seen_at
+    ) VALUES ('boss', ?, ?, '示例公司', '15-20K', ?, ?, ?, ?)`).run(
+      `boss:${prefix}-${suffix}`,
+      `内容运营 ${suffix}`,
+      complete
+        ? "负责完整内容运营流程、业务需求梳理、内容策划、发布验证和跨团队协作，并持续跟踪上线效果与改进建议。".repeat(3)
+        : "只有一小段岗位资料",
+      JSON.stringify(complete
+        ? { semanticStatus: "complete", provider: "fixture-model", recommendation: "consider" }
+        : { semanticStatus: "pending", provider: "message-discovery-detail" }),
+      NOW,
+      NOW
     ).lastInsertRowid);
     const cardId = Number(db.prepare(`INSERT INTO candidate_progress_cards(
       profile_id, plan_id, job_id, source, stage, next_action, last_event_at, created_at, updated_at

@@ -17,7 +17,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'unified
 function seed(db, platform, profileId, planId, manual = false, suffix = manual ? '8' : '9', messages = ['好的，可以沟通。']) {
   const sourceId = platform + ':CCL1234567890J0012345678' + suffix;
   const storedId = platform === 'zhaopin' ? zhaopinJobIdentity('https://www.zhaopin.com/jobdetail/CCL1234567890J0012345678' + suffix + '.htm').sourceId : sourceId;
-  const description = '负责完整岗位流程、业务需求梳理、方案实现、质量验证与跨团队协作，并持续跟进上线后的效果与改进。'.repeat(2);
+  const description = '负责完整岗位流程、业务需求梳理、方案实现、质量验证与跨团队协作，并持续跟进上线后的效果与改进。'.repeat(3);
   const analysis = JSON.stringify({ semanticStatus: 'complete', provider: 'fixture-model', recommendation: 'consider', roleSummary: '负责完整岗位流程和交付', fitSummary: '候选人的项目经验与岗位要求已经完成比对' });
   const jobId = Number(db.prepare("INSERT INTO jobs(source,source_id,title,company,description,analysis_json,first_seen_at,last_seen_at) VALUES (?,?,'同名岗位','合成公司',?,?,?,?)").run(platform, storedId, description, analysis, NOW, NOW).lastInsertRowid);
   if (platform === 'zhaopin') {
