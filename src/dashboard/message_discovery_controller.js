@@ -276,7 +276,17 @@ function createMessageDiscoveryController(deps = {}) {
               return actualDetailReader.readSelectedJobDetail(input);
             }
           };
-          const resolverOptions = { platform, db, profileId, modelConfig, root, logger, analyzeJob: analyzeMessageJob };
+          const analyzeJobWithStatus = typeof analyzeMessageJob === "function"
+            ? async (...args) => {
+              setDetailPhase(run, "analyzing_job", now);
+              try {
+                return await analyzeMessageJob(...args);
+              } finally {
+                if (!abortController.signal.aborted) setDetailPhase(run, "analyzing_messages", now);
+              }
+            }
+            : analyzeMessageJob;
+          const resolverOptions = { platform, db, profileId, modelConfig, root, logger, analyzeJob: analyzeJobWithStatus };
           if (platform !== "zhaopin" || typeof reader.readSelectedJobTarget === "function") {
             resolverOptions.messageReader = reader;
             resolverOptions.detailReader = detailReader;

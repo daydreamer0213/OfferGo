@@ -396,7 +396,7 @@ function messageDiscoveryClientScript(scriptState) {
     const draftWrites=new Map();
     const messageFor=(code)=>initial.recoveryMessages[String(code||"")]||initial.recoveryMessages.default;
     const show=(code)=>{if(reloadPending)return;feedback.textContent=messageFor(code);feedback.dataset.errorCode=String(code||"");};
-    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const counts=queued?"已发现 "+queued+" 条消息。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
+    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const counts=queued?"已发现 "+queued+" 条消息。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_job")return counts+"岗位资料已读取，正在完成岗位分析；首次分析可能需要几分钟。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
     const requestReload=(resetSelection=false)=>{if(resetSelection)try{localStorage.removeItem(selectedKeyStorage);}catch{}reloadPending=true;location.reload();};
     const setPending=(pending)=>{feedback.setAttribute("aria-busy",String(pending));if(pending)feedback.textContent="正在处理，请稍候。";for(const form of forms)for(const button of form.querySelectorAll("button")){if(!("discoveryBaseDisabled" in button.dataset))button.dataset.discoveryBaseDisabled=String(button.disabled);button.disabled=pending||button.dataset.discoveryBaseDisabled==="true";}};
     const read=async(response)=>{const text=await response.text();try{return {json:true,body:JSON.parse(text)}}catch{return {json:false,body:null}}};
@@ -572,6 +572,7 @@ function messageDiscoveryPhaseText(status) {
       : "正在按安全节奏冷却，稍后继续。";
   }
   if (status?.phase === "reading_detail") return "正在后台读取当前岗位详情，不会抢占前台。";
+  if (status?.phase === "analyzing_job") return "岗位资料已读取，正在完成岗位分析；首次分析可能需要几分钟。";
   if (status?.phase === "analyzing_messages") return "正在整理消息并生成回复建议，模型响应可能需要一些时间。";
   if (status?.phase === "reading_messages") return "正在加载并读取消息，可随时安全停止。";
   if (status?.phase === "starting") return "正在准备只读消息检查。";

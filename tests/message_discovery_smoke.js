@@ -10,6 +10,7 @@ const {
   completeMessageReplyDraft,
   getMessageReplyDraft,
   listOpenMessageReplyDrafts,
+  saveMessageInboundContext,
   listMessageInboundContexts,
   listCandidateAnswerMemories,
   withdrawCandidateAnswerMemory,
@@ -78,6 +79,7 @@ async function main() {
   await semanticRejectionSmoke();
   await directRejectionRoutingSmoke();
   await historicalRejectionReconciliationSmoke();
+  await historicalInboundContextRejectionReconciliationSmoke();
   await readerStopSmoke();
   await terminalAfterProcessedSmoke();
   await abortAfterClassificationSmoke();
@@ -1592,6 +1594,133 @@ async function historicalRejectionReconciliationSmoke() {
   assert.strictEqual(rejectionEvents(), 1);
   await run();
   assert.strictEqual(rejectionEvents(), 1);
+}
+
+async function historicalInboundContextRejectionReconciliationSmoke() {
+  const fixture = createFixture({ suffix: "historical-context-rejection", title: "Historical Context Rejection Engineer" });
+  const conversationKey = safeDigest(["historical-context-rejection-conversation"]);
+  const rejectedMessageId = "123456789012892";
+  const messageGroupKey = safeDigest(["historical-context-rejection-group"]);
+  recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: fixture.card.id,
+    jobId: fixture.jobId,
+    messageGroupKey,
+    questionSummary: "历史误判消息",
+    messageIntent: "information_update",
+    messageCategory: "other",
+    messages: ["历史误生成草稿"],
+    createdAt: NOW
+  });
+  saveMessageInboundContext(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    cardId: fixture.card.id,
+    messageGroupKey,
+    conversationKey,
+    sourceJobId: "boss:job-historical-context-rejection",
+    lastMessageId: rejectedMessageId,
+    messageIntent: "information_update",
+    messageCategory: "other",
+    inboundMessages: [
+      { kind: "text", text: "Hi，在线求简历~" },
+      { kind: "text", text: "感谢你的关注，很遗憾岗位与你不是很匹配，祝早日找到心仪的工作" }
+    ],
+    manualActions: [{ kind: "resume_request" }],
+    createdAt: NOW,
+    updatedAt: NOW
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    sourceJobId: "boss:job-historical-context-rejection",
+    jobId: fixture.jobId,
+    cardId: fixture.card.id,
+    lastMessageId: rejectedMessageId,
+    lastActivityAt: NOW,
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: fixture.title,
+    company: fixture.company,
+    latestExcerpt: "HR 邀请你发送简历",
+    actionGroup: "needs_action",
+    actionCode: "reply",
+    observedAt: NOW
+  });
+  const run = () => runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([]),
+    classifyMessageGroup: async () => { throw new Error("durable context repair must not call the model"); },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  await run();
+  assert.strictEqual(getProgressCardForJob(db, {
+    profileId: fixture.profileId,
+    jobId: fixture.jobId
+  }).stage, "rejected");
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey
+  }).actionGroup, "done");
+  const rejectionEvents = () => listProgressEvents(db, fixture.card.id)
+    .filter((event) => event.type === "recruiter_rejected").length;
+  assert.strictEqual(rejectionEvents(), 1);
+  await run();
+  assert.strictEqual(rejectionEvents(), 1);
+
+  const reopened = createFixture({ suffix: "historical-context-reopened", title: "Historical Context Reopened Engineer" });
+  const reopenedConversationKey = safeDigest(["historical-context-reopened-conversation"]);
+  saveMessageInboundContext(db, {
+    profileId: reopened.profileId,
+    platform: "boss",
+    cardId: reopened.card.id,
+    messageGroupKey: safeDigest(["historical-context-reopened-old-group"]),
+    conversationKey: reopenedConversationKey,
+    sourceJobId: "boss:job-historical-context-reopened",
+    lastMessageId: "123456789012893",
+    messageIntent: "rejection",
+    messageCategory: "other",
+    inboundMessages: [{ kind: "text", text: "不好意思，不太合适哦" }],
+    manualActions: [],
+    createdAt: NOW,
+    updatedAt: NOW
+  });
+  upsertMessageInboxItem(db, {
+    profileId: reopened.profileId,
+    platform: "boss",
+    conversationKey: reopenedConversationKey,
+    sourceJobId: "boss:job-historical-context-reopened",
+    jobId: reopened.jobId,
+    cardId: reopened.card.id,
+    lastMessageId: "123456789012894",
+    lastActivityAt: NOW,
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: reopened.title,
+    company: reopened.company,
+    latestExcerpt: "后来还有一个新问题",
+    actionGroup: "needs_action",
+    actionCode: "reply",
+    observedAt: NOW
+  });
+  await runBossMessageDiscovery({
+    db,
+    profileId: reopened.profileId,
+    reader: fakeReader([]),
+    classifyMessageGroup: async () => { throw new Error("stale rejection context must not call the model"); },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: reopened.profileId,
+    platform: "boss",
+    conversationKey: reopenedConversationKey
+  }).actionGroup, "needs_action", "an older rejection must not hide a later reopened conversation");
 }
 
 async function timelineBeforeJobContextSmoke() {

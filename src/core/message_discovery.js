@@ -13,6 +13,7 @@ const {
   recordMessageReplyDrafts,
   closeMessageReplyDrafts,
   saveMessageInboundContext,
+  listMessageInboundContexts,
   immediateTransaction
 } = require("./storage");
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
@@ -1563,6 +1564,8 @@ function reconcileTerminalMessageHistory({
   messageInbox,
   timeline
 }) {
+  const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 })
+    .filter((context) => context.platform === platform);
   const items = messageInbox.listMessageInboxItems(db, { profileId })
     .filter((item) => item.platform === platform && item.actionGroup !== "done");
   for (const item of items) {
@@ -1576,7 +1579,15 @@ function reconcileTerminalMessageHistory({
       event.direction === "friend"
       && event.kind === "text"
       && isExplicitRecruiterRejection([event]));
-    if (!rejectionEvent) continue;
+    const rejectionContext = rejectionEvent ? null : inboundContexts.find((context) =>
+      context.conversationKey === item.conversationKey
+      && Number(context.cardId) === Number(item.cardId)
+      && context.lastMessageId === item.lastMessageId
+      && isExplicitRecruiterRejection(context.inboundMessages.map((message) => ({
+        direction: "friend",
+        text: message.text
+      }))));
+    if (!rejectionEvent && !rejectionContext) continue;
     const occurredAt = now();
     immediateTransaction(db, () => {
       if (Number.isSafeInteger(Number(item.cardId)) && Number(item.cardId) > 0) {
@@ -1584,7 +1595,7 @@ function reconcileTerminalMessageHistory({
           cardId: Number(item.cardId),
           platform,
           threadKey: item.conversationKey,
-          messageKey: rejectionEvent.messageKey,
+          messageKey: rejectionEvent?.messageKey || rejectionContext.messageGroupKey,
           occurredAt
         });
         closeMessageReplyDrafts(db, {

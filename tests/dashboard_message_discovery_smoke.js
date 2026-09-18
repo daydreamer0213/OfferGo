@@ -1264,6 +1264,9 @@ async function controllerBrowserAuthoritySmoke() {
   let analyzerModelConfig = null;
   let runResolver = null;
   let cleanupBrowser = null;
+  let analysisPhaseDuringCall = "";
+  let analysisPhaseAfterCall = "";
+  let analysisInput = null;
   const controllerDb = {
     prepare() {
       return { get: () => ({ id: 1 }) };
@@ -1292,6 +1295,11 @@ async function controllerBrowserAuthoritySmoke() {
       contextResolverInput = input;
       return resolverSentinel;
     },
+    analyzeMessageJob: async (input) => {
+      analysisInput = input;
+      analysisPhaseDuringCall = controller.status(1).phase;
+      return { analyzed: true };
+    },
     getModelConfig: () => ({
       provider: "openai_compatible",
       providers: { openai_compatible: { timeoutMs: 120000, maxRetries: 3, maxTokens: 4096 } }
@@ -1302,6 +1310,8 @@ async function controllerBrowserAuthoritySmoke() {
     },
     runDiscovery: async (input) => {
       runResolver = input.resolveJobContext;
+      await contextResolverInput.analyzeJob({ marker: "job-analysis" });
+      analysisPhaseAfterCall = controller.status(1).phase;
       return {
         status: "completed",
         queued: 0,
@@ -1334,6 +1344,11 @@ async function controllerBrowserAuthoritySmoke() {
   assert.strictEqual(contextResolverInput.messageReader, readerSentinel);
   assert.strictEqual(contextResolverInput.detailReader, detailReaderSentinel);
   assert.strictEqual(runResolver, resolverSentinel);
+  assert.deepStrictEqual(analysisInput, { marker: "job-analysis" });
+  assert.strictEqual(analysisPhaseDuringCall, "analyzing_job",
+    "job model work must be visible instead of looking like a stalled detail read");
+  assert.strictEqual(analysisPhaseAfterCall, "analyzing_messages",
+    "message analysis must become the next visible phase after job analysis");
   assert.strictEqual(analyzerModelConfig.providers.openai_compatible.timeoutMs, 60000,
     "message drafting must cap one model attempt so a single conversation cannot look frozen indefinitely");
   assert.strictEqual(analyzerModelConfig.providers.openai_compatible.maxRetries, 0,
@@ -2226,6 +2241,19 @@ async function messageDiscoveryPollingSmoke(markup) {
   await analyzingPoll.runTimer(0);
   assert.match(analyzingPoll.feedback.textContent, /整理消息并生成回复建议/,
     "model work must be described accurately instead of looking like a stalled browser read");
+
+  const analyzingJobPoll = runMessageDiscoveryClient(markup, {
+    response: jsonResponse(200, {
+      status: "running",
+      phase: "analyzing_job",
+      queued: 19,
+      processed: 5,
+      unresolved: 5
+    })
+  }, { status: "running" });
+  await analyzingJobPoll.runTimer(0);
+  assert.match(analyzingJobPoll.feedback.textContent, /正在完成岗位分析/,
+    "first-time job analysis must have an explicit progress message");
 
   const terminalPoll = runMessageDiscoveryClient(markup, {
     response: jsonResponse(200, { status: "needs_user_action" })
