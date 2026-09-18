@@ -537,6 +537,8 @@ async function main() {
     observedAt: "2026-07-31T01:05:00.000Z",
     events: [
       { messageKey: `sha256:${"1".repeat(64)}`, platformMessageId: "101", direction: "platform", kind: "platform_notice", text: "已建立沟通", occurredAt: "2026-07-31T01:00:00.000Z", metadata: {} },
+      { messageKey: `sha256:${"a".repeat(64)}`, platformMessageId: "101-a", direction: "platform", kind: "platform_notice", text: "你与该职位竞争者PK情况共人投递，你超过竞争者优秀竞争者会，建议你查看详细分析", occurredAt: "2026-07-31T01:00:10.000Z", metadata: { noticeKind: "competition_promotion" } },
+      { messageKey: `sha256:${"b".repeat(64)}`, platformMessageId: "101-b", direction: "platform", kind: "platform_notice", text: "你与该职位竞争者PK情况 查看详细分析", occurredAt: "2026-07-31T01:00:20.000Z", metadata: {} },
       { messageKey: `sha256:${"2".repeat(64)}`, platformMessageId: "102", direction: "friend", kind: "text", text: OPEN_HR_TEXT, occurredAt: "2026-07-31T01:01:00.000Z", metadata: {} },
       { messageKey: `sha256:${"3".repeat(64)}`, platformMessageId: "103", direction: "myself", kind: "text", text: "您好，可以进一步了解。", occurredAt: "2026-07-31T01:02:00.000Z", metadata: {} },
       { messageKey: `sha256:${"4".repeat(64)}`, platformMessageId: "104", direction: "friend", kind: "media_ignored", text: "", occurredAt: "2026-07-31T01:03:00.000Z", metadata: { mediaKind: "voice" } },
@@ -626,6 +628,9 @@ async function main() {
   ]) assert(understoodPage.body.includes(expected), `missing user decision content: ${expected}`);
   assert.match(understoodPage.body, /class="message-bubble message-bubble--friend"/);
   assert.match(understoodPage.body, /class="message-bubble message-bubble--self"/);
+  assert.match(understoodPage.body, /已建立沟通/);
+  assert.doesNotMatch(understoodPage.body, /竞争者PK情况/);
+  assert.doesNotMatch(understoodPage.body, /查看详细分析/);
   assert.match(understoodPage.body, /收到一条语音消息，本版本暂不读取内容/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);

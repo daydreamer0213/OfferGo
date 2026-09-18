@@ -200,11 +200,21 @@ assert.deepStrictEqual(
   ["platform_notice", "text", "resume_request"],
   "verified platform, plain-text, and resume-card structures must route independently"
 );
+assert.deepStrictEqual(
+  structuredSnapshot.messages[0].metadata,
+  { noticeKind: "competition_promotion" },
+  "the verified competition card must carry a stable promotion subtype"
+);
 const structuredBrowserSnapshot = runBrowserSnapshot(structuredDocument, "https://www.zhipin.com/web/geek/chat");
 assert.deepStrictEqual(
   Array.from(structuredBrowserSnapshot.messages, (item) => item.contentKind),
   ["platform_notice", "text", "resume_request"],
   "browser and Node snapshots must agree on verified structured message kinds"
+);
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(structuredBrowserSnapshot.messages[0].metadata)),
+  { noticeKind: "competition_promotion" },
+  "browser and Node snapshots must agree on the promotion subtype"
 );
 
 const missingIconDocument = createStructuredBossMessageDomFixture({ resumeIcon: false });

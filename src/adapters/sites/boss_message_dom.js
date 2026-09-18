@@ -133,6 +133,9 @@ function messageContentKind(item) {
 }
 
 function messageMetadata(item, contentKind) {
+  if (contentKind === "platform_notice" && isCompetitionNoticeCard(item.querySelector(".message-card-wrap"))) {
+    return { noticeKind: "competition_promotion" };
+  }
   if (contentKind !== "media_ignored") return {};
   return { mediaKind: item.matches(".item-voice") ? "voice" : item.matches(".item-image") ? "image" : "attachment" };
 }
@@ -336,7 +339,7 @@ const BOSS_MESSAGE_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
   const resumeRequestCard = (card) => { const title = text(card.querySelector(".message-card-top-title.message-card-top-text")?.textContent); const actions = buttonTexts(card.querySelector(".message-card-buttons")); return card.matches(".boss-green") && Boolean(card.querySelector(".dialog-icon.resume")) && /附件简历/.test(title) && /是否同意/.test(title) && actions.length === 2 && actions[0] === "拒绝" && actions[1] === "同意"; };
   const competitionNoticeCard = (card) => { const title = text(card.querySelector(".message-card-top-title")?.textContent); const buttons = Array.from(card.querySelectorAll(".card-btn")); return card.matches(".blue") && !card.querySelector(".dialog-icon.resume") && /竞争/.test(title) && buttons.length === 1 && buttons[0].matches(".one-btn") && text(buttons[0].textContent) === "查看详细分析"; };
   const contentKind = (item) => { if (item.matches(".item-voice, .item-image, .item-attachment")) return "media_ignored"; const card = item.querySelector(".message-card-wrap"); if (!card) return "text"; if (resumeRequestCard(card)) return "resume_request"; if (competitionNoticeCard(card)) return "platform_notice"; return "unknown_card"; };
-  const metadata = (item, kind) => kind !== "media_ignored" ? {} : ({ mediaKind: item.matches(".item-voice") ? "voice" : item.matches(".item-image") ? "image" : "attachment" });
+  const metadata = (item, kind) => kind === "platform_notice" && competitionNoticeCard(item.querySelector(".message-card-wrap")) ? ({ noticeKind: "competition_promotion" }) : kind !== "media_ignored" ? {} : ({ mediaKind: item.matches(".item-voice") ? "voice" : item.matches(".item-image") ? "image" : "attachment" });
   const signature = (row) => "sha256:" + sha256(canonical([row.rowIndex, row.recruiterLabel, row.previewText, row.unread]));
   const visible = (element) => { const rect = element.getBoundingClientRect(); const style = getComputedStyle(element); return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"; };
   window.__bossMessageSnapshot = function() {

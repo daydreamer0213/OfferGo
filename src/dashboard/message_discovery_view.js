@@ -3,6 +3,7 @@ const { listUnresolvedMessageDiscoveryItems } = require("../core/message_preview
 const { listIncomingContacts } = require("../application/funnel_analysis");
 const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
 const { findExactIdentityCandidates } = require("../application/message_discovery/queries");
+const { isCompetitionPromotion } = require("../core/message_routing_policy");
 
 function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageActionController = null, messageReplyActionToken = "", helpers }) {
   const {
@@ -336,7 +337,7 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
 
 function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageActions = [] }) {
   if (!Array.isArray(events) || !events.length) return "";
-  const bubbles = events.map((event) => {
+  const bubbles = events.filter((event) => !isCompetitionPromotion(event)).map((event) => {
     const side = event.direction === "myself" ? "self" : event.direction === "friend" ? "friend" : "platform";
     const content = event.kind === "media_ignored"
       ? mediaPlaceholder(event.metadata?.mediaKind)
@@ -347,6 +348,7 @@ function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageAct
     const controls = event.kind === "resume_request" ? renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) : "";
     return `<article class="message-bubble message-bubble--${side}" data-message-key="${escapeAttr(event.messageKey || "")}"><p>${escapeHtml(content)}</p>${time}${controls}</article>`;
   }).join("");
+  if (!bubbles) return "";
   return `<section class="message-timeline" aria-label="完整会话"><h3>完整会话</h3><div class="message-timeline-body">${bubbles}</div></section>`;
 }
 
