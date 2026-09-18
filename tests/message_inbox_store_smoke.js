@@ -9,7 +9,8 @@ const {
   listMessageInboxItems,
   getMessageInboxSyncState,
   saveMessageInboxSyncState,
-  markMessageInboxItemDone
+  markMessageInboxItemDone,
+  deleteMessageInboxItem
 } = require("../src/storage/message_inbox_store");
 const { buildMessageInboxPageState } = require("../src/dashboard/message_discovery_controller");
 
@@ -94,6 +95,21 @@ try {
   item = listMessageInboxItems(db, { profileId })[0];
   assert.equal(item.actionGroup, "done");
   assert.equal(item.resolvedAt, "2026-09-17T02:12:00.000Z");
+
+  const internalConversationKey = digest("conversation-internal-retry");
+  upsertMessageInboxItem(db, {
+    ...input,
+    conversationKey: internalConversationKey,
+    actionGroup: "needs_review",
+    actionCode: "retry",
+    observedAt: "2026-09-17T02:12:30.000Z"
+  });
+  assert.equal(deleteMessageInboxItem(db, {
+    profileId,
+    platform: "boss",
+    conversationKey: internalConversationKey
+  }), true);
+  assert.equal(listMessageInboxItems(db, { profileId }).some((row) => row.conversationKey === internalConversationKey), false);
 
   upsertMessageInboxItem(db, {
     ...input,

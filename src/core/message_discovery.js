@@ -10,12 +10,14 @@ const {
   listCandidateFacts,
   listCandidateAnswerMemories,
   recordMessageReplyDrafts,
+  closeMessageReplyDrafts,
   saveMessageInboundContext,
   immediateTransaction
 } = require("./storage");
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
 const { MANUAL_ONLY_CATEGORIES } = require("./message_reply_contract");
+const { isExplicitRecruiterRejection } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
@@ -122,7 +124,8 @@ async function runBossMessageDiscovery({
     upsertMessageInboxItem,
     getMessageInboxSyncState,
     saveMessageInboxSyncState,
-    markMessageInboxItemDone
+    markMessageInboxItemDone,
+    deleteMessageInboxItem
   } = messageInboxPort(messageInbox);
   const timeline = messageTimelinePort(messageTimeline);
   const source = discoveryPlatform(platform);
@@ -251,7 +254,7 @@ async function runBossMessageDiscovery({
         observedAt: now(),
         identity: {}
       });
-      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now(), upsertMessageInboxItem });
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: code, observedAt: now(), deleteMessageInboxItem });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: code });
       retained = unresolvedSummary(db, profileId, source);
       emitStatus(safeStatus("running", {
@@ -278,7 +281,7 @@ async function runBossMessageDiscovery({
           previewDigest: target.previewDigest, previewKind: target.previewKind,
           reasonCode: localReasonCode, observedAt: now(), identity: {}
         });
-        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now(), upsertMessageInboxItem });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: localReasonCode, observedAt: now(), deleteMessageInboxItem });
         continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: localReasonCode });
         retained = unresolvedSummary(db, profileId, source);
         emitStatus(safeStatus("running", {
@@ -324,7 +327,7 @@ async function runBossMessageDiscovery({
       messages: selectedSnapshot?.messages
     });
     const latestPersisted = persistedEvents.at(-1) || null;
-    if (latestPersisted) {
+    if (latestPersisted?.direction === "myself") {
       upsertMessageInboxItem(db, {
         profileId,
         platform: source,
@@ -333,12 +336,12 @@ async function runBossMessageDiscovery({
         lastMessageId: latestPersisted.platformMessageId,
         lastActivityAt: latestPersisted.occurredAt || target.lastActivityAt || timelineObservedAt,
         lastDirection: latestPersisted.direction,
-        unread: latestPersisted.direction === "friend",
+        unread: false,
         positionTitle: selectedSnapshot?.positionName || target.positionTitle || "",
         company: selectedSnapshot?.companyName || target.company || "",
         latestExcerpt: timelineExcerpt(latestPersisted),
-        actionGroup: latestPersisted.direction === "myself" ? "waiting" : "needs_action",
-        actionCode: latestPersisted.direction === "myself" ? "wait" : "reply",
+        actionGroup: "waiting",
+        actionCode: "wait",
         reasonCode: "",
         observedAt: timelineObservedAt
       });
@@ -349,6 +352,67 @@ async function runBossMessageDiscovery({
     let resolved = source === "boss"
       ? resolveUniqueCandidate(candidates, selectedSnapshot, target.conversationKey, target.sourceJobId)
       : { ok: false, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" };
+    if (isExplicitRecruiterRejection(selectedSnapshot?.messages)) {
+      const directIncoming = resolved.ok
+        ? selectUnprocessedFriendMessageGroup(db, resolved.cardId, selectedSnapshot, resolved.threadKey, source)
+        : null;
+      const inboundMessages = directIncoming?.ok ? inboundDisplayMessages(directIncoming) : [];
+      const occurredAt = now();
+      const terminal = immediateTransaction(db, () => {
+        let card = null;
+        if (resolved.ok && directIncoming?.ok) {
+          const classification = rejectionClassification();
+          card = recordDiscoveredMessageGroupClassification(db, {
+            cardId: resolved.cardId,
+            platform: source,
+            threadKey: resolved.threadKey,
+            legacyThreadKey: resolved.legacyThreadKey || "",
+            messageKeys: directIncoming.newMessageKeys,
+            messageGroupKey: directIncoming.messageGroupKey,
+            messageIntent: classification.messageIntent,
+            messageCategory: classification.messageCategory,
+            missingFactKey: "",
+            manualActions: [],
+            progressUpdate: classification.progressUpdate,
+            occurredAt
+          });
+          closeMessageReplyDrafts(db, { profileId, cardId: card.id, closedAt: occurredAt });
+        }
+        commitBaseline(db, profileId, target, source, occurredAt);
+        clearUnresolvedMessageDiscoveryItem(db, {
+          profileId,
+          platform: source,
+          conversationKey: target.conversationKey
+        });
+        upsertMessageInboxItem(db, {
+          profileId,
+          platform: source,
+          conversationKey: target.conversationKey,
+          sourceJobId: selectedTarget.sourceJobId,
+          jobId: card?.jobId || null,
+          cardId: card?.id || null,
+          lastMessageId: selectedTarget.lastMessageId,
+          lastActivityAt: target.lastActivityAt || occurredAt,
+          lastDirection: "friend",
+          unread: false,
+          positionTitle: resolved.ok ? resolved.job.title : selectedSnapshot?.positionName || target.positionTitle || "",
+          company: resolved.ok ? resolved.job.company : selectedSnapshot?.companyName || target.company || "",
+          latestExcerpt: inboundMessages.at(-1)?.text || target.previewText || "",
+          actionGroup: "done",
+          actionCode: "",
+          reasonCode: "",
+          observedAt: occurredAt
+        });
+        return card;
+      });
+      clearSelectedSnapshot(selectedSnapshot);
+      retained = unresolvedSummary(db, profileId, source);
+      processed += 1;
+      counters.newReplies += 1;
+      if (terminal) results = results.filter((item) => item.cardId !== terminal.id);
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+      continue;
+    }
     let contextStopCode = "";
     const canResolveContext = source === "zhaopin" || resolved.ok
       || [
@@ -406,7 +470,7 @@ async function runBossMessageDiscovery({
         reasonCode: resolved.reasonCode,
         observedAt: now(),
         selected: identity,
-        upsertMessageInboxItem
+        deleteMessageInboxItem
       });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: resolved.reasonCode });
       retained = unresolvedSummary(db, profileId, source);
@@ -484,7 +548,7 @@ async function runBossMessageDiscovery({
             sourceJobId: selectedTarget.sourceJobId, lastMessageId: selectedTarget.lastMessageId
           } : {})
         });
-        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: incoming.reasonCode, observedAt: now(), selected: selectedIdentityValue, upsertMessageInboxItem });
+        recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: incoming.reasonCode, observedAt: now(), selected: selectedIdentityValue, deleteMessageInboxItem });
         continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: incoming.reasonCode });
         retained = unresolvedSummary(db, profileId, source);
         await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
@@ -601,7 +665,9 @@ async function runBossMessageDiscovery({
       progressUpdate: classification.progressUpdate,
       occurredAt: now()
       });
-      const drafts = recordMessageReplyDrafts(db, {
+      const rejection = classification.messageIntent === "rejection";
+      if (rejection) closeMessageReplyDrafts(db, { profileId, cardId: card.id, closedAt: now() });
+      const drafts = rejection ? [] : recordMessageReplyDrafts(db, {
       profileId,
       cardId: card.id,
       jobId: card.jobId,
@@ -635,11 +701,30 @@ async function runBossMessageDiscovery({
       platform: source,
       conversationKey: target.conversationKey
     });
+      upsertMessageInboxItem(db, {
+        profileId,
+        platform: source,
+        conversationKey: target.conversationKey,
+        sourceJobId: selectedTarget.sourceJobId,
+        jobId: card.jobId,
+        cardId: card.id,
+        lastMessageId: selectedTarget.lastMessageId,
+        lastActivityAt: target.lastActivityAt || now(),
+        lastDirection: "friend",
+        unread: !rejection,
+        positionTitle: resolved.job.title,
+        company: resolved.job.company,
+        latestExcerpt: inboundMessages.at(-1)?.text || target.previewText || "",
+        actionGroup: rejection ? "done" : "needs_action",
+        actionCode: rejection ? "" : "reply",
+        reasonCode: "",
+        observedAt: now()
+      });
       return { card, drafts };
     });
     if (!committed) {
       retained = unresolvedSummary(db, profileId, source);
-      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", observedAt: now(), selected: capturedIdentity, upsertMessageInboxItem });
+      recordLocalInboxFailure(db, { profileId, platform: source, target, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", observedAt: now(), selected: capturedIdentity, deleteMessageInboxItem });
       continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" });
       await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
       continue;
@@ -649,35 +734,18 @@ async function runBossMessageDiscovery({
     results = results.filter((item) => item.cardId !== card.id);
     processed += 1;
     counters.newReplies += 1;
-    results.push(safeResult(
-      card,
-      classification,
-      resolved.job,
-      resolved.contextSource || resolved.job.contextSource || "",
-      drafts,
-      inboundMessages,
-      source,
-      selectedTarget.sourceJobId
-    ));
-    upsertMessageInboxItem(db, {
-      profileId,
-      platform: source,
-      conversationKey: target.conversationKey,
-      sourceJobId: selectedTarget.sourceJobId,
-      jobId: card.jobId,
-      cardId: card.id,
-      lastMessageId: selectedTarget.lastMessageId,
-      lastActivityAt: target.lastActivityAt || now(),
-      lastDirection: "friend",
-      unread: true,
-      positionTitle: resolved.job.title,
-      company: resolved.job.company,
-      latestExcerpt: inboundMessages.at(-1)?.text || target.previewText || "",
-      actionGroup: "needs_action",
-      actionCode: "reply",
-      reasonCode: "",
-      observedAt: now()
-    });
+    if (classification.messageIntent !== "rejection") {
+      results.push(safeResult(
+        card,
+        classification,
+        resolved.job,
+        resolved.contextSource || resolved.job.contextSource || "",
+        drafts,
+        inboundMessages,
+        source,
+        selectedTarget.sourceJobId
+      ));
+    }
     emitStatus(
       safeStatus("running", { queued: queue.length, processed, results, unresolved: retained.count, reasonCode: retained.reasonCode, counters }),
       logger,
@@ -1375,6 +1443,17 @@ function safeStatus(status, value = {}) {
   };
 }
 
+function rejectionClassification() {
+  return {
+    messageIntent: "rejection",
+    messageCategory: "other",
+    messageSummary: "招聘方已明确结束本次机会。",
+    missingFact: null,
+    messages: [],
+    progressUpdate: { stage: "rejected", nextAction: "" }
+  };
+}
+
 function safeCoverage(value = {}) {
   return {
     complete: value?.complete === true,
@@ -1486,8 +1565,7 @@ function projectScannedInboxRows(db, {
       || (Number.isFinite(cutoffMillis) && activityMillis >= cutoffMillis));
     const changed = !firstSync && (!baseline || baseline.previewDigest !== row.previewDigest);
     if (!row.unread && !unresolvedItem && !recent && !changed) continue;
-    const needsReview = Boolean(unresolvedItem);
-    const waiting = row.lastMessageDirection === "myself" && !needsReview;
+    if (row.lastMessageDirection !== "myself") continue;
     upsertMessageInboxItem(db, {
       profileId,
       platform,
@@ -1500,9 +1578,9 @@ function projectScannedInboxRows(db, {
       positionTitle: row.positionTitle || "",
       company: row.company || "",
       latestExcerpt: row.previewText || "",
-      actionGroup: needsReview ? "needs_review" : waiting ? "waiting" : "needs_action",
-      actionCode: needsReview ? "retry" : waiting ? "wait" : "reply",
-      reasonCode: unresolvedItem?.reasonCode || "",
+      actionGroup: "waiting",
+      actionCode: "wait",
+      reasonCode: "",
       observedAt
     });
   }
@@ -1515,24 +1593,15 @@ function recordLocalInboxFailure(db, {
   reasonCode,
   observedAt,
   selected = {},
-  upsertMessageInboxItem
+  deleteMessageInboxItem
 }) {
-  upsertMessageInboxItem(db, {
+  void reasonCode;
+  void observedAt;
+  void selected;
+  deleteMessageInboxItem(db, {
     profileId,
     platform,
-    conversationKey: target.conversationKey,
-    sourceJobId: target.sourceJobId,
-    lastMessageId: target.lastMessageId,
-    lastActivityAt: target.lastActivityAt || observedAt,
-    lastDirection: target.lastMessageDirection || "unknown",
-    unread: true,
-    positionTitle: selected.positionTitle || selected.positionName || target.positionTitle || "",
-    company: selected.company || selected.companyName || target.company || "",
-    latestExcerpt: target.previewText || "",
-    actionGroup: "needs_review",
-    actionCode: "retry",
-    reasonCode,
-    observedAt
+    conversationKey: target.conversationKey
   });
 }
 
@@ -1541,7 +1610,8 @@ function messageInboxPort(value) {
     "upsertMessageInboxItem",
     "getMessageInboxSyncState",
     "saveMessageInboxSyncState",
-    "markMessageInboxItemDone"
+    "markMessageInboxItemDone",
+    "deleteMessageInboxItem"
   ];
   if (!value || required.some((name) => typeof value[name] !== "function")) {
     throw discoveryError("MESSAGE_INBOX_PORT_REQUIRED", "message discovery requires a message inbox persistence port");

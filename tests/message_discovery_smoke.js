@@ -9,6 +9,7 @@ const {
   recordMessageReplyDrafts,
   completeMessageReplyDraft,
   getMessageReplyDraft,
+  listOpenMessageReplyDrafts,
   listMessageInboundContexts,
   listCandidateAnswerMemories,
   withdrawCandidateAnswerMemory,
@@ -37,6 +38,7 @@ const {
   listUnresolvedMessageDiscoveryItems,
   recordUnresolvedMessageDiscoveryItem
 } = require("../src/core/message_preview_state");
+const { getMessageInboxItem } = require("../src/application/message_inbox");
 
 const PRIVATE_BODY = "PRIVATE_HR_BODY";
 const PRIVATE_PREVIEW = "PRIVATE_CONVERSATION_PREVIEW";
@@ -74,6 +76,7 @@ async function main() {
   await unsupportedPreviewSmoke();
   await classificationOutcomeSmoke();
   await semanticRejectionSmoke();
+  await directRejectionRoutingSmoke();
   await readerStopSmoke();
   await terminalAfterProcessedSmoke();
   await abortAfterClassificationSmoke();
@@ -783,6 +786,11 @@ async function threadAndContextResolutionSmoke() {
   assert.strictEqual(summary.unresolved, 1);
   assert.strictEqual(modelCalls, 0);
   assert.strictEqual(listPreviewStates(db, { profileId: failed.profileId }).length, 0);
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: failed.profileId,
+    platform: "boss",
+    conversationKey: safeDigest(["conversation", "0"])
+  }), null, "internal context repair must not become a user inbox item");
 
   const unsafeBackground = createFixture({ suffix: "context-not-background", title: "Unsafe Background Engineer" });
   let unsafeResolverCalls = 0;
@@ -1416,12 +1424,81 @@ async function semanticRejectionSmoke() {
     sleepFn: async () => {}
   });
   assert.strictEqual(summary.status, "completed");
-  assert.strictEqual(summary.results[0].stage, "rejected");
-  assert.deepStrictEqual(summary.results[0].drafts, []);
+  assert.deepStrictEqual(summary.results, []);
   assert.strictEqual(getProgressCardForJob(db, {
     profileId: fixture.profileId,
     jobId: fixture.jobId
   }).stage, "rejected");
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey: safeDigest(["conversation", "0"])
+  }).actionGroup, "done");
+}
+
+async function directRejectionRoutingSmoke() {
+  const fixture = createFixture({ suffix: "direct-rejection", title: "Direct Rejection Engineer" });
+  recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: fixture.card.id,
+    jobId: fixture.jobId,
+    messageGroupKey: safeDigest(["old-direct-rejection-draft"]),
+    questionSummary: "历史待回复消息",
+    messageIntent: "general_communication",
+    messageCategory: "other",
+    messages: ["历史草稿"],
+    createdAt: NOW
+  });
+  let detailReads = 0;
+  let modelCalls = 0;
+  const rejectionMessage = "不好意思，不太合适哦";
+  const selected = selectedConversation({
+    title: fixture.title,
+    messageId: "123456789012890",
+    messages: [message("friend", "123456789012890", rejectionMessage)]
+  });
+  const summary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([selected]),
+    resolveJobContext: async () => {
+      detailReads += 1;
+      throw new Error("direct rejection must not resolve job detail");
+    },
+    classifyMessageGroup: async () => {
+      modelCalls += 1;
+      throw new Error("direct rejection must not call the model");
+    },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.status, "completed");
+  assert.strictEqual(detailReads, 0);
+  assert.strictEqual(modelCalls, 0);
+  assert.strictEqual(summary.results.length, 0);
+  assert.strictEqual(getProgressCardForJob(db, {
+    profileId: fixture.profileId,
+    jobId: fixture.jobId
+  }).stage, "rejected");
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  const conversationKey = safeDigest(["conversation", "0"]);
+  const inbox = getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey });
+  assert.strictEqual(inbox.actionGroup, "done");
+  assert.strictEqual(inbox.actionCode, "");
+  const classificationEventCount = listProgressEvents(db, fixture.card.id)
+    .filter((event) => event.type === "message_group_classified").length;
+  await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([selected]),
+    resolveJobContext: async () => { throw new Error("repeat rejection must not resolve detail"); },
+    classifyMessageGroup: async () => { throw new Error("repeat rejection must not call the model"); },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(listProgressEvents(db, fixture.card.id)
+    .filter((event) => event.type === "message_group_classified").length, classificationEventCount);
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
 }
 
 async function timelineBeforeJobContextSmoke() {

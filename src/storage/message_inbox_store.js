@@ -98,6 +98,16 @@ function markMessageInboxItemDone(db, input = {}) {
   return result.changes > 0;
 }
 
+function deleteMessageInboxItem(db, input = {}) {
+  const result = db.prepare(`DELETE FROM message_inbox_items
+    WHERE profile_id = ? AND platform = ? AND conversation_key = ?`).run(
+    positiveInteger(input.profileId, "profileId"),
+    platformValue(input.platform),
+    digestValue(input.conversationKey, "conversationKey")
+  );
+  return result.changes > 0;
+}
+
 function getMessageInboxSyncState(db, { profileId, platform } = {}) {
   const row = db.prepare(`SELECT * FROM message_inbox_sync_states
     WHERE profile_id = ? AND platform = ?`).get(
@@ -242,6 +252,7 @@ module.exports = {
   getMessageInboxItem,
   listMessageInboxItems,
   markMessageInboxItemDone,
+  deleteMessageInboxItem,
   getMessageInboxSyncState,
   saveMessageInboxSyncState
 };

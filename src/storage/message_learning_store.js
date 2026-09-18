@@ -321,7 +321,7 @@ function closeMessageReplyDrafts(db, {
   const profile = positiveInteger(profileId, "profileId");
   const card = positiveInteger(cardId, "cardId");
   const at = isoText(closedAt, "closedAt");
-  return immediateTransaction(db, () => {
+  return storeTransaction(db, () => {
     const changes = Number(db.prepare(`UPDATE message_reply_drafts
       SET closed_at = COALESCE(closed_at, ?), updated_at = ?
       WHERE profile_id = ? AND card_id = ? AND closed_at IS NULL`)

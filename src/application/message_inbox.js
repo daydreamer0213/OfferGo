@@ -6,6 +6,7 @@ module.exports = {
   getMessageInboxItem: messageInboxStore.getMessageInboxItem,
   listMessageInboxItems: messageInboxStore.listMessageInboxItems,
   markMessageInboxItemDone: messageInboxStore.markMessageInboxItemDone,
+  deleteMessageInboxItem: messageInboxStore.deleteMessageInboxItem,
   getMessageInboxSyncState: messageInboxStore.getMessageInboxSyncState,
   saveMessageInboxSyncState: messageInboxStore.saveMessageInboxSyncState,
   listMessageEvents: messageTimelineStore.listMessageEvents,

@@ -391,9 +391,30 @@ async function fetchedDetailWithoutFullAnalysisSmoke() {
         };
       }
     },
-    async analyzeJob() {
+    async analyzeJob({ input }) {
       analysisCalls += 1;
-      throw new Error("message discovery must not run full job matching");
+      const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(input.jobId);
+      const batchId = createBatch(db, "zhaopin", "analysis-retry", "message context analysis fixture", {
+        profileId,
+        searchPlanId: planId
+      });
+      upsertJob(db, {
+        source: row.source,
+        sourceId: row.source_id,
+        keyword: row.keyword,
+        title: row.title,
+        company: row.company,
+        location: row.location,
+        salary: row.salary,
+        experience: row.experience,
+        education: row.education,
+        bossActiveText: row.boss_active_text,
+        url: row.url,
+        tags: JSON.parse(row.tags_json),
+        description: row.description,
+        qualityTags: JSON.parse(row.quality_tags_json),
+        analysis: { provider: "fixture", semanticStatus: "complete", recommendation: "primary" }
+      }, batchId);
     },
     now: () => NOW
   });
@@ -401,9 +422,9 @@ async function fetchedDetailWithoutFullAnalysisSmoke() {
     target: { sourceJobId: `zhaopin:${sourceId}`, conversationKey: safeDigest(["zhaopin", "fetched-detail"]) },
     selected: { marker: "selected" }
   });
-  assert.equal(analysisCalls, 0);
+  assert.equal(analysisCalls, 1);
   assert.equal(result.contextSource, "message_discovery_detail");
-  assert.equal(result.job.analysis.semanticStatus, "pending");
+  assert.equal(result.job.analysis.semanticStatus, "complete");
   assert.equal(result.job.description.length >= 120, true);
   assert.equal(findMessageDiscoveryJobContext(db, { profileId, planId, platform: "zhaopin", sourceId }).contextComplete, true);
 }
