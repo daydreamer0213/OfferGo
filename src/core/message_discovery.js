@@ -804,14 +804,12 @@ function resolveUniqueCandidate(candidates, selected, canonicalThreadKey, source
 
 function hasCompleteJobContext(job) {
   const analysis = job?.analysis || {};
-  const trustedMessageDetail = analysis.provider === "message-discovery-detail"
-    && analysis.semanticStatus === "pending";
   const unavailableMessageDetail = analysis.provider === "message-discovery-unavailable"
     && analysis.semanticStatus === "unavailable"
     && analysis.sourceAvailability === "offline";
   const minimumLength = job?.source === "zhaopin" ? 60 : 120;
   return unavailableMessageDetail || (String(job?.description || "").trim().length >= minimumLength
-    && (analysis.semanticStatus === "complete" || trustedMessageDetail));
+    && analysis.semanticStatus === "complete");
 }
 
 function validResolvedContext(value, canonicalThreadKey, platform) {

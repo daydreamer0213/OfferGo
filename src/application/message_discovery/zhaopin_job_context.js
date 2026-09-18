@@ -6,7 +6,9 @@ const { getActiveSearchPlan } = require("../../storage/candidate_store");
 const { ensureProgressCard, bindProgressCardThread, findMessageDiscoveryJobContext } = require("../../core/candidate_progress");
 
 function createZhaopinMessageJobContextResolver({
-  db, profileId, messageReader = null, detailReader = null, now = () => new Date().toISOString()
+  db, profileId, messageReader = null, detailReader = null, analyzeJob = null,
+  root = process.cwd(), modelConfig = null, logger = null,
+  now = () => new Date().toISOString()
 } = {}) {
   const normalizedProfileId = positiveInteger(profileId, "profileId");
   if (!db) throw new TypeError("db is required");
@@ -30,6 +32,7 @@ function createZhaopinMessageJobContextResolver({
         context = findContext(plan.id, sourceId);
       }
       throwIfAborted(signal);
+      context = await ensureAnalyzedContext(plan, context, signal);
       return bindContext(context, target?.conversationKey, "local_cache", signal);
     }
     if (!liveReaders) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "zhaopin job context is unavailable");
@@ -85,8 +88,28 @@ function createZhaopinMessageJobContextResolver({
     annotateAvailability(context, availability === "offline" || jobTarget.availability === "offline" ? "offline" : "unknown");
     context = findContext(plan.id, detail.sourceId);
     throwIfAborted(signal);
+    context = await ensureAnalyzedContext(plan, context, signal);
     return bindContext(context, target?.conversationKey, "message_discovery_detail", signal);
   };
+
+  async function ensureAnalyzedContext(plan, context, signal) {
+    if (context?.analysis?.semanticStatus === "complete"
+      || (context?.analysis?.provider === "message-discovery-unavailable"
+        && context?.analysis?.sourceAvailability === "offline")) return context;
+    if (typeof analyzeJob !== "function") {
+      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "message job analysis is incomplete");
+    }
+    await analyzeJob({
+      db,
+      input: { planId: plan.id, jobId: context.jobId },
+      deps: { root, modelConfig, modelReady: true, logger, signal, messageContextAnalysis: true }
+    });
+    const refreshed = findContext(plan.id, context.sourceId);
+    if (!refreshed?.contextComplete || refreshed.analysis?.semanticStatus !== "complete") {
+      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "message job analysis is incomplete");
+    }
+    return refreshed;
+  }
 
   function activePlan() {
     const plan = getActiveSearchPlan(db, normalizedProfileId);

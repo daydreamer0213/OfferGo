@@ -6,7 +6,9 @@ const {
   saveProfileAnalysis,
   createMatchingCardDraft,
   confirmMatchingCard,
-  listReportJobs
+  listReportJobs,
+  createBatch,
+  upsertJob
 } = require("../src/core/storage");
 const { listOpenMessageReplyDrafts } = require("../src/core/storage");
 const { matchingCardFromProfile } = require("../src/core/matching_card");
@@ -39,6 +41,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
           return detail("offline");
         }
       },
+      analyzeJob: completeAnalysis(fixture, calls),
       root,
       now: () => NOW
     });
@@ -46,8 +49,8 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(result.contextSource, "message_discovery_detail");
     assert.equal(result.job.source, "zhaopin");
     assert.equal(result.job.sourceId, JOB_ID);
-    assert.equal(result.job.analysis.semanticStatus, "pending");
-    assert.equal(result.job.analysis.provider, "message-discovery-detail");
+    assert.equal(result.job.analysis.semanticStatus, "complete");
+    assert.equal(result.job.analysis.provider, "fixture-analysis");
     assert.equal(result.job.analysis.sourceAvailability, "offline");
     assert.equal(result.job.availability, "offline");
     assert.equal(result.card.threadKey, target.conversationKey);
@@ -94,7 +97,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(cached.contextSource, "local_cache");
     assert.equal(cached.job.availability, "unknown");
     assert.equal(cached.job.analysis.sourceAvailability, "unknown");
-    assert.equal(cached.job.analysis.semanticStatus, "pending");
+    assert.equal(cached.job.analysis.semanticStatus, "complete");
     assert.equal(cacheCalls.includes("detail"), false);
 
     const restored = await createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId, now: () => NOW })({ target });
@@ -161,6 +164,7 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     const pipelineResolver = createZhaopinMessageJobContextResolver({
       db, profileId: pipeline.profileId, messageReader: pipelineReader,
       detailReader: { async readSelectedJobDetail() { return detail(); } },
+      analyzeJob: completeAnalysis(pipeline, []),
       root, now: () => NOW
     });
     const pipelineSummary = await runBossMessageDiscovery({
@@ -219,6 +223,40 @@ function detail(availability = "unknown") {
     source: "zhaopin", sourceId: JOB_ID, canonicalUrl: `https://www.zhaopin.com/jobdetail/${JOB_ID}.htm`,
     title: "合成软件工程师", company: "合成科技有限公司", location: "北京", salary: "20-30K",
     experience: "3-5年", education: "本科", tags: ["Node.js"], description: DESCRIPTION, availability
+  };
+}
+
+function completeAnalysis(fixture, calls) {
+  return async ({ input, deps }) => {
+    calls.push("analyze");
+    assert.equal(deps.messageContextAnalysis, true);
+    const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(input.jobId);
+    const batchId = createBatch(db, "zhaopin", "analysis-retry", "message context analysis fixture", {
+      profileId: fixture.profileId,
+      searchPlanId: input.planId
+    });
+    upsertJob(db, {
+      source: row.source,
+      sourceId: row.source_id,
+      keyword: row.keyword,
+      title: row.title,
+      company: row.company,
+      location: row.location,
+      salary: row.salary,
+      experience: row.experience,
+      education: row.education,
+      bossActiveText: row.boss_active_text,
+      url: row.url,
+      tags: JSON.parse(row.tags_json),
+      description: row.description,
+      qualityTags: JSON.parse(row.quality_tags_json),
+      analysis: {
+        provider: "fixture-analysis",
+        semanticStatus: "complete",
+        recommendation: "primary",
+        sourceAvailability: JSON.parse(row.analysis_json || "{}").sourceAvailability || "unknown"
+      }
+    }, batchId);
   };
 }
 

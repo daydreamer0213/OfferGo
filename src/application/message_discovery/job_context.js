@@ -15,6 +15,10 @@ function createMessageDiscoveryJobContextResolver({
   profileId,
   messageReader,
   detailReader,
+  analyzeJob = null,
+  root = process.cwd(),
+  modelConfig = null,
+  logger = null,
   now = () => new Date().toISOString()
 } = {}) {
   const normalizedProfileId = positiveInteger(profileId, "profileId");
@@ -49,7 +53,8 @@ function createMessageDiscoveryJobContextResolver({
         sourceId: localSourceId
       });
     if (known?.contextComplete) {
-      return bindContext(known, target?.conversationKey, "local_cache", now());
+      const analyzed = await ensureAnalyzedContext(plan, known, signal);
+      return bindContext(analyzed, target?.conversationKey, "local_cache", now());
     }
 
     let rawDetail;
@@ -88,7 +93,7 @@ function createMessageDiscoveryJobContextResolver({
         recommendation: null
       }
     }, batchId);
-    const complete = findMessageDiscoveryJobContext(db, {
+    let complete = findMessageDiscoveryJobContext(db, {
       profileId: normalizedProfileId,
       planId: plan.id,
       sourceId: detail.sourceId
@@ -96,8 +101,32 @@ function createMessageDiscoveryJobContextResolver({
     if (!complete?.contextComplete) {
       throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "job context is incomplete");
     }
+    complete = await ensureAnalyzedContext(plan, complete, signal);
     return bindContext(complete, target?.conversationKey, "message_discovery_detail", now());
   };
+
+  async function ensureAnalyzedContext(plan, context, signal) {
+    if (context?.analysis?.semanticStatus === "complete"
+      || (context?.analysis?.provider === "message-discovery-unavailable"
+        && context?.analysis?.sourceAvailability === "offline")) return context;
+    if (typeof analyzeJob !== "function") {
+      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "message job analysis is incomplete");
+    }
+    await analyzeJob({
+      db,
+      input: { planId: plan.id, jobId: context.jobId },
+      deps: { root, modelConfig, modelReady: true, logger, signal, messageContextAnalysis: true }
+    });
+    const refreshed = findMessageDiscoveryJobContext(db, {
+      profileId: normalizedProfileId,
+      planId: plan.id,
+      sourceId: context.sourceId
+    });
+    if (!refreshed?.contextComplete || refreshed.analysis?.semanticStatus !== "complete") {
+      throw contextError("MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE", "message job analysis is incomplete");
+    }
+    return refreshed;
+  }
 
   function bindContext(context, threadKey, contextSource, occurredAt) {
     let card = ensureProgressCard(db, {

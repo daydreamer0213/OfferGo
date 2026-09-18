@@ -195,10 +195,7 @@ async function fetchedContextSmoke() {
         return detail("fetched-job");
       }
     },
-    async analyzeJob() {
-      calls.push("analyze");
-      throw new Error("message discovery must not run full job matching");
-    },
+    analyzeJob: completeAnalysisAdapter(calls, controller.signal),
     modelConfig: { provider: "fixture" },
     root,
     logger: captureLogger(logs)
@@ -213,12 +210,13 @@ async function fetchedContextSmoke() {
     candidate,
     signal: controller.signal
   });
-  assert.deepStrictEqual(calls, ["target", "binding", "detail"]);
+  assert.deepStrictEqual(calls, ["target", "binding", "detail", "analyze"]);
   assert.strictEqual(result.cardId, card.id);
   assert.strictEqual(result.card.threadKey, conversationKey);
   assert.strictEqual(result.job.description, detail("fetched-job").description.trim());
   assert.strictEqual(result.job.sourceId, "boss:fetched-job");
-  assert.strictEqual(result.job.analysis.semanticStatus, "pending");
+  assert.strictEqual(result.job.analysis.semanticStatus, "complete");
+  assert.strictEqual(result.job.analysis.marker, "fresh");
   assert.strictEqual(result.contextSource, "message_discovery_detail");
   assert.strictEqual(
     db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE source = ? AND source_id IN (?, ?)")
@@ -244,7 +242,7 @@ async function incompleteContextSmoke() {
   const jobId = seedJob(fixture, "incomplete-job");
   ensureProgressCard(db, { ...fixture, jobId, source: "boss", now: fixture.now });
   const calls = [];
-  const resolver = createMessageDiscoveryJobContextResolver({
+  const partialResolver = createMessageDiscoveryJobContextResolver({
     db,
     profileId: fixture.profileId,
     messageReader: {
@@ -252,18 +250,16 @@ async function incompleteContextSmoke() {
       async assertActiveBindings() {}
     },
     detailReader: { async readSelectedJobDetail() { calls.push("detail"); return detail("incomplete-job"); } },
-    async analyzeJob() {
-      calls.push("analyze");
-      throw new Error("message discovery must not run full job matching");
-    }
+    analyzeJob: partialAnalysisAdapter(calls)
   });
-  const result = await resolver({
-    target: { tabId: 44, conversationKey: digest("incomplete-thread") },
-    selected: { marker: "selected-incomplete" }
-  });
-  assert.strictEqual(result.contextSource, "message_discovery_detail");
-  assert.strictEqual(result.job.analysis.semanticStatus, "pending");
-  assert.deepStrictEqual(calls, ["detail"]);
+  await assert.rejects(
+    () => partialResolver({
+      target: { tabId: 44, conversationKey: digest("incomplete-thread") },
+      selected: { marker: "selected-incomplete" }
+    }),
+    (error) => error.code === "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE"
+  );
+  assert.deepStrictEqual(calls, ["detail", "analyze"]);
 
   const shortFixture = seedProfilePlan("short");
   const shortJobId = seedJob(shortFixture, "short-job");

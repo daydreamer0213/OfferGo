@@ -8,6 +8,7 @@ const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_
 const { BossSiteAdapter, inspectBossSessionState } = require("../adapters/sites/boss");
 const { createMessageDiscoveryJobContextResolver } = require("../application/message_discovery/job_context");
 const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../application/message_discovery/run");
+const { retryOneJobAnalysis } = require("../application/analysis");
 const { createMessageReplyAnalyzer } = require("../core/message_reply_analyzer");
 const {
   listUnresolvedMessageDiscoveryItems
@@ -94,6 +95,7 @@ function createMessageDiscoveryController(deps = {}) {
       ? createZhaopinMessageDetailReader(options) : createBossMessageDetailReader(options),
     createJobContextResolver = (options) => options.platform === "zhaopin"
       ? createZhaopinMessageJobContextResolver(options) : createMessageDiscoveryJobContextResolver(options),
+    analyzeMessageJob = retryOneJobAnalysis,
     createAnalyzer = ({ modelConfig, logger: analyzerLogger }) => createMessageReplyAnalyzer({
       adapter: createMessageModelAdapter(modelConfig, analyzerLogger)
     }),
@@ -273,7 +275,7 @@ function createMessageDiscoveryController(deps = {}) {
               return actualDetailReader.readSelectedJobDetail(input);
             }
           };
-          const resolverOptions = { platform, db, profileId, modelConfig, root, logger };
+          const resolverOptions = { platform, db, profileId, modelConfig, root, logger, analyzeJob: analyzeMessageJob };
           if (platform !== "zhaopin" || typeof reader.readSelectedJobTarget === "function") {
             resolverOptions.messageReader = reader;
             resolverOptions.detailReader = detailReader;
