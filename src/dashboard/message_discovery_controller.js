@@ -593,6 +593,7 @@ function createMessageDiscoveryController(deps = {}) {
 
   function pageRun(run) {
     const results = sanitizeResults(run.results);
+    const durableResults = sanitizeResults(durableStatus(run.profileId).results);
     return {
       profileId: run.profileId,
       status: run.status,
@@ -602,13 +603,40 @@ function createMessageDiscoveryController(deps = {}) {
       counters: safeCounters(run.counters),
       platformRuns: visiblePlatformRuns(run),
       reasonCode: run.reasonCode,
-      results: run.status === "running" ? results : overlayOpenDrafts(run.profileId, results),
+      results: mergePageResults(run.profileId, durableResults, results),
       phase: safePhase(run.phase),
       waitUntil: safeTimestamp(run.waitUntil),
       startedAt: run.startedAt,
       updatedAt: run.updatedAt,
       expiresAt: run.expiresAt
     };
+  }
+
+  function mergePageResults(profileId, durableResults, currentResults) {
+    const merged = new Map();
+    for (const result of durableResults) merged.set(pageResultKey(result), result);
+    for (const result of currentResults) {
+      const key = pageResultKey(result);
+      const durable = merged.get(key);
+      if (!durable) {
+        merged.set(key, result);
+        continue;
+      }
+      merged.set(key, {
+        ...result,
+        ...durable,
+        draftQualityWarnings: result.draftQualityWarnings?.length
+          ? result.draftQualityWarnings
+          : durable.draftQualityWarnings
+      });
+    }
+    return overlayOpenDrafts(profileId, [...merged.values()]);
+  }
+
+  function pageResultKey(result) {
+    return result.platform && result.conversationKey
+      ? `${result.platform}\0${result.conversationKey}`
+      : `card\0${Number(result.cardId) || 0}`;
   }
 
   function visiblePlatformRuns(run) {

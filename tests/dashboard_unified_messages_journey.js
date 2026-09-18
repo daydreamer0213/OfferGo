@@ -9,6 +9,7 @@ const { createMessageDiscoveryController } = require('../src/dashboard/message_d
 const { createDashboardServer } = require('../src/dashboard/server');
 const { recordUnresolvedMessageDiscoveryItem } = require('../src/core/message_preview_state');
 const { listIncomingContacts } = require('../src/application/funnel_analysis');
+const { upsertMessageInboxItem } = require('../src/storage/message_inbox_store');
 const NOW = '2026-09-08T01:00:00.000Z';
 const PARAMETERIZED_IM_URL = 'https://i.zhaopin.com/im?refcode=4089&sessionId=' + 'a'.repeat(32) + '#conversation';
 const digest = value => 'sha256:' + crypto.createHash('sha256').update(value).digest('hex');
@@ -46,6 +47,7 @@ async function main() {
       createBrowser:()=>({listTabs:async()=>nativePlatforms.map((platform,index)=>({id:index+1,windowId:1,url:platform==='boss'?'https://www.zhipin.com/web/geek/chat':PARAMETERIZED_IM_URL}))}),
       assertRuntimeAvailable:()=>{nativeBossGuards++;},createReader:({platform})=>({async scanConversationRows(){nativeStates.push(nativeController.status(profileId).platformRuns);assert(nativeController.status(profileId).platformRuns.every(entry=>['not_connected','running','completed','stopped','needs_user_action'].includes(entry.status)));nativeScans++;nativeOrder.push(platform);nativeActive++;nativeMax=Math.max(nativeMax,nativeActive);await new Promise(resolve=>setTimeout(resolve,1));nativeActive--;return {platform,rows:[]};}}),createAnalyzer:()=>async()=>({}),createDetailSafety:()=>({}),createDetailReader:()=>({}),createJobContextResolver:()=>async()=>({})});
     controllers.push(nativeController);nativeController.start(profileId);const nativeResult=await settle(nativeController,profileId);assert.equal(nativeScans,1,'shared production pipeline reaches the ZL reader');assert.equal(nativeBossGuards,0);
+    assert.equal(nativeResult.results.length,3,'a sync with no new replies must retain every durable pending action');
     assertUnknownZhaopinReceipts({ platformRuns: nativeStates[0] });
     const nativeZl = nativeResult.platformRuns.find(entry => entry.platform === 'zhaopin');
     assert.equal(nativeZl.counters.currentRead, null, 'public platformRuns must preserve unknown ZL read receipts');
@@ -77,17 +79,17 @@ async function main() {
     assert.equal(zhaopinReadCalls,1);assert.equal(maxOperations,1);assert.equal(cleanup,1);
     assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'not_connected');
     connected=['zhaopin','boss'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);
-    assert.deepEqual(order,['boss','zhaopin']);assert.equal(result.results.length,2);assert.equal(result.counters.visible,2);assert.equal(result.counters.currentRead,7,'ZL cannot contribute invented BOSS read receipts');
+    assert.deepEqual(order,['boss','zhaopin']);assert.equal(result.results.length,3,'current results merge with the existing manual-only pending action');assert.equal(result.counters.visible,2);assert.equal(result.counters.currentRead,7,'ZL cannot contribute invented BOSS read receipts');
     assertUnknownZhaopinReceipts(result);
     deps.waitSecond=true;controller.start(profileId);while(order.length<4)await new Promise(r=>setTimeout(r,5));controller.stop(profileId);result=await settle(controller,profileId);
     assertUnknownZhaopinReceipts(result);
-    assert.equal(result.results[0].cardId,boss.cardId);assert(storage.getMessageReplyDraft(db,{profileId,draftId:boss.drafts[0].id}));
+    assert(result.results.some(item=>item.cardId===boss.cardId));assert(storage.getMessageReplyDraft(db,{profileId,draftId:boss.drafts[0].id}));
     deps.waitSecond=false;connected=['boss'];controller.start(profileId);result=await settle(controller,profileId);
-    assert.equal(result.results[0].cardId,boss.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'not_connected');
+    assert(result.results.some(item=>item.cardId===boss.cardId));assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'not_connected');
     assertUnknownZhaopinReceipts(result);
     connected=['boss','zhaopin','zhaopin'];controller.start(profileId);result=await settle(controller,profileId);
-    assert.equal(result.results[0].cardId,boss.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'completed');assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').reasonCode,'','extra same-platform tabs must not block the managed message page');
-    connected=['boss','zhaopin'];deps.blockBoss=true;controller.start(profileId);result=await settle(controller,profileId);assert.equal(result.results[0].cardId,zl.cardId);assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RUNTIME_BLOCKED');deps.blockBoss=false;
+    assert(result.results.some(item=>item.cardId===boss.cardId));assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').status,'completed');assert.equal(result.platformRuns.find(r=>r.platform==='zhaopin').reasonCode,'','extra same-platform tabs must not block the managed message page');
+    connected=['boss','zhaopin'];deps.blockBoss=true;controller.start(profileId);result=await settle(controller,profileId);assert.equal(controller.status(profileId).results[0].cardId,zl.cardId);assert(result.results.some(item=>item.cardId===zl.cardId));assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RUNTIME_BLOCKED');deps.blockBoss=false;
     connected=['boss','boss_stale','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['boss','zhaopin'],'a stale security-check query parameter cannot hide a healthy logged-in BOSS session');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'completed');
     connected=['boss','boss_risk','zhaopin'];order.length=0;controller.start(profileId);result=await settle(controller,profileId);assert.deepEqual(order,['zhaopin'],'a live BOSS risk page takes precedence over an apparently usable message tab');assert.equal(result.platformRuns.find(r=>r.platform==='boss').status,'needs_user_action');assert.equal(result.platformRuns.find(r=>r.platform==='boss').reasonCode,'BOSS_RISK_CONTROL');assert.equal(riskRecords.at(-1).errorCode,'BOSS_RISK_CONTROL');
     await controller.close();
@@ -231,14 +233,25 @@ async function contactFiltersAndHistory(context, base, db) {
   const historyCard = Number(db.prepare("INSERT INTO candidate_progress_cards(profile_id,plan_id,job_id,source,thread_key,stage,next_action,last_event_at,created_at,updated_at) VALUES (?,?,?,'boss',?,'replied','',?,?,?)").run(profileId,planId,historyJob,historyKey,NOW,NOW,NOW).lastInsertRowid);
   event(historyCard,'resume_requested','boss',historyKey);
   event(historyCard,'interview_invited','boss',historyKey);
+  const pendingKey = digest('pending-resume-contact');
+  const pendingJob = Number(db.prepare("INSERT INTO jobs(source,source_id,title,company,first_seen_at,last_seen_at) VALUES ('zhaopin','zhaopin:pending-resume','待确认简历岗位','待确认公司',?,?)").run(NOW,NOW).lastInsertRowid);
+  const pendingCard = Number(db.prepare("INSERT INTO candidate_progress_cards(profile_id,plan_id,job_id,source,thread_key,stage,next_action,last_event_at,created_at,updated_at) VALUES (?,?,?,'zhaopin',?,'replied','',?,?,?)").run(profileId,planId,pendingJob,pendingKey,NOW,NOW,NOW).lastInsertRowid);
+  event(pendingCard,'resume_requested','zhaopin',pendingKey);
+  upsertMessageInboxItem(db, {
+    profileId, platform: 'zhaopin', conversationKey: pendingKey, sourceJobId: 'zhaopin:pending-resume',
+    jobId: pendingJob, cardId: pendingCard, lastMessageId: 'pending-resume-message', lastActivityAt: NOW,
+    lastDirection: 'friend', unread: true, positionTitle: '待确认简历岗位', company: '待确认公司',
+    latestExcerpt: 'HR 邀请你发送简历', actionGroup: 'needs_action', actionCode: 'resume_request', observedAt: NOW
+  });
   const contacts = listIncomingContacts(db,{profileId});
   const history = contacts.find(item=>item.conversationKey===historyKey);
   const page = await context.newPage();
   try {
     await page.setViewportSize({width:390,height:694});
     await page.goto(base+'/messages?profileId='+profileId+'&source=all&task=pending');
-    assert.equal(await page.locator('.message-list-item').count(),3,'the unified inbox keeps pending work and completed history in one page');
-    assert.equal(await page.locator('.message-list-item:visible').count(),2,'completed history stays collapsed until the user opens it');
+    assert.equal(await page.locator('.message-list-item').count(),4,'the unified inbox keeps pending work and completed history in one page');
+    assert.equal(await page.locator('.message-list-item:visible').count(),3,'unfinished resume confirmation remains visible while completed history stays collapsed');
+    assert.equal(await page.locator('[data-action-group="needs_action"] .message-list-item',{hasText:'待确认简历岗位'}).count(),1,'the current inbox state must outrank the historical contact projection');
     const firstRow = page.locator('.message-list-item:visible').first();
     assert((await firstRow.boundingBox()).y+100<=694,'390px viewport exposes the first message and HR preview');
     const draftRow = page.locator('.message-list-item[data-platform="boss"]:visible').filter({has:page.locator('[data-message-view^="result-"]')});
@@ -261,7 +274,7 @@ async function contactFiltersAndHistory(context, base, db) {
     assert.equal(await page.locator('.message-history:visible').count(),1);
     assert.match(await page.locator('.message-history:visible').innerText(),/已记录这次联系，完整内容会在下次同步后显示/);
     assert.equal(await page.locator('.message-history [data-draft-text], .message-history [data-send-single]').count(),0,'history never reconstructs a draft or send action');
-    await page.locator('.message-list-item[data-platform="zhaopin"]').waitFor({state:'visible'});
+    await page.locator('.message-list-item[data-platform="zhaopin"]').first().waitFor({state:'visible'});
     await page.goto(base+'/messages?profileId='+profileId+'&source=zhaopin&task=all&contact='+encodeURIComponent(history.key));
     assert.equal(await page.locator('.message-history:visible').count(),1,'platform query parameters no longer hide a known conversation from the unified inbox');
     await page.goto(base+'/messages?profileId=1&source=all&task=all&contact='+encodeURIComponent(history.key));

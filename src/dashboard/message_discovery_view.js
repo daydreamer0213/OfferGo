@@ -209,7 +209,18 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const unresolvedIdentities = new Set(durableUnresolved.map((item) => `${item.platform}\0${item.conversationKey}`));
   const incomingViews = incomingContacts.filter((item) => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)
     && !unresolvedIdentities.has(`${item.platform}\0${item.conversationKey}`))
-    .map((item) => renderIncomingContactView(item, { selected: false, pending: Boolean(item.pending), timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, messageActions, escapeHtml, escapeAttr }));
+    .map((item) => {
+      const inboxItem = inboxByConversation.get(`${item.platform}\0${item.conversationKey}`) || null;
+      const actionGroup = inboxItem?.actionGroup || (item.pending ? "needs_action" : "done");
+      return renderIncomingContactView(item, {
+        selected: false,
+        actionGroup,
+        timeline: inboxItem?.timeline,
+        messageActions,
+        escapeHtml,
+        escapeAttr
+      });
+    });
   const representedIdentities = new Set([...resultViews, ...unresolvedViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
   const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
     .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }));
@@ -286,7 +297,7 @@ function messageStatusLabel(result) {
   return "待人工判断";
 }
 
-function renderIncomingContactView(item, { selected, pending, timeline, messageActions, escapeHtml, escapeAttr }) {
+function renderIncomingContactView(item, { selected, actionGroup = "done", timeline, messageActions, escapeHtml, escapeAttr }) {
   const key = messageViewKey("incoming", [item.key]);
   const inputId = `message-view-${key}`;
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
@@ -295,10 +306,10 @@ function renderIncomingContactView(item, { selected, pending, timeline, messageA
   return {
     key,
     identity: `${item.platform}\0${item.conversationKey}`,
-    actionGroup: pending ? "needs_action" : "done",
+    actionGroup,
     contactKey: item.key,
-    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result message-history" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">当前没有需要你处理的操作。</p></section>`
+    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${actionGroup}" data-pending="${actionGroup === "needs_action" || actionGroup === "needs_review"}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small class="message-source">${escapeHtml(platform)} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
+    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "needs_action" ? "这条消息仍在等待你处理。" : actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : "当前没有需要你处理的操作。"}</p></section>`
   };
 }
 
