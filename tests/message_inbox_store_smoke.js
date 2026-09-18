@@ -139,9 +139,9 @@ try {
   });
   assert.equal(pageState.groups.needsAction[0].primaryAction.label, "查看建议回复");
   assert.equal(pageState.groups.waiting[0].statusText, "已回复，等待对方消息");
-  assert.equal(pageState.groups.needsReview[0].technicalReason, undefined);
+  assert.deepEqual(pageState.groups.needsReview, []);
   assert.equal(pageState.freshness.boss.label, "刚刚同步");
-  assert.equal(pageState.counts.total, 4);
+  assert.equal(pageState.counts.total, 3);
 } finally {
   db.close();
   fs.rmSync(root, { recursive: true, force: true });

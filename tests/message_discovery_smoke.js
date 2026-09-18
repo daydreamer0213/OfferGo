@@ -38,7 +38,7 @@ const {
   listUnresolvedMessageDiscoveryItems,
   recordUnresolvedMessageDiscoveryItem
 } = require("../src/core/message_preview_state");
-const { getMessageInboxItem } = require("../src/application/message_inbox");
+const { getMessageInboxItem, upsertMessageInboxItem } = require("../src/application/message_inbox");
 
 const PRIVATE_BODY = "PRIVATE_HR_BODY";
 const PRIVATE_PREVIEW = "PRIVATE_CONVERSATION_PREVIEW";
@@ -77,6 +77,7 @@ async function main() {
   await classificationOutcomeSmoke();
   await semanticRejectionSmoke();
   await directRejectionRoutingSmoke();
+  await historicalRejectionReconciliationSmoke();
   await readerStopSmoke();
   await terminalAfterProcessedSmoke();
   await abortAfterClassificationSmoke();
@@ -1499,6 +1500,98 @@ async function directRejectionRoutingSmoke() {
   assert.strictEqual(listProgressEvents(db, fixture.card.id)
     .filter((event) => event.type === "message_group_classified").length, classificationEventCount);
   assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+}
+
+async function historicalRejectionReconciliationSmoke() {
+  const fixture = createFixture({ suffix: "historical-rejection", title: "Historical Rejection Engineer" });
+  const conversationKey = safeDigest(["historical-rejection-conversation"]);
+  const platformMessageId = "123456789012891";
+  const persistedMessageKey = messageKey({
+    platform: "boss",
+    threadKey: conversationKey,
+    messageId: platformMessageId
+  });
+  recordDiscoveredMessageGroupClassification(db, {
+    cardId: fixture.card.id,
+    platform: "boss",
+    threadKey: conversationKey,
+    messageKeys: [persistedMessageKey],
+    messageGroupKey: safeDigest(["historical-rejection-old-classification"]),
+    messageIntent: "general_communication",
+    messageCategory: "other",
+    missingFactKey: "",
+    manualActions: [],
+    progressUpdate: { stage: "reply_ready" },
+    occurredAt: NOW
+  });
+  recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: fixture.card.id,
+    jobId: fixture.jobId,
+    messageGroupKey: safeDigest(["historical-rejection-old-classification"]),
+    questionSummary: "历史误判消息",
+    messageIntent: "general_communication",
+    messageCategory: "other",
+    messages: ["历史误生成草稿"],
+    createdAt: NOW
+  });
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    observedAt: NOW,
+    events: [{
+      messageKey: persistedMessageKey,
+      platformMessageId,
+      direction: "friend",
+      kind: "text",
+      text: "不好意思，不太合适哦",
+      occurredAt: NOW,
+      metadata: {}
+    }]
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    sourceJobId: `boss:job-historical-rejection`,
+    jobId: fixture.jobId,
+    cardId: fixture.card.id,
+    lastMessageId: platformMessageId,
+    lastActivityAt: NOW,
+    lastDirection: "friend",
+    unread: true,
+    positionTitle: fixture.title,
+    company: fixture.company,
+    latestExcerpt: "不好意思，不太合适哦",
+    actionGroup: "needs_action",
+    actionCode: "reply",
+    observedAt: NOW
+  });
+  const run = () => runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([]),
+    classifyMessageGroup: async () => { throw new Error("history repair must not call the model"); },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  await run();
+  assert.strictEqual(getProgressCardForJob(db, {
+    profileId: fixture.profileId,
+    jobId: fixture.jobId
+  }).stage, "rejected");
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey
+  }).actionGroup, "done");
+  const rejectionEvents = () => listProgressEvents(db, fixture.card.id)
+    .filter((event) => event.type === "recruiter_rejected").length;
+  assert.strictEqual(rejectionEvents(), 1);
+  await run();
+  assert.strictEqual(rejectionEvents(), 1);
 }
 
 async function timelineBeforeJobContextSmoke() {

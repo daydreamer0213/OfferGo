@@ -550,6 +550,57 @@ function recordDiscoveredMessageGroupClassification(db, input = {}) {
   });
 }
 
+function recordRecruiterRejection(db, input = {}) {
+  const cardId = positiveInteger(input.cardId, "cardId");
+  const platform = String(input.platform || "").trim().toLowerCase();
+  if (!["boss", "zhaopin"].includes(platform)) {
+    throw progressError("PROGRESS_PLATFORM_INVALID", "message platform is invalid");
+  }
+  const owner = db.prepare(`SELECT cards.source AS card_source, jobs.source AS job_source
+    FROM candidate_progress_cards cards JOIN jobs ON jobs.id = cards.job_id
+    WHERE cards.id = ?`).get(cardId);
+  if (!owner || owner.card_source !== platform || owner.job_source !== platform) {
+    throw progressError("PROGRESS_PLATFORM_MISMATCH", "message platform does not match progress card");
+  }
+  const threadKey = safeDigestKey(input.threadKey, "threadKey");
+  const messageKey = safeDigestKey(input.messageKey, "messageKey");
+  const occurredAt = isoText(input.occurredAt);
+  const idempotencyKey = derivedProgressIdempotencyKey([
+    "recruiter-rejection", platform, threadKey, messageKey
+  ]);
+  const existing = getProgressEventByKey(db, cardId, idempotencyKey);
+  if (existing) return getProgressCard(db, cardId);
+  return progressTransaction(db, () => {
+    const card = getProgressCard(db, cardId);
+    if (!card) throw progressError("PROGRESS_CARD_NOT_FOUND", "progress card was not found");
+    persistProgressEvent(db, {
+      cardId,
+      idempotencyKey,
+      type: "recruiter_rejected",
+      actor: "system",
+      summary: "招聘方已明确结束本次机会",
+      metadata: {
+        platform,
+        threadKey,
+        messageKey,
+        messageIntent: "rejection",
+        stage: "rejected"
+      },
+      occurredAt
+    });
+    if (!TERMINAL_PROGRESS_STAGES.has(card.stage)) {
+      transitionProgressCard(db, {
+        cardId,
+        expectedStage: card.stage,
+        stage: "rejected",
+        nextAction: "",
+        now: occurredAt
+      });
+    }
+    return getProgressCard(db, cardId);
+  });
+}
+
 function recordManualProgressAction(db, input = {}) {
   const cardId = positiveInteger(input.cardId, "cardId");
   const idempotencyKey = progressIdempotencyKey(input.idempotencyKey);
@@ -1209,6 +1260,7 @@ module.exports = {
   recordIncomingMessageClassification,
   recordDiscoveredMessageClassification,
   recordDiscoveredMessageGroupClassification,
+  recordRecruiterRejection,
   recordManualProgressAction,
   recordReplyConfirmedSent,
   recordFollowUpSent,

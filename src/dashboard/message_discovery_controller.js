@@ -48,6 +48,7 @@ const MESSAGE_INTENTS = new Set([
   "information_request",
   "information_update",
   "general_communication",
+  "rejection",
   "manual_review"
 ]);
 const MESSAGE_CONTENT_CAPTURED_REASON_CODES = new Set([
@@ -732,9 +733,9 @@ function createMessageDiscoveryController(deps = {}) {
     ));
     return {
       ...emptyStatus(profileId),
-      status: unresolved.length ? "needs_user_action" : "completed",
+      status: "completed",
       unresolved: unresolved.length,
-      reasonCode: safeCode(unresolved[0]?.reasonCode),
+      reasonCode: "",
       processed: results.length,
       results
     };
@@ -1092,11 +1093,12 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
       limit: 500
     })
   }));
+  const visibleItems = items.filter((item) => item.actionGroup !== "needs_review");
   const groups = {
-    needsAction: items.filter((item) => item.actionGroup === "needs_action"),
-    waiting: items.filter((item) => item.actionGroup === "waiting"),
-    needsReview: items.filter((item) => item.actionGroup === "needs_review"),
-    done: items.filter((item) => item.actionGroup === "done")
+    needsAction: visibleItems.filter((item) => item.actionGroup === "needs_action"),
+    waiting: visibleItems.filter((item) => item.actionGroup === "waiting"),
+    needsReview: [],
+    done: visibleItems.filter((item) => item.actionGroup === "done")
   };
   const freshness = Object.fromEntries(["boss", "zhaopin"].map((platform) => {
     const run = runningByPlatform.get(platform);
@@ -1111,7 +1113,7 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
       waiting: groups.waiting.length,
       needsReview: groups.needsReview.length,
       done: groups.done.length,
-      total: items.length
+      total: visibleItems.length
     }
   };
 }
@@ -1120,7 +1122,7 @@ function presentInboxItem(item) {
   const presentation = {
     needs_action: { statusText: "需要你处理", label: "查看建议回复" },
     waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
-    needs_review: { statusText: "系统正在补充资料", label: "查看进度" },
+    needs_review: { statusText: "内部处理中", label: "查看记录" },
     done: { statusText: "已经处理", label: "查看记录" }
   }[item.actionGroup];
   return {
@@ -1144,8 +1146,8 @@ function presentFreshness(platform, run, sync, now) {
       return {
         platform,
         label: "消息已读取",
-        detail: "消息内容已保留，部分岗位资料仍在补充",
-        state
+        detail: "已完成可处理消息整理",
+        state: "complete"
       };
     }
     return { platform, label: state === "partial" ? "部分同步" : "需要处理", detail: messageDiscoveryFreshnessText(run.reasonCode), state };
@@ -1170,7 +1172,7 @@ function messageDiscoveryFreshnessText(code) {
   if (/RISK_CONTROL/.test(code)) return "平台需要完成安全检查";
   if (/TAB_|PAGE_LOST/.test(code)) return "消息页已变化，请恢复后重试";
   if (/BROWSER/.test(code)) return "暂时无法连接浏览器";
-  return "部分消息暂时无法完成，已保留待重试";
+  return "本次同步未完成，请稍后重新同步";
 }
 
 function assertMessageDiscoveryRuntimeAvailable(db, now, { platform = "boss" } = {}) {

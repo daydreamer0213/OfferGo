@@ -2,7 +2,8 @@ const {
   listMessageDiscoveryCandidates,
   getProgressCardById,
   findMessageDiscoveryJobContext,
-  recordDiscoveredMessageGroupClassification
+  recordDiscoveredMessageGroupClassification,
+  recordRecruiterRejection
 } = require("./candidate_progress");
 const {
   getCandidateProfile,
@@ -125,7 +126,8 @@ async function runBossMessageDiscovery({
     getMessageInboxSyncState,
     saveMessageInboxSyncState,
     markMessageInboxItemDone,
-    deleteMessageInboxItem
+    deleteMessageInboxItem,
+    listMessageInboxItems
   } = messageInboxPort(messageInbox);
   const timeline = messageTimelinePort(messageTimeline);
   const source = discoveryPlatform(platform);
@@ -135,6 +137,14 @@ async function runBossMessageDiscovery({
     throw discoveryError("MESSAGE_DISCOVERY_PROFILE_NOT_FOUND", "candidate profile was not found");
   }
   const profile = messageReplyProfile(storedProfile.profile);
+  reconcileTerminalMessageHistory({
+    db,
+    profileId,
+    platform: source,
+    now,
+    messageInbox: { listMessageInboxItems, markMessageInboxItemDone },
+    timeline
+  });
   const runStartedAt = now();
   const previousSync = getMessageInboxSyncState(db, { profileId, platform: source });
   const firstSync = !previousSync?.lastSuccessfulAt;
@@ -1545,6 +1555,59 @@ function newestActivityAt(rows) {
   return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
 }
 
+function reconcileTerminalMessageHistory({
+  db,
+  profileId,
+  platform,
+  now,
+  messageInbox,
+  timeline
+}) {
+  const items = messageInbox.listMessageInboxItems(db, { profileId })
+    .filter((item) => item.platform === platform && item.actionGroup !== "done");
+  for (const item of items) {
+    const events = timeline.listMessageEvents(db, {
+      profileId,
+      platform,
+      conversationKey: item.conversationKey,
+      limit: 500
+    });
+    const rejectionEvent = [...events].reverse().find((event) =>
+      event.direction === "friend"
+      && event.kind === "text"
+      && isExplicitRecruiterRejection([event]));
+    if (!rejectionEvent) continue;
+    const occurredAt = now();
+    immediateTransaction(db, () => {
+      if (Number.isSafeInteger(Number(item.cardId)) && Number(item.cardId) > 0) {
+        recordRecruiterRejection(db, {
+          cardId: Number(item.cardId),
+          platform,
+          threadKey: item.conversationKey,
+          messageKey: rejectionEvent.messageKey,
+          occurredAt
+        });
+        closeMessageReplyDrafts(db, {
+          profileId,
+          cardId: Number(item.cardId),
+          closedAt: occurredAt
+        });
+      }
+      clearUnresolvedMessageDiscoveryItem(db, {
+        profileId,
+        platform,
+        conversationKey: item.conversationKey
+      });
+      messageInbox.markMessageInboxItemDone(db, {
+        profileId,
+        platform,
+        conversationKey: item.conversationKey,
+        resolvedAt: occurredAt
+      });
+    });
+  }
+}
+
 function projectScannedInboxRows(db, {
   profileId,
   platform,
@@ -1611,7 +1674,8 @@ function messageInboxPort(value) {
     "getMessageInboxSyncState",
     "saveMessageInboxSyncState",
     "markMessageInboxItemDone",
-    "deleteMessageInboxItem"
+    "deleteMessageInboxItem",
+    "listMessageInboxItems"
   ];
   if (!value || required.some((name) => typeof value[name] !== "function")) {
     throw discoveryError("MESSAGE_INBOX_PORT_REQUIRED", "message discovery requires a message inbox persistence port");
@@ -1620,7 +1684,8 @@ function messageInboxPort(value) {
 }
 
 function messageTimelinePort(value) {
-  if (!value || typeof value.upsertMessageEvents !== "function") {
+  if (!value || typeof value.upsertMessageEvents !== "function"
+    || typeof value.listMessageEvents !== "function") {
     throw discoveryError("MESSAGE_TIMELINE_PORT_REQUIRED", "message discovery requires a message timeline persistence port");
   }
   return value;

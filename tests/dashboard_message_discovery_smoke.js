@@ -353,7 +353,8 @@ async function main() {
   assert.strictEqual(status.reasonCode, "BOSS_MESSAGE_CARD_NOT_FOUND");
   assertNoPrivateData(status);
   const unresolvedPage = await request(base, `/messages?profileId=${fixture.profileId}`);
-  assert(unresolvedPage.body.includes("\u672a\u89e3\u51b3 1"), "the page must show the truthful unresolved count");
+  assert(!unresolvedPage.body.includes("未解决"), "internal repair work must not be presented as user work");
+  assert(!unresolvedPage.body.includes("系统正在补充资料"), "internal repair work must stay out of the action inbox");
   assertNoPrivateData(unresolvedPage.body);
   await waitForLeaseRelease();
 
@@ -799,6 +800,14 @@ async function main() {
       messageCategory: "salary",
       messageSummary: "SECONDARY_RESULT_SUMMARY",
       missingFactKey: "",
+      contextComplete: true,
+      job: {
+        title: "第二个完整岗位",
+        company: "示例公司",
+        roleSummary: "负责已经完成分析的岗位工作",
+        fitLabel: "中",
+        fitSummary: "岗位资料与候选人画像已经完成比对"
+      },
       messages: []
     }]
   }));
@@ -863,9 +872,9 @@ async function main() {
     observedAt: "2026-08-11T08:00:00.000Z"
   });
   let durableStatus = await getStatus(base, retainedFixture.profileId);
-  assert.strictEqual(durableStatus.status, "needs_user_action", "an inactive controller must surface durable unresolved work");
+  assert.strictEqual(durableStatus.status, "completed", "an inactive controller must keep internal repair work out of the user-action status");
   assert.strictEqual(durableStatus.unresolved, 1);
-  assert.strictEqual(durableStatus.reasonCode, "BOSS_MESSAGE_CARD_NOT_FOUND");
+  assert.strictEqual(durableStatus.reasonCode, "");
   assertNoPrivateData(durableStatus);
   const capturedMessageFreshness = buildMessageInboxPageState(db, {
     profileId: retainedFixture.profileId,
@@ -878,9 +887,9 @@ async function main() {
   assert.deepStrictEqual(capturedMessageFreshness, {
     platform: "zhaopin",
     label: "消息已读取",
-    detail: "消息内容已保留，部分岗位资料仍在补充",
-    state: "partial"
-  }, "a job-detail verification gap must not be presented as a message sync failure");
+    detail: "已完成可处理消息整理",
+    state: "complete"
+  }, "a job-detail verification gap must stay inside OfferGo instead of becoming user work");
   let durablePage = await request(base, `/messages?profileId=${retainedFixture.profileId}`);
   assert(!durablePage.body.includes('class="panel message-state"'), "one unresolved contact belongs in its own list item, not a page-wide error panel");
   for (const reasonCode of ["BOSS_LOGIN_REQUIRED", "BOSS_RISK_CONTROL", "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "ZHAOPIN_MESSAGE_RISK_CONTROL", "BOSS_MESSAGE_DETAIL_NOT_BACKGROUND"]) {
@@ -897,10 +906,8 @@ async function main() {
     assert(html.includes(messageDiscoveryReasonText(reasonCode)), `${reasonCode} must not be overwritten by an item-level association failure`);
     }
   }
-  const unresolvedViewKey = durablePage.body.match(/data-message-view="(unresolved-[a-f0-9]{64})"/)?.[1];
-  assert(unresolvedViewKey, "pending-only pages must expose a selectable stable unresolved key");
-  assert(durablePage.body.includes(`data-message-detail-panel="${unresolvedViewKey}"`), "the pending list row and detail must share one selection key");
-  assert.match(durablePage.body, /class="message-workspace"[\s\S]*class="panel message-unresolved"/, "pending-only pages must keep the detail inside the unified workspace");
+  assert.doesNotMatch(durablePage.body, /data-message-view="unresolved-/, "pending-only work must not create a user-facing row");
+  assert.doesNotMatch(durablePage.body, /class="panel message-unresolved"/, "pending-only work must remain internal");
   assertNoPrivateData(durablePage.body);
   scenarios.push(completedRun({ fixture: retainedFixture, drafts: ["durable-cleanup-draft"] }));
   await startAndWait(base, retainedFixture.profileId, "completed");
@@ -911,20 +918,20 @@ async function main() {
   });
   assert.strictEqual(response.status, 200);
   durablePage = await request(base, `/messages?profileId=${retainedFixture.profileId}`);
-  assert(durablePage.body.includes("\u672a\u89e3\u51b3 0"), "a fresh GET must preserve the dismissed current run count");
-  assert(durablePage.body.includes("\u4fdd\u7559\u8bb0\u5f55 1"), "a fresh GET must show durable work as a retained record");
-  assert(durablePage.body.includes("无法确认本地岗位与会话是否一致"), "a fresh GET must retain the first safe durable reason after dismiss");
+  assert(!durablePage.body.includes("未解决"), "a fresh GET must not expose internal repair counts");
+  assert(!durablePage.body.includes("保留记录"), "a fresh GET must not expose internal repair records");
+  assert.doesNotMatch(durablePage.body, /class="message-list-item"[^>]*data-task="needs_review"/, "a fresh GET must not assign internal association work to the user");
   assertNoPrivateData(durablePage.body);
   scenarios.push(completedRun({ fixture: retainedFixture, drafts: ["durable-cleanup-draft"] }));
   await startAndWait(base, retainedFixture.profileId, "completed");
   await waitForLeaseRelease();
   cleanupTimers.fire(cleanupTimers.latest().id);
   durableStatus = await getStatus(base, retainedFixture.profileId);
-  assert.strictEqual(durableStatus.status, "needs_user_action", "30-minute cleanup must not hide durable unresolved work");
+  assert.strictEqual(durableStatus.status, "completed", "30-minute cleanup must keep durable repair work internal");
   assert.strictEqual(durableStatus.unresolved, 1);
-  assert.strictEqual(durableStatus.reasonCode, "BOSS_MESSAGE_CARD_NOT_FOUND");
+  assert.strictEqual(durableStatus.reasonCode, "");
   durablePage = await request(base, `/messages?profileId=${retainedFixture.profileId}`);
-  assert.match(durablePage.body, /class="message-list-item"[^>]*data-pending="true"/, "retained work remains selectable after cleanup without recreating the global error panel");
+  assert.doesNotMatch(durablePage.body, /class="message-list-item"[^>]*data-pending="true"/, "internal repair work remains hidden after cleanup");
   assertNoPrivateData(durablePage.body);
 
   await inboundResolutionDashboardSmoke({
@@ -1117,12 +1124,9 @@ async function inboundResolutionDashboardSmoke({ base, browserCreations, scenari
   const beforeBrowser = browserCreations();
   const beforeScenarios = scenarios.length;
   const page = await request(base, `/messages?profileId=${createFixtureValue.profileId}`);
-  assert.match(page.body, /RAG 应用工程师/);
-  assert.match(page.body, /示例科技/);
-  assert.match(page.body, /15-25K/);
-  assert.match(page.body, /关联现有岗位/);
-  assert.match(page.body, /保存为 HR 主动机会/);
-  assert.match(page.body, /不纳入 OfferGo/);
+  assert.doesNotMatch(page.body, /RAG 应用工程师|示例科技|15-25K/);
+  assert.doesNotMatch(page.body, /关联现有岗位|保存为 HR 主动机会|不纳入 OfferGo/,
+    "unresolved association work must not be assigned to the user");
   assert.doesNotMatch(page.body, /action="[^"]*communication|发送消息/);
   assertNoPrivateData(page.body);
   let response = await postForm(base, "/api/message-discovery-unresolved", {
@@ -1171,7 +1175,8 @@ async function inboundResolutionDashboardSmoke({ base, browserCreations, scenari
     }
   });
   const linkPage = await request(base, `/messages?profileId=${linkFixture.profileId}`);
-  assert.match(linkPage.body, new RegExp(`name="jobId" value="${linkFixture.jobId}"`));
+  assert.doesNotMatch(linkPage.body, new RegExp(`name="jobId" value="${linkFixture.jobId}"`),
+    "hidden internal repair work must not expose manual linking controls");
   response = await postForm(base, "/api/message-discovery-unresolved", {
     profileId: linkFixture.profileId,
     conversationKey: linkKey,
@@ -1714,8 +1719,9 @@ function completedRun({
         stage,
         messageIntent,
         messageCategory,
-        messageSummary,
-        draftQualityWarnings,
+         messageSummary,
+         draftQualityWarnings,
+         contextComplete: true,
         missingFactKey: "",
         inboundMessages,
         drafts: durableDrafts.map((draft) => ({
@@ -1747,17 +1753,19 @@ function multiResultCompletedRun(fixture) {
         jobId: fixture.jobId,
         stage: "reply_ready",
         messageIntent: "information_request",
-        messageCategory: "qualification",
-        missingFactKey: "",
-        messages: ["运行额度草稿一", "岗位一草稿二", "岗位一草稿三"]
+         messageCategory: "qualification",
+         missingFactKey: "",
+         contextComplete: true,
+         messages: ["运行额度草稿一", "岗位一草稿二", "岗位一草稿三"]
       }, {
         cardId: fixture.card.id + 1,
         jobId: fixture.jobId + 1,
         stage: "reply_ready",
         messageIntent: "information_request",
-        messageCategory: "qualification",
-        missingFactKey: "",
-        messages: ["运行额度草稿二", "岗位二草稿二", "岗位二草稿三"]
+         messageCategory: "qualification",
+         missingFactKey: "",
+         contextComplete: true,
+         messages: ["运行额度草稿二", "岗位二草稿二", "岗位二草稿三"]
       }]
     };
     onStatus(summary);
@@ -2203,8 +2211,8 @@ async function messageDiscoveryPollingSmoke(markup) {
     "a long safety wait must be visible while polling instead of looking frozen");
   assert.match(cooldownPoll.feedback.textContent, /19 条/,
     "live discovery feedback must show how many messages were found");
-  assert.match(cooldownPoll.feedback.textContent, /8 条.*待补/,
-    "live discovery feedback must show retained messages that still need job context");
+  assert.doesNotMatch(cooldownPoll.feedback.textContent, /待补岗位资料|未解决/,
+    "internal job-context repair must stay out of the user-facing progress text");
 
   const analyzingPoll = runMessageDiscoveryClient(markup, {
     response: jsonResponse(200, {

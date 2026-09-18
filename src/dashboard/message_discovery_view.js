@@ -1,8 +1,6 @@
 const crypto = require("node:crypto");
-const { listUnresolvedMessageDiscoveryItems } = require("../core/message_preview_state");
 const { listIncomingContacts } = require("../application/funnel_analysis");
 const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
-const { findExactIdentityCandidates } = require("../application/message_discovery/queries");
 const { isCompetitionPromotion } = require("../core/message_routing_policy");
 
 function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageActionController = null, messageReplyActionToken = "", helpers }) {
@@ -33,18 +31,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const initialReplySend = replySendController?.latest?.({ profileId }) || null;
   const messageActions = messageActionController?.list?.({ profileId }) || [];
   const pageState = controller.pageState(profileId);
-  const inboxState = pageState.inbox || { groups: { needsAction: [], waiting: [], needsReview: [], done: [] }, freshness: {}, counts: { total: 0 } };
+  const inboxState = pageState.inbox || { groups: { needsAction: [], waiting: [], done: [] }, freshness: {}, counts: { total: 0 } };
   const inboxItems = Object.values(inboxState.groups || {}).flat();
   const inboxByConversation = new Map(inboxItems.map((item) => [`${item.platform}\0${item.conversationKey}`, item]));
-  const durableUnresolved = listUnresolvedMessageDiscoveryItems(db, { profileId, platform: null });
-  const status = durableUnresolved.length && !pageState.startedAt && !pageState.reasonCode
-    ? {
-        ...pageState,
-        status: pageState.status === "running" ? "running" : "needs_user_action",
-        unresolved: durableUnresolved.length,
-        reasonCode: durableUnresolved[0].reasonCode
-      }
-    : pageState;
+  const status = pageState;
   plan ||= getLatestSearchPlan(db, profileId);
   const originQuery = searchParams.get("workSite") === "zhaopin" ? "&workSite=zhaopin" : "";
   const todayPath = plan?.id ? `/plan?planId=${plan.id}${originQuery ? "&site=zhaopin" : ""}` : "/onboarding";
@@ -86,7 +76,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const contactMatchesScope = Boolean(requestedContact);
   const resultPending = (result) => Boolean((result.drafts || []).some((draft) => Number(draft?.id) > 0)
     || (result.manualActions || []).length || result.missingFactKey || result.messageIntent === "manual_review");
-  const allResults = status.results.filter((result) => result?.messageIntent !== "follow_up");
+  const allResults = status.results.filter((result) => result?.messageIntent !== "follow_up"
+    && result?.contextComplete === true);
   // Keep every durable result in the DOM so the unified inbox can preserve the
   // selected conversation without a server round trip.
   const displayResults = allResults;
@@ -99,11 +90,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const matchingContact = incomingContacts.find((item) => item.platform === result.platform
       && Number(item.cardId) === Number(result.cardId)
       && item.conversationKey === result.conversationKey);
-    const retainedItem = /^sha256:[a-f0-9]{64}$/.test(result.conversationKey || "")
-      ? durableUnresolved.find(item => item.platform === result.platform && item.conversationKey === result.conversationKey) : null;
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
-    const pending = resultPending(result) || Boolean(retainedItem);
-    const retainedWork = retainedItem ? `<details class="message-retained-work"><summary>这条会话还有待核对事项</summary>${renderUnresolvedItem(db, retainedItem, { profileId, embedded: true, messageActions, escapeHtml, escapeAttr })}</details>` : "";
+    const pending = resultPending(result);
     const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
     const interviewInvited = Boolean(matchingContact?.interviewInvited || result.messageIntent === "interview_invitation");
     const durableDrafts = Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0) : [];
@@ -141,12 +129,15 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       ? "本地已有岗位资料"
       : result.contextSource === "message_discovery_detail"
         ? "本次后台只读岗位详情"
-        : "岗位资料来源待确认";
+        : "本地岗位资料";
+    const opportunityLine = job.availability === "offline"
+      ? "职位已下线，以下资料用于理解这段沟通"
+      : job.opportunityVerdict || "";
     const decisionCard = `<section class="message-job-understanding">
       <p class="line"><strong>沟通类型：</strong>${escapeHtml(messageIntentLabel(result.messageIntent))}${manualActions.length ? " · HR 邀请你发送简历" : ""}</p>
-      <p class="line"><strong>这份机会：</strong>${escapeHtml(job.availability === "offline" ? "职位已下线，以下资料用于理解这段沟通" : job.opportunityVerdict || "信息不足，暂时无法判断")}${job.availability !== "offline" && job.opportunitySummary ? ` · ${escapeHtml(job.opportunitySummary)}` : ""}</p>
-      <p class="line"><strong>岗位主要做什么：</strong>${escapeHtml(job.roleSummary || "岗位职责分析尚未完成。")}</p>
-      <p class="line"><strong>简历匹配：</strong>${escapeHtml([job.fitLabel, job.fitSummary].filter(Boolean).join(" · ") || "待确认")}</p>
+      ${opportunityLine ? `<p class="line"><strong>这份机会：</strong>${escapeHtml(opportunityLine)}${job.availability !== "offline" && job.opportunitySummary ? ` · ${escapeHtml(job.opportunitySummary)}` : ""}</p>` : ""}
+      ${job.roleSummary ? `<p class="line"><strong>岗位主要做什么：</strong>${escapeHtml(job.roleSummary)}</p>` : ""}
+      ${job.fitLabel || job.fitSummary ? `<p class="line"><strong>简历匹配：</strong>${escapeHtml([job.fitLabel, job.fitSummary].filter(Boolean).join(" · "))}</p>` : ""}
       <p class="line"><strong>工作安排：</strong>${escapeHtml(job.workSchedule || "工作安排未确认")}</p>
       <details class="message-job-details"><summary>岗位与资料详情</summary>
         <p class="line"><strong>公司业务：</strong>${escapeHtml(job.companyBusiness || "JD 暂未说明公司的具体业务。")}</p>
@@ -170,10 +161,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     return {
       key: viewKey,
       identity: `${result.platform}\0${result.conversationKey}`,
-      actionGroup: retainedItem ? "needs_review" : inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
+      actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
-      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)} · 阶段：${escapeHtml(progressStageLabel(result.stage))}</p>${inboundSection}${retainedWork}${decisionCard}<h3>下一步</h3>${nextSection}${sentForm}</section>`
+      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)} · 阶段：${escapeHtml(progressStageLabel(result.stage))}</p>${inboundSection}${decisionCard}<h3>下一步</h3>${nextSection}${sentForm}</section>`
     };
   });
   const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)).reduce((count, result) => count
@@ -190,26 +181,12 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     <div class="button-row"><button type="button" data-send-batch hidden disabled>确认并串行发送 0 条</button><button type="button" data-send-batch-exit hidden>退出批量</button><button type="button" data-send-stop hidden disabled>停止后续发送</button></div>
   </section>` : "";
   const resultIdentities = new Set(allResults.filter(result => /^sha256:[a-f0-9]{64}$/.test(result.conversationKey || "")).map((result) => `${result.platform}\0${result.conversationKey}`));
-  const unresolvedViews = durableUnresolved.filter(item => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)).map((item, unresolvedIndex) => {
-    const viewKey = messageViewKey("unresolved", [item.platform, item.conversationKey]);
-    const viewId = `message-view-${viewKey}`;
-    const platformLabel = item.platform === "zhaopin" ? "智联" : "BOSS";
-    const title = item.positionTitle || "岗位名称待确认";
-    const company = item.company || "公司待确认";
-    const matchingContact = incomingContacts.find((contact) => contact.platform === item.platform
-      && contact.conversationKey === item.conversationKey);
-    return {
-      key: viewKey,
-      identity: `${item.platform}\0${item.conversationKey}`,
-      actionGroup: "needs_review",
-      contactKey: matchingContact?.key || "",
-      list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform || "")}" data-task="pending" data-pending="true" data-resume="${Boolean(matchingContact?.resumeRequested)}" data-interview="${Boolean(matchingContact?.interviewInvited)}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small class="message-source">${escapeHtml(platformLabel)} · 待补岗位资料</small><small>${escapeHtml(company)}</small><em>${escapeHtml(messagePreview(item, "待补岗位资料"))}</em></span></label>`,
-      detail: renderUnresolvedItem(db, item, { profileId, viewKey, hidden: true, timeline: inboxByConversation.get(`${item.platform}\0${item.conversationKey}`)?.timeline, messageActions, escapeHtml, escapeAttr })
-    };
-  });
-  const unresolvedIdentities = new Set(durableUnresolved.map((item) => `${item.platform}\0${item.conversationKey}`));
-  const incomingViews = incomingContacts.filter((item) => !resultIdentities.has(`${item.platform}\0${item.conversationKey}`)
-    && !unresolvedIdentities.has(`${item.platform}\0${item.conversationKey}`))
+  const incomingViews = incomingContacts.filter((item) => {
+    const identity = `${item.platform}\0${item.conversationKey}`;
+    if (resultIdentities.has(identity)) return false;
+    if ((item.sourceKinds || []).length === 1 && item.sourceKinds[0] === "unresolved") return false;
+    return true;
+  })
     .map((item) => {
       const inboxItem = inboxByConversation.get(`${item.platform}\0${item.conversationKey}`) || null;
       const actionGroup = inboxItem?.actionGroup || (item.pending ? "needs_action" : "done");
@@ -222,18 +199,17 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         escapeAttr
       });
     });
-  const representedIdentities = new Set([...resultViews, ...unresolvedViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
+  const representedIdentities = new Set([...resultViews, ...incomingViews].map((view) => view.identity).filter(Boolean));
   const inboxOnlyViews = inboxItems.filter((item) => !representedIdentities.has(`${item.platform}\0${item.conversationKey}`))
     .map((item) => renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }));
-  const allViews = [...resultViews, ...unresolvedViews, ...incomingViews, ...inboxOnlyViews];
+  const allViews = [...resultViews, ...incomingViews, ...inboxOnlyViews];
   const requestedView = contactMatchesScope ? allViews.find((view) => view.contactKey === requestedContact.key) : null;
   const selectionLocked = Boolean(contactKey && !requestedView);
   const views = allViews;
   const messageGroups = [
     ["needs_action", "现在需要你处理", false],
     ["waiting", "等待对方回复", false],
-    ["needs_review", "系统正在补充资料", false],
-    ["done", "已经处理", true]
+    ["done", "已结束记录", true]
   ];
   const groupedLists = messageGroups.map(([group, label, collapsed]) => {
     const groupViews = views.filter((view) => view.actionGroup === group);
@@ -246,12 +222,20 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const messageWorkspace = views.length
     ? `<section class="message-workspace" aria-label="消息行动收件箱"><aside class="message-list" aria-label="行动消息">${groupedLists}</aside><div class="message-detail">${views.map((view) => view.detail).join("")}</div></section>`
     : "";
-  const retainedRecords = durableUnresolved.length
-    ? `<p class="line">保留记录 ${durableUnresolved.length}</p>`
-    : "";
   const counters = status.counters || {};
   const hasReadDetails = Boolean(status.startedAt || status.status === "running" || (status.platformRuns || []).length || Number(counters.visible) || Number(counters.newReplies));
-  const platformNotices =  `<details class="message-read-details"><summary>读取详情</summary><p class="line">BOSS 与智联消息统一在本页展示和处理。</p>${hasReadDetails ? `<p class="line">可见 ${Math.max(0, Number(counters.visible) || 0)} · 已分析回复 ${Math.max(0, Number(counters.newReplies) || 0)} · BOSS 已读 ${Math.max(0, Number(counters.currentRead) || 0)} · 送达 ${Math.max(0, Number(counters.currentDelivered) || 0)} · 未解决 ${Math.max(0, Number(status.unresolved) || 0)}</p>${retainedRecords}<p class="line">智联暂不提供已读/送达统计。</p>` : ""}${(status.platformRuns || []).map(entry => `<p class="line">${entry.platform === "zhaopin" ? "智联" : "BOSS"}：${escapeHtml(entry.reasonCode === "MESSAGE_DISCOVERY_WAITING_TURN" ? "等待前一平台读取完成" : ({ not_connected: "未连接消息页，本次未检查", running: "正在加载并读取消息，可随时安全停止", completed: "本次读取完成", stopped: "已安全停止", needs_user_action: "需要处理后重试" })[entry.status] || "等待读取")}${entry.reasonCode && entry.reasonCode !== "MESSAGE_DISCOVERY_WAITING_TURN" ? ` · ${escapeHtml(messageDiscoveryReasonText(entry.reasonCode))}` : ""}</p>`).join("")}</details>`;
+  const platformNotices =  `<details class="message-read-details"><summary>读取详情</summary><p class="line">BOSS 与智联消息统一在本页展示和处理。</p>${hasReadDetails ? `<p class="line">可见 ${Math.max(0, Number(counters.visible) || 0)} · 已分析回复 ${Math.max(0, Number(counters.newReplies) || 0)} · BOSS 已读 ${Math.max(0, Number(counters.currentRead) || 0)} · 送达 ${Math.max(0, Number(counters.currentDelivered) || 0)}</p><p class="line">智联暂不提供已读/送达统计。</p>` : ""}${(status.platformRuns || []).map(entry => {
+    const internalRepair = itemReasonCodes.has(entry.reasonCode);
+    const label = internalRepair
+      ? "本次读取完成"
+      : entry.reasonCode === "MESSAGE_DISCOVERY_WAITING_TURN"
+        ? "等待前一平台读取完成"
+        : ({ not_connected: "未连接消息页，本次未检查", running: "正在加载并读取消息，可随时安全停止", completed: "本次读取完成", stopped: "已安全停止", needs_user_action: "需要处理后重试" })[entry.status] || "等待读取";
+    const detail = !internalRepair && entry.reasonCode && entry.reasonCode !== "MESSAGE_DISCOVERY_WAITING_TURN"
+      ? ` · ${escapeHtml(messageDiscoveryReasonText(entry.reasonCode))}`
+      : "";
+    return `<p class="line">${entry.platform === "zhaopin" ? "智联" : "BOSS"}：${escapeHtml(label)}${detail}</p>`;
+  }).join("")}</details>`;
   const freshness = `<section class="message-freshness" aria-label="消息同步状态">${["boss", "zhaopin"].map((platform) => {
     const value = inboxState.freshness?.[platform] || { label: "尚未同步", detail: "" };
     return `<div data-state="${escapeAttr(value.state || "idle")}"><strong>${platform === "zhaopin" ? "智联" : "BOSS"}</strong><span>${escapeHtml(value.label)}</span><small>${escapeHtml(value.detail || "")}</small></div>`;
@@ -331,7 +315,7 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
     actionGroup: item.actionGroup,
     contactKey: "",
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section>${item.actionGroup === "needs_review" ? '<p class="line">岗位资料正在后台补充，消息内容已保留。</p>' : ""}</section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section></section>`
   };
 }
 
@@ -412,7 +396,7 @@ function messageDiscoveryClientScript(scriptState) {
     const draftWrites=new Map();
     const messageFor=(code)=>initial.recoveryMessages[String(code||"")]||initial.recoveryMessages.default;
     const show=(code)=>{if(reloadPending)return;feedback.textContent=messageFor(code);feedback.dataset.errorCode=String(code||"");};
-    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const unresolved=Math.max(0,Number(status?.unresolved)||0);const counts=queued?"已发现 "+queued+" 条消息"+(unresolved?"，其中 "+unresolved+" 条待补岗位资料":"")+"。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
+    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const counts=queued?"已发现 "+queued+" 条消息。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
     const requestReload=(resetSelection=false)=>{if(resetSelection)try{localStorage.removeItem(selectedKeyStorage);}catch{}reloadPending=true;location.reload();};
     const setPending=(pending)=>{feedback.setAttribute("aria-busy",String(pending));if(pending)feedback.textContent="正在处理，请稍候。";for(const form of forms)for(const button of form.querySelectorAll("button")){if(!("discoveryBaseDisabled" in button.dataset))button.dataset.discoveryBaseDisabled=String(button.disabled);button.disabled=pending||button.dataset.discoveryBaseDisabled==="true";}};
     const read=async(response)=>{const text=await response.text();try{return {json:true,body:JSON.parse(text)}}catch{return {json:false,body:null}}};
@@ -552,27 +536,6 @@ function messageDiscoveryClientScript(scriptState) {
   }());</script>`;
 }
 
-function renderUnresolvedItem(db, item, { profileId, viewKey, hidden, embedded = false, timeline = [], messageActions = [], escapeHtml, escapeAttr }) {
-  const attributes = embedded ? 'class="message-unresolved-context"' : `id="message-detail-${viewKey}" class="panel message-unresolved" data-platform="${escapeAttr(item.platform || "")}" data-message-detail-panel="${viewKey}"${hidden ? " hidden" : ""}`;
-  const back = embedded ? "" : '<button type="button" class="message-back" data-message-back>返回列表</button>';
-  if (item.platform === "zhaopin") return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "待处理消息")}</h2><p class="message-source">智联</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions }) || (item.inboundMessages || []).map(message => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><p class="line">岗位资料正在后台补充，消息内容已保留。</p></section>`;
-  const complete = Boolean(String(item.positionTitle || "").trim() && String(item.company || "").trim());
-  const matches = complete ? findExactIdentityCandidates(db, {
-    profileId, title: item.positionTitle, company: item.company
-  }) : [];
-  const hiddenInputs = `<input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="conversationKey" value="${escapeAttr(item.conversationKey)}"><input type="hidden" name="previewDigest" value="${escapeAttr(item.previewDigest)}">`;
-  const candidateChoices = matches.map((job) =>
-    `<label><input type="radio" name="jobId" value="${job.id}"${matches.length === 1 ? " checked" : ""}>${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}</label>`
-  ).join("");
-  const link = complete && matches.length
-    ? `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<input type="hidden" name="action" value="link"><fieldset><legend>关联现有岗位</legend>${candidateChoices}</fieldset><button class="secondary">关联现有岗位</button></form>`
-    : `<button class="secondary" disabled>关联现有岗位</button>`;
-  const create = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button name="action" value="create"${complete ? "" : " disabled"}>保存为 HR 主动机会</button></form>`;
-  const ignore = `<form method="post" action="/api/message-discovery-unresolved">${hiddenInputs}<button class="secondary" name="action" value="ignore">不纳入 OfferGo</button></form>`;
-  const incomplete = complete ? "" : `<p class="risk-text">岗位身份仍不完整，请下次只读发现后再处理。</p>`;
-  return `<section ${attributes}>${back}<h2>${escapeHtml(item.positionTitle || "岗位名称待确认")}</h2><p class="message-source">BOSS</p><p class="line">${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(item.salary || "薪资待确认")} · ${escapeHtml(item.city || "地点待确认")}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions })}${incomplete}<p class="risk-text">${escapeHtml(messageDiscoveryReasonText(item.reasonCode))}</p><div class="message-controls">${link}${create}${ignore}</div></section>`;
-}
-
 function messageViewKey(type, parts) {
   return `${type}-${crypto.createHash("sha256").update(JSON.stringify(parts.map((part) => String(part || "")))).digest("hex")}`;
 }
@@ -584,6 +547,7 @@ function messageIntentLabel(value) {
     information_request: "需要你补充信息",
     information_update: "对方补充了信息",
     general_communication: "普通沟通",
+    rejection: "本次机会已结束",
     manual_review: "需要人工判断"
   }[String(value || "")] || "需要人工判断";
 }
