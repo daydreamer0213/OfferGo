@@ -122,8 +122,10 @@ function assertDualPlatformActionRendering() {
     runtime: { browserMode: "portable", cdpPort: 9222, site: "boss" },
     profile: {}
   });
-  assert.match(html, /name="site" value="both"/);
-  assert.match(html, />同时运行 BOSS \+ 智联<\/button>/);
+  assert.match(html, /<option value="both">BOSS \+ 智联（同时）<\/option>/);
+  assert.match(html, /data-platform-selector/);
+  assert.doesNotMatch(html, /dual-platform-start/);
+  assert.doesNotMatch(html, />同时运行 BOSS \+ 智联<\/button>/);
 }
 
 function assertEvaluationScriptExplainsMissingPlaywright() {
