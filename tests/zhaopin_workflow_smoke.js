@@ -494,6 +494,22 @@ async function main() {
     assert.equal((await stalePaneAdapter.readVisiblePaneDetail('cdp-zl', stalePaneState.cards[1])).sourceId, 'SYNTH1', 'a newly selected card may wait for the previous ready pane to transition');
     assert(stalePaneClock >= 5000, 'the stale ready pane is allowed to settle beyond the old six-sample window');
 
+    let selectedStaleClock = 0;
+    const selectedStaleBridge = fakeBrowser({ cardSourceIds: true });
+    selectedStaleBridge.setState({ detailRequestState: 'ready', loading: false, detail: fullDetail(-1) });
+    const selectedStaleAdapter = new ZhaopinSiteAdapter({
+      browser: selectedStaleBridge,
+      nowFn: () => selectedStaleClock,
+      sleepFn: async (ms = 120) => {
+        selectedStaleClock += ms;
+        if (selectedStaleClock >= 5000) selectedStaleBridge.setState({ detail: fullDetail(0) });
+      },
+      randomFn: () => 0
+    });
+    const selectedStaleState = await selectedStaleAdapter.readSearchState('cdp-zl');
+    assert.equal((await selectedStaleAdapter.readVisiblePaneDetail('cdp-zl', selectedStaleState.cards[0], null, null, null, true)).sourceId, 'SYNTH0', 'the first selected card after keyword navigation may wait for the previous keyword pane');
+    assert(selectedStaleClock >= 5000, 'the first selected card waits for keyword navigation to finish settling');
+
     const loadingBatch = storage.createBatch(db, 'zhaopin', 'AI', 'loading-timeout');
     const loadingTargets = [], loadingTerminal = [];
     const loadingBridge = fakeBrowser({ loadingOnSwitch: true });

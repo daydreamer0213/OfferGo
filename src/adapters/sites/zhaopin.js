@@ -264,7 +264,7 @@ class ZhaopinSiteAdapter {
             let detail;
             let detailError = null;
             try {
-              detail = await this.readVisiblePaneDetail(tabId, card, options.signal, scoped, beforeEmptyRetry);
+              detail = await this.readVisiblePaneDetail(tabId, card, options.signal, scoped, beforeEmptyRetry, targetJobs.length === 0);
             } catch (error) {
               detailError = error;
               throw error;
@@ -433,7 +433,7 @@ class ZhaopinSiteAdapter {
     return state;
   }
 
-  async readVisiblePaneDetail(tabId, card, signal = null, assertTabBindings = null, beforeEmptyRetry = null) {
+  async readVisiblePaneDetail(tabId, card, signal = null, assertTabBindings = null, beforeEmptyRetry = null, allowSelectedPaneTransition = false) {
     throwIfAborted(signal);
     await assertBindings(assertTabBindings);
     const before = await this.readSearchState(tabId);
@@ -472,7 +472,7 @@ class ZhaopinSiteAdapter {
       }
       const stoppedEmpty = state.selectedIndex === refreshedCard.index
         && state.detailRequestState === 'empty' && state.cards[refreshedCard.index]?.signature === refreshedCard.signature;
-      const awaitingPaneTransition = !wasSelected && Boolean(beforeUrl)
+      const awaitingPaneTransition = (!wasSelected || allowSelectedPaneTransition) && Boolean(beforeUrl)
         && state.selectedIndex === refreshedCard.index && state.detail?.url === beforeUrl;
       if (stoppedEmpty && typeof beforeEmptyRetry === 'function' && !retryUsed) {
         retryUsed = true;
