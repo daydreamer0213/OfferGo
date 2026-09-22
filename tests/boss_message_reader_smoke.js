@@ -185,13 +185,16 @@ function runGuardedExpression(expression, { innerText, unread = true, snapshotRe
   const initialSnapshot = snapshot();
   const guardedSuccess = { clicked: true, operation: "__bossGuardedMessageConversationClick", rowIndex: 0 };
   const selectedSnapshot = snapshot();
-  const browser = fakeBrowser({ snapshots: [initialSnapshot, guardedSuccess, selectedSnapshot] });
+  const browser = fakeBrowser({ snapshots: [initialSnapshot, guardedSuccess, selectedSnapshot, selectedSnapshot] });
   const { reader, scan: unread } = await scan(browser);
   assert.strictEqual(unread.tabId, COMMUNICATION_TAB_ID);
   assert(Object.isFrozen(unread.queue));
   assert(Object.isFrozen(unread.queue[0]));
   assert.strictEqual(unread.queue[0].tabId, COMMUNICATION_TAB_ID);
   const selected = await reader.openQueuedConversation(unread.queue[0]);
+  const selectedAgain = await reader.readSelectedConversation(selected);
+  assert.strictEqual(selectedAgain.rows.filter((row) => row.selected)[0].conversationKey, unread.queue[0].conversationKey);
+  assert.deepStrictEqual(selectedAgain.messages.map((item) => item.messageKey), selected.messages.map((item) => item.messageKey));
   assert.strictEqual(selected.positionName, "Java Engineer");
   assert.strictEqual(browser.guardedDomClicks, 1);
   assert.strictEqual(browser.calls.filter(([name]) => name === "setPageLifecycleActive").length, 2,

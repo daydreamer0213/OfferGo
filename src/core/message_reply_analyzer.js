@@ -5,7 +5,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     throw new Error("message reply analyzer requires adapter.draftMessageGroup");
   }
   return async function analyzeMessageGroup(
-    { profile, job, messages = [], facts = [], answerMemories = [], draftQualityRevision, now } = {},
+    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], answerMemories = [], draftQualityRevision, now } = {},
     { signal = null } = {}
   ) {
     const normalizedFacts = (facts || []).map((fact) => ({
@@ -21,6 +21,10 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     const input = {
       profile,
       job,
+      platform: String(platform || "").toLowerCase(),
+      requestedActions: Array.isArray(requestedActions)
+        ? requestedActions.filter((item) => item?.kind === "resume_request").map(() => ({ kind: "resume_request" })).slice(0, 1)
+        : [],
       messages: messages.map((message) => ({
         messageKey: message.messageKey,
         text: String(message.text || "")
@@ -36,7 +40,10 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
         facts: input.facts,
         answerMemories: input.answerMemories,
         now,
-        requestedSubjectKeys: input.requestedSubjectKeys
+        requestedSubjectKeys: input.requestedSubjectKeys,
+        platform: input.platform,
+        requestedActions: input.requestedActions,
+        sourceMessages: input.messages.map((message) => message.text)
       });
     } catch (error) {
       if (typeof logger?.warn === "function") {

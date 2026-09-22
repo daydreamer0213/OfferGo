@@ -528,6 +528,8 @@ StructuredModelAdapter.prototype.draftMessageGroup = async function draftMessage
     "如果使用 answerMemories，必须在 usedMemoryIds 中返回实际使用的记忆 id；不得返回未提供的 id。",
     "Do not confirm interview times unless supplied confirmed facts support them.",
     "Do not claim resume submission.",
+    "supplied requestedActions 表示 OfferGo 将通过当前招聘平台按钮单独完成的动作；草稿只回答剩余问题，不要重复该动作，也不要承诺稍后发送简历。",
+    "根据 supplied platform 保持在当前招聘平台内沟通；除非招聘方原话明确要求，否则不得主动改用邮箱、微信或其他平台外渠道。",
     "Return no draft when a required fact is missing or expired.",
     "Return at most two complete alternative drafts.",
     "missingFact 只能是 null 或 {key,question}，不得输出 reason 等其他字段。只有招聘方询问了输入中没有的候选人事实时才使用 missingFact；question 必须是向用户补充该事实的简短问题，此时 messages 必须为空。",

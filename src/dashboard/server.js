@@ -91,6 +91,7 @@ const {
 const { communicationAmbiguityStateForBatch } = require("../core/communication_ambiguity");
 const {
   PROGRESS_STAGES,
+  TERMINAL_PROGRESS_STAGES,
   ensureProgressCard,
   transitionProgressCard,
   correctProgressStage,
@@ -254,6 +255,24 @@ const PROGRESS_ACTIONS = Object.freeze({
     eventType: "interview_scheduled",
     summary: "",
     nextAction: "按已确认时间参加面试"
+  },
+  mark_interview_completed: {
+    stage: "interview_completed",
+    eventType: "interview_completed",
+    summary: "用户确认已完成面试",
+    nextAction: "等待面试结果"
+  },
+  mark_offer_received: {
+    stage: "offer_received",
+    eventType: "offer_received",
+    summary: "用户确认已收到 Offer",
+    nextAction: "确认入职条件和最终决定"
+  },
+  withdraw_opportunity: {
+    stage: "withdrawn",
+    eventType: "opportunity_withdrawn",
+    summary: "用户决定不再继续这份机会",
+    nextAction: ""
   },
   mark_resume_submitted: {
     stage: "resume_submitted",
@@ -5943,7 +5962,7 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
   const scopedProgress = progressCandidates.filter((job) => scope === "all" || queueScopeForJob(job, latestMainBatchId) === scope);
   counts.waiting_reply = scopedProgress.filter((job) => job.progressCard.stage === "waiting_reply").length;
   counts.needs_user_action = scopedProgress.filter((job) => ["needs_user_action", "reply_ready"].includes(job.progressCard.stage)).length;
-  counts.interview = scopedProgress.filter((job) => ["interview_invited", "interview_scheduled"].includes(job.progressCard.stage)).length;
+  counts.interview = scopedProgress.filter((job) => ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard.stage)).length;
   const wanted = pool === "focus" ? new Set(["primary", "apply"]) : new Set([pool]);
   const filtered = candidates.filter((job) => {
     const tags = job.qualityTags || [];
@@ -5952,7 +5971,7 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
     if (pool === "activity_pending") return job.decisionBucket === "refresh" && (tags.includes("activity_unverified") || tags.includes("stale_or_unknown_active")) && !tags.includes("detail_unverified");
     if (pool === "waiting_reply") return job.progressCard?.stage === "waiting_reply";
     if (pool === "needs_user_action") return ["needs_user_action", "reply_ready"].includes(job.progressCard?.stage);
-    if (pool === "interview") return ["interview_invited", "interview_scheduled"].includes(job.progressCard?.stage);
+    if (pool === "interview") return ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard?.stage);
     return wanted.has(job.decisionBucket);
   });
   const pageSize = 30;
@@ -6397,10 +6416,14 @@ function renderProgressPanel(card) {
       : actionButton("reply_confirmed_sent", "我已在 BOSS 手动发送")
     : card.stage === "interview_invited"
       ? `<form class="follow" method="post" action="/api/progress">${context}${requestKey()}<input type="hidden" name="action" value="mark_interview_scheduled"><input name="summary" placeholder="你确认的面试安排" required><input type="datetime-local" name="scheduledAt" required><button>标记已安排面试</button></form>`
+      : card.stage === "interview_scheduled"
+        ? actionButton("mark_interview_completed", "标记已完成面试")
+        : card.stage === "interview_completed"
+          ? actionButton("mark_offer_received", "标记已收到 Offer")
       : "";
-  const controls = card.stage === "closed"
+  const controls = TERMINAL_PROGRESS_STAGES.has(card.stage)
     ? actionButton("reopen_opportunity", "重新开启机会")
-    : `${stageAction}${actionButton("mark_needs_user_action", "标记需要处理")}${actionButton("mark_resume_submitted", "标记已投递简历")}${actionButton("close_opportunity", "关闭机会")}`;
+    : `${stageAction}${actionButton("mark_needs_user_action", "标记需要处理")}${actionButton("mark_resume_submitted", "标记已投递简历")}${actionButton("withdraw_opportunity", "我不再继续")}${actionButton("close_opportunity", "关闭机会")}`;
   const correctionOptions = [...PROGRESS_STAGES]
     .map((stage) => `<option value="${stage}">${escapeHtml(progressStageLabel(stage))}</option>`)
     .join("");
@@ -6423,7 +6446,10 @@ function progressStageLabel(stage) {
     reply_ready: "回复草稿已就绪",
     interview_invited: "收到面试邀约",
     interview_scheduled: "面试已安排",
+    interview_completed: "已完成面试",
+    offer_received: "已收到 Offer",
     resume_submitted: "已投递简历",
+    withdrawn: "已主动结束",
     rejected: "已拒绝",
     closed: "已关闭"
   }[stage] || "求职进展";

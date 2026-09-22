@@ -29,7 +29,8 @@ let serial = 0;
   try {
     const pathname = `/funnel?planId=${owner.planId}`;
     const current = await (await fetch(base + pathname)).text();
-    assert.match(current, /<table[^>]*aria-label="当前方案投递反馈"/, 'HTTP page identifies reporting scope');
+    assert.match(current, /aria-label="求职进展概览"/, 'HTTP page shows the complete job-search health path');
+    assert.match(current, /联系岗位[\s\S]*收到回复[\s\S]*有效沟通[\s\S]*面试邀请[\s\S]*完成面试[\s\S]*收到 Offer/);
     assert.match(current, /收到的联系/);
     assert.match(current, /包含 HR 新招呼和对投递的回复，同一会话只计一次/);
     assert.match(incomingPlatformRow(current, 'boss'), /1[\s\S]*1[\s\S]*0/);
@@ -37,8 +38,9 @@ let serial = 0;
     assert.match(current, /<details id="incoming-boss-resume-details"/);
     assert.match(current, new RegExp(`/messages\\?planId=${owner.planId}&amp;source=boss&amp;contact=sha256%3A[a-f0-9]{64}&amp;task=all`));
     assert.doesNotMatch(current, /其他消息中还有/);
-    assert.match(platformRow(current, 'boss'), /5[\s\S]*2[\s\S]*40%/, 'fresh replies use all 5 contacts');
-    assert.match(platformRow(current, 'zhaopin'), /2[\s\S]*1[\s\S]*50%/);
+    assert.match(healthPlatform(current, 'boss'), /data-health-stage="started"[\s\S]*>5<[\s\S]*data-health-stage="replied"[\s\S]*>2</, 'fresh replies stay visible in the complete path');
+    assert.match(healthPlatform(current, 'zhaopin'), /data-health-stage="started"[\s\S]*>2<[\s\S]*data-health-stage="replied"[\s\S]*>1</);
+    assert.doesNotMatch(healthPlatform(current, 'zhaopin'), /data-health-stage="read"/, '智联不展示无法可靠取得的已读状态');
     const lifetime = await (await fetch(base + pathname + '&view=lifetime')).text();
     assert.match(platformRow(lifetime, 'boss'), /8[\s\S]*2[\s\S]*25%/);
     assert.match(lifetime, /所有方案的本地记录/);
@@ -59,7 +61,7 @@ let serial = 0;
     const advice = renderFunnelPage({ plan: { id: owner.planId }, dashboard: {
       ...service.getDashboard(owner), advice: { site: 'boss', stage: 'replied', title: '先检查招呼语和岗位匹配', numerator: 2, denominator: 20 }
     } });
-    assert.match(advice, /20 个已读岗位中，2 个有回复/);
+    assert.match(advice, /20 个已读岗位中，2 个进入下一步/);
     assert.match(advice, /查看等待回复的岗位/);
     const advicePath = advice.match(/href="([^"]+)">查看等待回复的岗位/)?.[1].replace(/&amp;/g, '&');
     assert.match(advicePath || '', /pool=waiting_reply/);
@@ -81,7 +83,7 @@ let serial = 0;
         return route.continue();
       });
       await page.goto(base + pathname);
-      assert.match(await page.locator('[data-feedback-platform="boss"]').innerText(), /40%/);
+      assert.match(await page.locator('[data-health-platform="boss"]').innerText(), /收到回复/);
       assert.equal(await page.getByRole('button', { name: '保存调整记录', exact: true }).isVisible(), false);
       await page.getByRole('link', { name: '累计记录', exact: true }).click();
       assert.match(await page.locator('[data-feedback-platform="boss"]').innerText(), /25%/);
@@ -116,6 +118,7 @@ let serial = 0;
   }
 })().catch(error => { console.error(error.stack); process.exitCode = 1; });
 function platformRow(html, site) { return html.match(new RegExp(`<tr data-feedback-platform="${site}"[\\s\\S]*?</tr>`))?.[0] || ''; }
+function healthPlatform(html, site) { return html.match(new RegExp(`<article class="health-platform" data-health-platform="${site}"[\\s\\S]*?</article>`))?.[0] || ''; }
 function incomingPlatformRow(html, site) { return html.match(new RegExp(`<tr data-incoming-platform="${site}"[\\s\\S]*?</tr>`))?.[0] || ''; }
 function createOwner(db) {
   const profileId = Number(db.prepare("INSERT INTO candidate_profiles(display_name,profile_json,created_at,updated_at) VALUES ('Synthetic','{}',?,?)").run(now, now).lastInsertRowid);

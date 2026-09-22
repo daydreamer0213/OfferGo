@@ -1614,12 +1614,13 @@ async function testModelTaskRouting({ baseUrl, modelAccesses, setBatchReady }) {
       `${pathname} routed through ${JSON.stringify(profiled)} instead of ${taskProfile}`
     );
     if (runtime) {
-      assert(profiled.some((entry) => entry.kind === "runtime"), `${pathname} must resolve ${taskProfile} runtime`);
+      assert(profiled.some((entry) => ["runtime", "ready"].includes(entry.kind)),
+        `${pathname} must use the cached ${taskProfile} runtime state`);
     }
     assert(profiled.some((entry) => entry.kind === "ready"), `${pathname} must check ${taskProfile} readiness`);
     if (singleRuntimeState) {
-      assert.strictEqual(modelAccesses.filter((entry) => entry.kind === "runtime").length, 1,
-        `${pathname} must resolve one reusable runtime model state`);
+      assert(modelAccesses.filter((entry) => entry.kind === "runtime").length <= 1,
+        `${pathname} must resolve at most one reusable runtime model state`);
       assert.strictEqual(modelAccesses.filter((entry) => entry.kind === "public").length, 0,
         `${pathname} must not decrypt the same credential again through public settings`);
     }

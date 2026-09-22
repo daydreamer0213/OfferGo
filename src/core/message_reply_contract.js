@@ -39,6 +39,8 @@ function validateMessageReply(value, context = {}) {
   assertCoverageComplete(normalized);
   assertDraftLimit(normalized.messages, MAX_DRAFTS);
   assertManualOnlyHasNoDraft(normalized);
+  assertDraftChannelSafe(normalized.messages, context);
+  assertDraftDoesNotDuplicateAction(normalized.messages, context.requestedActions);
   for (const key of normalized.usedFactKeys) {
     const fact = validFacts.get(key);
     if (!fact) {
@@ -233,6 +235,37 @@ function assertManualOnlyHasNoDraft(normalized) {
   throw contractError("MESSAGE_REPLY_MANUAL_ONLY", "this message category requires manual handling");
 }
 
+function assertDraftChannelSafe(messages, context = {}) {
+  const platform = String(context.platform || "").toLowerCase();
+  if (!["boss", "zhaopin"].includes(platform)) return;
+  const source = (Array.isArray(context.sourceMessages) ? context.sourceMessages : [])
+    .map((item) => String(item || "").toLowerCase()).join(" ");
+  const channels = [
+    { name: "email", pattern: /邮箱|邮件|e-?mail|@[a-z0-9.-]+\.[a-z]{2,}/i },
+    { name: "wechat", pattern: /微信|wechat|wx/i },
+    { name: "qq", pattern: /(?:^|[^a-z])qq(?:[^a-z]|$)/i }
+  ];
+  for (const channel of channels) {
+    if (channel.pattern.test(source)) continue;
+    if (messages.some((message) => channel.pattern.test(String(message || "")))) {
+      throw contractError("MESSAGE_REPLY_CHANNEL_UNSUPPORTED", `draft invented unsupported ${channel.name} channel`);
+    }
+  }
+}
+
+function assertDraftDoesNotDuplicateAction(messages, requestedActions) {
+  const resumeAction = Array.isArray(requestedActions)
+    && requestedActions.some((item) => item?.kind === "resume_request");
+  if (!resumeAction) return;
+  const duplicatesResumeSend = messages.some((message) => {
+    const text = String(message || "").replace(/\s+/g, "");
+    return /(?:简历|履历)/.test(text) && /(?:发|发送|分享|提供|上传|投递|提交)/.test(text);
+  });
+  if (duplicatesResumeSend) {
+    throw contractError("MESSAGE_REPLY_ACTION_DUPLICATED", "draft duplicated the platform resume action");
+  }
+}
+
 function safeMessageSummary(messageIntent, messageCategory) {
   if (messageIntent === "interview_invitation") return "对方正式邀请候选人参加面试。";
   if (messageIntent === "interest_check") return "对方正在询问候选人是否愿意了解或继续沟通该岗位。";
@@ -267,7 +300,10 @@ function safeReplyNextAction(stage) {
     reply_ready: "Review draft before manual send",
     interview_invited: "Review interview invitation",
     interview_scheduled: "Review interview schedule",
+    interview_completed: "Wait for interview outcome",
+    offer_received: "Review offer details",
     resume_submitted: "Wait for recruiter reply",
+    withdrawn: "Opportunity withdrawn",
     rejected: "Opportunity rejected",
     closed: "Opportunity closed"
   }[stage] || "Review next step";

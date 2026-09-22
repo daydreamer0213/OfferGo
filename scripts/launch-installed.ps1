@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-  [int]$Port = 8787
+  [int]$Port = 8787,
+  [string]$ProgressPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,26 @@ $DataRoot = Resolve-RoleFlowNormalizedPath -Path (Join-Path $LocalAppDataRoot "R
 $LogDir = Join-Path $DataRoot ".runtime\logs"
 $LogPath = Join-Path $LogDir "launcher.log"
 $StartScript = Join-Path $PSScriptRoot "start-workspace.ps1"
+
+function Write-OfferGoProgress {
+  param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("checking_install", "starting_service", "starting_browser", "checking_workspace", "ready", "failed")]
+    [string]$State,
+    [Parameter(Mandatory = $true)][string]$Message
+  )
+  if ([string]::IsNullOrWhiteSpace($ProgressPath)) { return }
+  $FullPath = [System.IO.Path]::GetFullPath($ProgressPath)
+  $Parent = Split-Path -Parent $FullPath
+  New-Item -ItemType Directory -Force -Path $Parent | Out-Null
+  $TempPath = Join-Path $Parent (".{0}.{1}.tmp" -f ([System.IO.Path]::GetFileName($FullPath)), [guid]::NewGuid().ToString("N"))
+  @{
+    state = $State
+    message = $Message
+    updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  } | ConvertTo-Json -Compress | Set-Content -LiteralPath $TempPath -Encoding utf8
+  Move-Item -LiteralPath $TempPath -Destination $FullPath -Force
+}
 
 function Write-RoleFlowLauncherLog {
   param([Parameter(Mandatory = $true)][string]$Value)
@@ -69,6 +90,7 @@ $(if ($CanOpenLogs) { "`r`n是否打开诊断日志文件夹？" } else { "" })
 $StartupMutex = $null
 $StartupMutexAcquired = $false
 try {
+  Write-OfferGoProgress -State "checking_install" -Message "正在检查 OfferGo 运行环境…"
   $StartupMutex = [System.Threading.Mutex]::new(
     $false,
     (Get-RoleFlowStartupMutexName -ProjectRoot $ProjectRoot -Port $Port)
@@ -81,13 +103,18 @@ try {
   if (-not $StartupMutexAcquired) {
     throw "ROLEFLOW_STARTUP_ALREADY_IN_PROGRESS: 另一个 OfferGo 启动过程仍在运行。"
   }
-  $Output = & powershell.exe `
-    -NoProfile `
-    -NonInteractive `
-    -WindowStyle Hidden `
-    -ExecutionPolicy Bypass `
-    -File $StartScript `
-    -Port $Port 2>&1
+  $StartArguments = @(
+    "-NoProfile",
+    "-NonInteractive",
+    "-WindowStyle", "Hidden",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $StartScript,
+    "-Port", [string]$Port
+  )
+  if (-not [string]::IsNullOrWhiteSpace($ProgressPath)) {
+    $StartArguments += @("-ProgressPath", $ProgressPath)
+  }
+  $Output = & powershell.exe @StartArguments 2>&1
   $ExitCode = $LASTEXITCODE
   $Text = ($Output | Out-String).Trim()
   Write-RoleFlowLauncherLog -Value (
@@ -99,6 +126,7 @@ try {
       $Reason = "启动组件返回错误代码 $ExitCode。"
     }
     Show-RoleFlowError -Reason $Reason
+    Write-OfferGoProgress -State "failed" -Message $Reason
     exit $ExitCode
   }
 } catch {
@@ -107,6 +135,7 @@ try {
       "{0:o} launcher_error={1}" -f (Get-Date), $_.Exception.Message
     )
   } catch {}
+  try { Write-OfferGoProgress -State "failed" -Message $_.Exception.Message } catch {}
   Show-RoleFlowError -Reason $_.Exception.Message
   exit 1
 } finally {

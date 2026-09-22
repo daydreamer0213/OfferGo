@@ -418,6 +418,34 @@ function createBossMessageReader({ browser, sleepFn = sleep, randomFn = Math.ran
     async assertActiveBindings() {
       return runExclusive(assertCurrentBinding);
     },
+    async readSelectedConversation(selected, signal) {
+      return runExclusive(async () => {
+        if (!activeSelectedSnapshot || selected !== activeSelectedSnapshot || activeTabId === null) {
+          throw codedError("BOSS_MESSAGE_TARGET_INVALID", "selected message target is not active");
+        }
+        throwIfAborted(signal);
+        await assertCurrentBinding();
+        const current = assertSafeSnapshot(normalizeBrowserSnapshot(
+          await browser.evalValue(activeTabId, BOSS_MESSAGE_SNAPSHOT_EXPRESSION)
+        ));
+        if (!sameSelectedConversation(current, selected)) {
+          throw codedError("BOSS_MESSAGE_TARGET_MISMATCH", "selected conversation identity did not match");
+        }
+        const selectedRow = current.rows.find((row) => row.selected);
+        return {
+          ...current,
+          conversationKey: selectedRow?.conversationKey || "",
+          positionName: normalizedText(current.positionName) || normalizedText(selected.positionName),
+          companyName: normalizedText(current.companyName) || normalizedText(selected.companyName),
+          salary: normalizedText(current.salary) || normalizedText(selected.salary),
+          city: normalizedText(current.city) || normalizedText(selected.city),
+          messages: current.messages.map((item) => ({
+            ...item,
+            messageKey: messageKey({ platform: "boss", threadKey: selectedRow.conversationKey, messageId: item.messageId })
+          }))
+        };
+      });
+    },
     async readSelectedJobTarget(selected, signal) {
       return runExclusive(async () => {
         if (!activeSelectedSnapshot || selected !== activeSelectedSnapshot || activeTabId === null) {

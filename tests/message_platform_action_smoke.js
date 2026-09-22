@@ -6,6 +6,7 @@ const { openDb } = require("../src/core/storage");
 const { upsertMessageEvents } = require("../src/storage/message_timeline_store");
 const { upsertMessageInboxItem, getMessageInboxItem } = require("../src/storage/message_inbox_store");
 const { createMessageActionController } = require("../src/dashboard/message_action_controller");
+const { createMessageActionService } = require("../src/application/message_actions");
 const {
   confirmMessageAction,
   getMessageAction,
@@ -146,6 +147,99 @@ const { createZhaopinMessageActionSender } = require("../src/adapters/sites/zhao
     assert.equal(controllerClicks, 1, "duplicate confirmation must dispatch exactly one click");
     assert.equal(getMessageInboxItem(db, { profileId, platform: "zhaopin", conversationKey }).actionGroup, "done");
     await controller.close();
+
+    const bossConversationKey = `sha256:${"d".repeat(64)}`;
+    const bossMessageKey = `sha256:${"e".repeat(64)}`;
+    upsertMessageEvents(db, {
+      profileId,
+      platform: "boss",
+      conversationKey: bossConversationKey,
+      observedAt: now,
+      events: [{
+        messageKey: bossMessageKey,
+        platformMessageId: "123456789015924",
+        direction: "friend",
+        kind: "resume_request",
+        text: "方便请您分享最新简历吗？",
+        occurredAt: now,
+        metadata: {}
+      }]
+    });
+    upsertMessageInboxItem(db, {
+      profileId, platform: "boss", conversationKey: bossConversationKey, observedAt: now, lastActivityAt: now,
+      lastMessageId: "123456789015924", lastDirection: "friend", actionGroup: "needs_action",
+      actionCode: "resume_request", latestExcerpt: "方便请您分享最新简历吗？"
+    });
+    const bossService = createMessageActionService({ db, now: () => new Date(now) });
+    const bossInput = {
+      profileId,
+      platform: "boss",
+      conversationKey: bossConversationKey,
+      messageKey: bossMessageKey,
+      actionKind: "resume_request_accept",
+      idempotencyKey: "77388b84-d274-4eaf-bf07-58d72e87e82f"
+    };
+    const bossConfirmed = bossService.confirm(bossInput);
+    assert.equal(bossConfirmed.platform, "boss");
+    assert.deepEqual(bossConfirmed.evidence, { sourceMessageId: "123456789015924", cardType: "" });
+    bossService.transition({ profileId, actionId: bossConfirmed.id, expectedStatus: "confirmed", status: "stopped", clickCount: 0 });
+    assert.throws(() => bossService.confirm({
+      ...bossInput,
+      actionKind: "resume_request_decline",
+      idempotencyKey: "87388b84-d274-4eaf-bf07-58d72e87e82f"
+    }), (error) => error.code === "MESSAGE_ACTION_KIND_UNSUPPORTED");
+
+    const bossRunConversationKey = `sha256:${"f".repeat(64)}`;
+    const bossRunMessageKey = `sha256:${"1".repeat(64)}`;
+    upsertMessageEvents(db, {
+      profileId, platform: "boss", conversationKey: bossRunConversationKey, observedAt: now,
+      events: [{ messageKey: bossRunMessageKey, platformMessageId: "123456789015925", direction: "friend",
+        kind: "resume_request", text: "可以发下您的简历吗？", occurredAt: now, metadata: {} }]
+    });
+    upsertMessageInboxItem(db, {
+      profileId, platform: "boss", conversationKey: bossRunConversationKey, observedAt: now, lastActivityAt: now,
+      lastMessageId: "123456789015925", lastDirection: "friend", actionGroup: "needs_action",
+      actionCode: "resume_request", latestExcerpt: "可以发下您的简历吗？"
+    });
+
+    let bossClicks = 0;
+    const leaseSites = [];
+    const bossController = createMessageActionController({
+      db,
+      now: () => new Date(now),
+      browserFactory: async () => ({}),
+      cleanupBrowser: async () => {},
+      createReader: ({ platform }) => { assert.equal(platform, "boss"); return {}; },
+      createSender: ({ platform }) => {
+        assert.equal(platform, "boss");
+        return {
+          async inspectTarget() { return {}; },
+          async prepareAction() { return {}; },
+          async dispatchAction() { bossClicks += 1; },
+          async verifyActionResult() { return { state: "succeeded", evidence: { verification: "fixture" } }; }
+        };
+      },
+      acquireLease(_db, input) { leaseSites.push(input.site); },
+      renewLease() {}, releaseLease() {}, getLease: () => null,
+      setIntervalFn: () => 1, clearIntervalFn: () => {}
+    });
+    const bossRun = bossController.confirm({
+      ...bossInput,
+      conversationKey: bossRunConversationKey,
+      messageKey: bossRunMessageKey,
+      idempotencyKey: "97388b84-d274-4eaf-bf07-58d72e87e82f"
+    });
+    let bossCompleted;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      bossCompleted = bossController.status({ profileId, actionId: bossRun.id });
+      if (bossCompleted.status === "succeeded") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(bossCompleted.status, "succeeded", JSON.stringify(bossCompleted));
+    assert.equal(bossClicks, 1);
+    assert.deepEqual(leaseSites, ["boss"]);
+    assert.equal(getMessageInboxItem(db, { profileId, platform: "boss", conversationKey: bossRunConversationKey }).actionGroup, "done");
+    await bossController.close();
 
     console.log("message_platform_action_smoke ok");
   } finally {

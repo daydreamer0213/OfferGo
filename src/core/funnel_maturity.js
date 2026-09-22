@@ -83,7 +83,7 @@ function projectFunnelEntry(entry = {}, rawEvents = [], { now = new Date().toISO
   const latestResume = lastEvent(events, (item) => item.type === "resume_requested");
   const current = authoritativeCurrentState(events);
   const terminalCurrent = Boolean(
-    current.rejected?.value === true || current.closed?.value === true
+    current.rejected?.value === true || current.withdrawn?.value === true || current.closed?.value === true
   );
   const terminalWithoutReply = Boolean(
     terminalCurrent && !latestReply
@@ -142,6 +142,8 @@ function projectFunnelEntry(entry = {}, rawEvents = [], { now = new Date().toISO
     || (mature && interviewInvited.value === true
       ? inferredNegativeState(matureAt)
       : unknownState());
+  const interviewCompleted = current.interviewCompleted || unknownState();
+  const offerReceived = current.offerReceived || unknownState();
   const unknownFields = terminalWithoutReply ? [] : [
     ["read", read],
     ["replied", replied],
@@ -159,7 +161,10 @@ function projectFunnelEntry(entry = {}, rawEvents = [], { now = new Date().toISO
     resumeRequested,
     interviewInvited,
     interviewConfirmed,
+    interviewCompleted,
+    offerReceived,
     rejected: current.rejected || unknownState(),
+    withdrawn: current.withdrawn || unknownState(),
     closed: current.closed || unknownState(),
     mature,
     readNoReplyMature,
@@ -210,7 +215,9 @@ function buildFunnelSnapshot(entries = [], eventsByEntry = new Map(), {
     effectiveConversation: summarizeStage(matureEntries, "effectiveConversation", feedbackWaiting, (item) => item.replied.value === true),
     resumeRequested: summarizeStage(matureEntries, "resumeRequested", feedbackWaiting, (item) => item.effectiveConversation.value === true),
     interviewInvited: summarizeStage(matureEntries, "interviewInvited", feedbackWaiting, (item) => item.effectiveConversation.value === true),
-    interviewConfirmed: summarizeStage(matureEntries, "interviewConfirmed", feedbackWaiting, (item) => item.interviewInvited.value === true)
+    interviewConfirmed: summarizeStage(matureEntries, "interviewConfirmed", feedbackWaiting, (item) => item.interviewInvited.value === true),
+    interviewCompleted: summarizeStage(matureEntries, "interviewCompleted", feedbackWaiting, (item) => item.interviewConfirmed.value === true),
+    offerReceived: summarizeStage(matureEntries, "offerReceived", feedbackWaiting, (item) => item.interviewCompleted.value === true)
   };
   return {
     started: projections.length,
@@ -246,7 +253,9 @@ function positiveCounts(projections) {
     "effectiveConversation",
     "resumeRequested",
     "interviewInvited",
-    "interviewConfirmed"
+    "interviewConfirmed",
+    "interviewCompleted",
+    "offerReceived"
   ].map((key) => [key, projections.filter((item) => item[key].value === true).length]));
 }
 
@@ -271,13 +280,16 @@ function authoritativeCurrentState(events) {
   const terminalEvent = lastEvent(events, (item) => [
     "rejected",
     "closed",
-    "opportunity_closed"
+    "opportunity_closed",
+    "opportunity_withdrawn"
   ].includes(item.type) || (isUserAuthority(item) && [
     "opportunity_reopened",
     "manual_correction"
   ].includes(item.type)));
   const interviewEvent = lastEvent(events, (item) => isInterviewInvite(item)
     || item.type === "interview_scheduled"
+    || item.type === "interview_completed"
+    || item.type === "offer_received"
     || (isUserAuthority(item) && item.type === "manual_correction"));
   return {
     ...terminalState(terminalEvent),
@@ -286,35 +298,60 @@ function authoritativeCurrentState(events) {
 }
 
 function terminalState(event) {
-  if (!event) return { rejected: null, closed: null };
+  if (!event) return { rejected: null, withdrawn: null, closed: null };
   const stage = event.type === "manual_correction" ? String(event.metadata?.toStage || "") : "";
   if (event.type === "rejected" || stage === "rejected") {
-    return { rejected: observedState(true, event), closed: observedState(false, event) };
+    return { rejected: observedState(true, event), withdrawn: observedState(false, event), closed: observedState(false, event) };
+  }
+  if (event.type === "opportunity_withdrawn" || stage === "withdrawn") {
+    return { rejected: observedState(false, event), withdrawn: observedState(true, event), closed: observedState(false, event) };
   }
   if (["closed", "opportunity_closed"].includes(event.type) || stage === "closed") {
-    return { rejected: observedState(false, event), closed: observedState(true, event) };
+    return { rejected: observedState(false, event), withdrawn: observedState(false, event), closed: observedState(true, event) };
   }
-  return { rejected: observedState(false, event), closed: observedState(false, event) };
+  return { rejected: observedState(false, event), withdrawn: observedState(false, event), closed: observedState(false, event) };
 }
 
 function interviewState(event) {
-  if (!event) return { interviewInvited: null, interviewConfirmed: null };
+  if (!event) return { interviewInvited: null, interviewConfirmed: null, interviewCompleted: null, offerReceived: null };
   const stage = event.type === "manual_correction" ? String(event.metadata?.toStage || "") : "";
+  if (event.type === "offer_received" || stage === "offer_received") {
+    return {
+      interviewInvited: observedState(true, event),
+      interviewConfirmed: observedState(true, event),
+      interviewCompleted: observedState(true, event),
+      offerReceived: observedState(true, event)
+    };
+  }
+  if (event.type === "interview_completed" || stage === "interview_completed") {
+    return {
+      interviewInvited: observedState(true, event),
+      interviewConfirmed: observedState(true, event),
+      interviewCompleted: observedState(true, event),
+      offerReceived: observedState(false, event)
+    };
+  }
   if (event.type === "interview_scheduled" || stage === "interview_scheduled") {
     return {
       interviewInvited: observedState(true, event),
-      interviewConfirmed: observedState(true, event)
+      interviewConfirmed: observedState(true, event),
+      interviewCompleted: observedState(false, event),
+      offerReceived: observedState(false, event)
     };
   }
   if (isInterviewInvite(event) || stage === "interview_invited") {
     return {
       interviewInvited: observedState(true, event),
-      interviewConfirmed: observedState(false, event)
+      interviewConfirmed: observedState(false, event),
+      interviewCompleted: observedState(false, event),
+      offerReceived: observedState(false, event)
     };
   }
   return {
     interviewInvited: observedState(false, event),
-    interviewConfirmed: observedState(false, event)
+    interviewConfirmed: observedState(false, event),
+    interviewCompleted: observedState(false, event),
+    offerReceived: observedState(false, event)
   };
 }
 

@@ -12,8 +12,12 @@ function createMessageActionService({ db, now = () => new Date() } = {}) {
   return { confirm, status, active, list, transition, completeVerified };
 
   function confirm(input = {}) {
-    if (String(input.platform || "") !== "zhaopin") {
+    const platform = String(input.platform || "");
+    if (!["boss", "zhaopin"].includes(platform)) {
       throw actionError("MESSAGE_ACTION_PLATFORM_UNSUPPORTED", "当前页面还不能安全执行这个平台操作。");
+    }
+    if (platform === "boss" && String(input.actionKind || "") !== "resume_request_accept") {
+      throw actionError("MESSAGE_ACTION_KIND_UNSUPPORTED", "BOSS 当前只支持确认发送在线简历。");
     }
     return confirmMessageAction(db, { ...input, confirmedAt: nowIso(now()) });
   }

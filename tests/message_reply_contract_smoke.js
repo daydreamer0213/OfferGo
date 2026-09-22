@@ -119,6 +119,37 @@ async function main() {
     () => validateMessageReply(safeReply({ messages: ["one", "two", "three"] }), { facts: validFacts, now: NOW }),
     (error) => error.code === "MESSAGE_REPLY_DRAFT_LIMIT"
   );
+  assert.throws(
+    () => validateMessageReply(safeReply({ messages: ["好的，请把邮箱发我，我通过邮件发送。"] }), {
+      facts: validFacts,
+      now: NOW,
+      platform: "boss",
+      sourceMessages: ["明天下午方便沟通吗？"]
+    }),
+    (error) => error.code === "MESSAGE_REPLY_CHANNEL_UNSUPPORTED",
+    "a BOSS draft must not invent email or another channel"
+  );
+  assert.throws(
+    () => validateMessageReply(safeReply({ messages: ["可以的，我稍后把简历发给您。"] }), {
+      facts: validFacts,
+      now: NOW,
+      platform: "boss",
+      requestedActions: [{ kind: "resume_request" }],
+      sourceMessages: ["另外明天下午方便沟通吗？"]
+    }),
+    (error) => error.code === "MESSAGE_REPLY_ACTION_DUPLICATED",
+    "a reply draft must not promise an action that the platform button performs"
+  );
+  assert.deepStrictEqual(
+    validateMessageReply(safeReply({ messages: ["好的，我会按您提供的邮箱发送。"] }), {
+      facts: validFacts,
+      now: NOW,
+      platform: "boss",
+      sourceMessages: ["请把材料发到 hr@example.com"]
+    }).messages,
+    ["好的，我会按您提供的邮箱发送。"],
+    "an explicitly requested external channel may remain in the draft"
+  );
   const interview = validateMessageReply(safeReply({
     messageIntent: "interview_invitation",
     messageCategory: "other",
@@ -508,6 +539,8 @@ async function main() {
   const scopedResult = await scopedAnalyzer({
     profile: { candidate: { targetTitles: ["Java Engineer"] } },
     job: { id: 2, title: "Java Engineer" },
+    platform: "boss",
+    requestedActions: [{ kind: "resume_request" }],
     messages: scopedMessages,
     facts: [
       ...stableFacts,
@@ -518,6 +551,8 @@ async function main() {
   }, { signal: scopedController.signal });
   assert.strictEqual(stableAdapterSignal, scopedController.signal);
   assert.strictEqual(scopedResult.progressUpdate.stage, "reply_ready");
+  assert.strictEqual(stableAdapterInput.platform, "boss");
+  assert.deepStrictEqual(stableAdapterInput.requestedActions, [{ kind: "resume_request" }]);
   assert.deepStrictEqual(
     stableAdapterInput.facts.map((fact) => fact.key),
     ["gap.2024-03_2024-08", "employment_status"],

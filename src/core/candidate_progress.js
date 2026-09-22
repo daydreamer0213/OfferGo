@@ -9,7 +9,10 @@ const PROGRESS_STAGES = new Set([
   "reply_ready",
   "interview_invited",
   "interview_scheduled",
+  "interview_completed",
+  "offer_received",
   "resume_submitted",
+  "withdrawn",
   "rejected",
   "closed"
 ]);
@@ -32,8 +35,13 @@ const MESSAGE_INTENTS = new Set([
   "manual_review"
 ]);
 
-const TERMINAL_PROGRESS_STAGES = new Set(["rejected", "closed"]);
-const INTERVIEW_PROGRESS_STAGES = new Set(["interview_invited", "interview_scheduled"]);
+const TERMINAL_PROGRESS_STAGES = new Set(["rejected", "withdrawn", "closed"]);
+const INTERVIEW_PROGRESS_STAGES = new Set([
+  "interview_invited",
+  "interview_scheduled",
+  "interview_completed",
+  "offer_received"
+]);
 const FORBIDDEN_METADATA_KEYS = new Set(["message", "body", "text", "html", "draft", "screenshot"]);
 const ALLOWED_METADATA_KEYS = new Set([
   "batchId",
@@ -60,14 +68,17 @@ const ALLOWED_METADATA_KEYS = new Set([
   "messageGroupKey"
 ]);
 const TRANSITIONS = new Map([
-  ["contact_started", new Set(["waiting_reply", "needs_user_action", "reply_ready", "interview_invited", "rejected", "closed"])],
-  ["waiting_reply", new Set(["needs_user_action", "reply_ready", "interview_invited", "resume_submitted", "rejected", "closed"])],
-  ["needs_user_action", new Set(["waiting_reply", "reply_ready", "interview_invited", "interview_scheduled", "resume_submitted", "rejected", "closed"])],
-  ["reply_ready", new Set(["waiting_reply", "needs_user_action", "interview_invited", "rejected", "closed"])],
-  ["interview_invited", new Set(["needs_user_action", "interview_scheduled", "rejected", "closed"])],
-  ["interview_scheduled", new Set(["needs_user_action", "resume_submitted", "rejected", "closed"])],
-  ["resume_submitted", new Set(["waiting_reply", "needs_user_action", "interview_invited", "interview_scheduled", "rejected", "closed"])],
+  ["contact_started", new Set(["waiting_reply", "needs_user_action", "reply_ready", "interview_invited", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["waiting_reply", new Set(["needs_user_action", "reply_ready", "interview_invited", "resume_submitted", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["needs_user_action", new Set(["waiting_reply", "reply_ready", "interview_invited", "interview_scheduled", "interview_completed", "resume_submitted", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["reply_ready", new Set(["waiting_reply", "needs_user_action", "interview_invited", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["interview_invited", new Set(["needs_user_action", "interview_scheduled", "interview_completed", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["interview_scheduled", new Set(["needs_user_action", "interview_completed", "resume_submitted", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["interview_completed", new Set(["needs_user_action", "offer_received", "withdrawn", "rejected", "closed"])],
+  ["offer_received", new Set(["needs_user_action", "withdrawn", "closed"])],
+  ["resume_submitted", new Set(["waiting_reply", "needs_user_action", "interview_invited", "interview_scheduled", "interview_completed", "offer_received", "withdrawn", "rejected", "closed"])],
   ["rejected", new Set(["closed"])],
+  ["withdrawn", new Set(["closed"])],
   ["closed", new Set()]
 ]);
 
@@ -179,8 +190,8 @@ function correctProgressStage(db, input = {}) {
   if (card.stage !== expectedStage) {
     throw progressError("PROGRESS_STAGE_CONFLICT", `expected ${expectedStage}, found ${card.stage}`);
   }
-  if (expectedStage === "closed" && toStage !== "needs_user_action") {
-    throw progressError("PROGRESS_STAGE_TRANSITION_INVALID", "closed progress can only reopen to needs_user_action");
+  if (TERMINAL_PROGRESS_STAGES.has(expectedStage) && toStage !== "needs_user_action") {
+    throw progressError("PROGRESS_STAGE_TRANSITION_INVALID", "terminal progress can only reopen to needs_user_action");
   }
   const now = isoText(input.now);
   return progressTransaction(db, () => {
@@ -640,11 +651,11 @@ function recordManualProgressAction(db, input = {}) {
     }
     return card;
   }
-  const closedReopen = card.stage === "closed"
+  const terminalReopen = TERMINAL_PROGRESS_STAGES.has(card.stage)
     && stage === "needs_user_action"
     && eventType === "opportunity_reopened";
-  if (card.stage === "closed" && !closedReopen) {
-    throw progressError("PROGRESS_STAGE_TRANSITION_INVALID", "closed progress can only be reopened");
+  if (TERMINAL_PROGRESS_STAGES.has(card.stage) && !terminalReopen) {
+    throw progressError("PROGRESS_STAGE_TRANSITION_INVALID", "terminal progress can only be reopened");
   }
   const now = isoText(input.now);
   return progressTransaction(db, () => {
@@ -660,11 +671,11 @@ function recordManualProgressAction(db, input = {}) {
     if (!persisted.inserted) {
       return getProgressCard(db, cardId);
     }
-    if (closedReopen) {
+    if (terminalReopen) {
       const result = db.prepare(`UPDATE candidate_progress_cards
         SET stage = 'needs_user_action', next_action = ?, scheduled_at = NULL, updated_at = ?
-        WHERE id = ? AND stage = 'closed'`)
-        .run(shortText(input.nextAction, 240), now, cardId);
+        WHERE id = ? AND stage = ?`)
+        .run(shortText(input.nextAction, 240), now, cardId, card.stage);
       if (Number(result.changes) !== 1) throw progressError("PROGRESS_STAGE_CONFLICT", "progress stage changed concurrently");
     } else {
       transitionProgressCard(db, {
@@ -1216,7 +1227,10 @@ function safeDiscoveredNextAction(stage) {
     reply_ready: "Review draft before manual send",
     interview_invited: "Review interview invitation",
     interview_scheduled: "Review interview schedule",
+    interview_completed: "Wait for interview outcome",
+    offer_received: "Review offer details",
     resume_submitted: "Wait for recruiter reply",
+    withdrawn: "Opportunity withdrawn",
     rejected: "Opportunity rejected",
     closed: "Opportunity closed"
   }[stage];

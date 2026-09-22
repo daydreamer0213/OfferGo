@@ -1999,6 +1999,72 @@ async function messageGroupBoundarySmoke() {
   ]);
   assert.strictEqual(resumeOnlySummary.results[0].stage, "needs_user_action");
 
+  const textualResumeOnly = createFixture({ suffix: "group-text-resume-only", title: "Text Resume Only Engineer" });
+  let textualResumeOnlyModelCalls = 0;
+  const textualResumeOnlySummary = await runBossMessageDiscovery({
+    db,
+    profileId: textualResumeOnly.profileId,
+    reader: fakeReader([selectedConversation({
+      title: textualResumeOnly.title,
+      messages: [message("friend", "821000000000000", "您好，可以发下您的简历吗？", "text")]
+    })]),
+    classifyMessageGroup: async () => {
+      textualResumeOnlyModelCalls += 1;
+      return classification({ messages: ["可以的，我稍后把简历发给您。"] });
+    },
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(textualResumeOnlyModelCalls, 0, "a textual resume-only request must become a platform action without calling the reply model");
+  assert.deepStrictEqual(textualResumeOnlySummary.results[0].manualActions, [{ kind: "resume_request" }]);
+  assert.deepStrictEqual(textualResumeOnlySummary.results[0].messages, []);
+  const textualResumeEvents = listMessageEvents(db, {
+    profileId: textualResumeOnly.profileId,
+    platform: "boss",
+    conversationKey: safeDigest(["conversation", "0"])
+  });
+  assert.equal(textualResumeEvents.at(-1).kind, "resume_request", "the durable BOSS timeline must expose the inferred request as an actionable event");
+  assert.equal(textualResumeEvents.at(-1).platformMessageId, "821000000000000");
+
+  const textualMixed = createFixture({ suffix: "group-text-resume-schedule", title: "Text Resume Schedule Engineer" });
+  let textualMixedInput = null;
+  const textualMixedSummary = await runBossMessageDiscovery({
+    db,
+    profileId: textualMixed.profileId,
+    reader: fakeReader([selectedConversation({
+      title: textualMixed.title,
+      messages: [message("friend", "822000000000000", "方便发一下简历吗？另外明天下午方便沟通吗？", "text")]
+    })]),
+    classifyMessageGroup: async (input) => {
+      textualMixedInput = input;
+      return classification({ messages: ["方便的，我们可以进一步沟通。"] });
+    },
+    sleepFn: async () => {}
+  });
+  assert.deepStrictEqual(textualMixedInput.messages.map((item) => item.text), ["另外明天下午方便沟通吗？"]);
+  assert.strictEqual(textualMixedInput.platform, "boss");
+  assert.deepStrictEqual(textualMixedInput.requestedActions, [{ kind: "resume_request" }]);
+  assert.deepStrictEqual(textualMixedSummary.results[0].manualActions, [{ kind: "resume_request" }]);
+  assert.deepStrictEqual(textualMixedSummary.results[0].messages, ["方便的，我们可以进一步沟通。"]);
+
+  const textualMention = createFixture({ suffix: "group-text-resume-mention", title: "Text Resume Mention Engineer" });
+  let textualMentionInput = null;
+  const textualMentionSummary = await runBossMessageDiscovery({
+    db,
+    profileId: textualMention.profileId,
+    reader: fakeReader([selectedConversation({
+      title: textualMention.title,
+      messages: [message("friend", "823000000000000", "我看过你的简历，知识库项目是你负责的吗？", "text")]
+    })]),
+    classifyMessageGroup: async (input) => {
+      textualMentionInput = input;
+      return classification({ messages: ["我参与了这个项目。"] });
+    },
+    sleepFn: async () => {}
+  });
+  assert.deepStrictEqual(textualMentionInput.messages.map((item) => item.text), ["我看过你的简历，知识库项目是你负责的吗？"]);
+  assert.deepStrictEqual(textualMentionInput.requestedActions, []);
+  assert.deepStrictEqual(textualMentionSummary.results[0].manualActions, []);
+
   const platformOnly = createFixture({ suffix: "group-platform-only", title: "Group Platform Only Engineer" });
   let platformOnlyModelCalls = 0;
   const platformOnlySummary = await runBossMessageDiscovery({

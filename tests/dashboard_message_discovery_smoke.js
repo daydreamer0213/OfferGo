@@ -702,32 +702,40 @@ async function main() {
   assert(!understoodPage.body.includes("有 <证书> 吗？"));
   assert(understoodPage.body.includes("AI 应用开发工程师"));
   for (const expected of [
-    "沟通类型",
-    "需要你补充信息",
-    "正式面试邀约",
-    "这份机会",
+    "HR 想让你做什么",
+    "HR 想请你发送简历，并回复其他问题。",
+    "HR 邀请你确认面试安排。",
+    "这份岗位是否值得继续",
     "可以了解，但要先确认关键问题",
-    "岗位主要做什么",
+    "已确认信息",
+    "主要工作",
     "把企业知识转成可追溯的智能问答能力",
     "公司业务",
     "JD 显示该岗位服务于企业知识管理。",
-    "简历匹配",
-    "中",
     "薪资",
     "15-25K·13薪",
-    "薪资未说明",
     "下一步",
-    "HR 邀请你发送简历",
-    "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。",
+    "发送简历",
+    "确认发送 BOSS 中最近更新的附件简历",
+    "点击后 OfferGo 会重新核对当前会话和附件更新时间；无法唯一确认时不会发送。",
     "推荐回复",
     "HR 消息",
     OPEN_HR_TEXT,
     RESUME_REQUEST_SUMMARY,
     "岗位与资料详情",
-    "工作安排：</strong>双休",
+    "工作安排",
+    "双休",
     "您好，感谢邀请，请问面试时间和形式如何安排？",
-    "JD 暂未说明公司的具体业务。"
   ]) assert(understoodPage.body.includes(expected), `missing user decision content: ${expected}`);
+  for (const hidden of [
+    "沟通类型：",
+    "简历匹配：",
+    "工作安排未确认",
+    "薪资未说明",
+    "JD 暂未说明公司的具体业务。",
+    "可迁移证据",
+    "最高归入可投"
+  ]) assert(!understoodPage.body.includes(hidden), `internal or unknown text must stay hidden: ${hidden}`);
   assert.match(understoodPage.body, /class="message-bubble message-bubble--friend"/);
   assert.match(understoodPage.body, /class="message-bubble message-bubble--self"/);
   assert.match(understoodPage.body, /已建立沟通/);
@@ -736,6 +744,7 @@ async function main() {
   assert.match(understoodPage.body, /收到一条语音消息，本版本暂不读取内容/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
+  assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-platform="boss"[^>]+data-action-kind="accept_resume"/);
   markMessageInboxItemDone(db, {
     profileId: fixture.profileId,
     platform: "zhaopin",
@@ -745,34 +754,33 @@ async function main() {
   });
   const expiredActionPage = await request(base, `/messages?profileId=${fixture.profileId}`);
   assert(expiredActionPage.body.includes("超过 7 天，已结束处理"));
-  assert.doesNotMatch(expiredActionPage.body, /data-message-action-confirm[^>]+data-action-kind="(?:accept_resume|decline_resume)"/,
+  assert.doesNotMatch(expiredActionPage.body, /data-message-action-confirm[^>]+data-platform="zhaopin"[^>]+data-action-kind="(?:accept_resume|decline_resume)"/,
     "expired resume invitations must keep their history without actionable platform controls");
   assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
   assert(
-    understoodPage.body.indexOf("<h4>HR 邀请你发送简历</h4>")
+    understoodPage.body.indexOf("<h4>发送简历</h4>")
       < understoodPage.body.indexOf("<h4>推荐回复</h4>"),
     "manual BOSS action must appear before the local reply drafts"
   );
   assertHeadingsInOrder(understoodPage.body, [
     "<h3>完整会话</h3>",
-    "沟通类型",
-    "这份机会",
-    "岗位主要做什么",
-    "简历匹配",
-    "岗位与资料详情",
-    "<h3>下一步</h3>"
+    "<h3>HR 想让你做什么</h3>",
+    "<h3>下一步</h3>",
+    "<h3>这份岗位是否值得继续</h3>",
+    "<h3>已确认信息</h3>",
+    "岗位与资料详情"
   ]);
   assert.match(understoodPage.body, /<details class="message-job-details">/);
   assert.doesNotMatch(understoodPage.body, /<h3>岗位理解<\/h3>[\s\S]*?<h3>结论<\/h3>/, "compact cards must not repeat adjacent generic headings");
   assert(
     understoodPage.body.indexOf('class="message-timeline"')
-      < understoodPage.body.indexOf('class="message-job-understanding"'),
-    "HR message must appear before job understanding"
+      < understoodPage.body.indexOf('class="message-next-step"'),
+    "HR message must appear before the action summary"
   );
   assert(
-    understoodPage.body.indexOf('class="message-job-understanding"')
-      < understoodPage.body.indexOf('class="message-draft"'),
-    "job understanding must appear before reply drafts"
+    understoodPage.body.indexOf('class="message-draft"')
+      < understoodPage.body.indexOf('class="message-job-understanding"'),
+    "the user's next action must appear before supporting job analysis"
   );
   for (const rawValue of ["interview_invitation", "information_request", "manual_review"]) {
     assert(!understoodPage.body.includes(rawValue), `raw intent must stay out of markup: ${rawValue}`);
@@ -1909,11 +1917,11 @@ function jobUnderstandingCompletedRun(fixture) {
       roleSummary: "把企业知识转成可追溯的智能问答能力",
       companyBusiness: "JD 显示该岗位服务于企业知识管理。",
       fitLabel: "中",
-      fitSummary: "候选人有 RAG 项目经验；生产运维经验仍需确认",
+      fitSummary: "核心硬性要求只有可迁移证据，最高归入可投。",
       workSchedule: "双休",
       salary: "15-25K·13薪",
       opportunityVerdict: "可以了解，但要先确认关键问题",
-      opportunitySummary: "候选人有 RAG 项目经验；生产运维经验仍需确认"
+      opportunitySummary: "核心硬性要求只有可迁移证据，最高归入可投。"
     };
     const summary = {
       status: "completed",

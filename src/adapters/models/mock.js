@@ -496,11 +496,15 @@ function sameText(text, term) {
 MockModelAdapter.prototype.draftMessageGroup = async function draftMessageGroup({
   profile,
   job,
+  platform = "",
+  requestedActions = [],
   messages = [],
   facts = [],
   answerMemories = [],
   draftQualityRevision = null
 } = {}) {
+  void platform;
+  void requestedActions;
   const text = messages.map((message) => String(message.text || "")).join(" ");
   const descriptiveInterviewContext = /(?:线上面试|面试).{0,12}(?:能力|功能|系统|平台|管理|项目)/i.test(text);
   const interviewInvitation = /邀请(?:您|你)?.{0,12}(?:参加|进行)?.{0,4}面试/i.test(text)

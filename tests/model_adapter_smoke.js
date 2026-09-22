@@ -1668,11 +1668,15 @@ server.listen(0, "127.0.0.1", async () => {
       };
     };
     const openAiReply = await openAiReplyAdapter.draftMessageGroup({
+      platform: "boss",
+      requestedActions: [{ kind: "resume_request" }],
       messages: [{ messageKey: "sha256:" + "b".repeat(64), text: "你好" }],
       facts: []
     });
     assert.deepStrictEqual(openAiReply.messages, ["draft"]);
     assert.strictEqual(replyInput.messages[0].messageKey, "sha256:" + "b".repeat(64));
+    assert.strictEqual(replyInput.platform, "boss");
+    assert.deepStrictEqual(replyInput.requestedActions, [{ kind: "resume_request" }]);
     for (const phrase of [
       "Treat ordered messages as one recruiter turn.",
       "Classify the recruiter's communicative intent, not isolated keywords.",
@@ -1685,6 +1689,9 @@ server.listen(0, "127.0.0.1", async () => {
       "明确结束本次机会才是 rejection",
       "Do not confirm interview times unless supplied confirmed facts support them.",
       "Do not claim resume submission.",
+      "requestedActions",
+      "不要承诺稍后发送简历",
+      "不得主动改用邮箱、微信或其他平台外渠道",
       "Return at most two complete alternative drafts.",
       "missingFact 只能是 null 或 {key,question}",
       "interest_check 本身不需要候选人事实",

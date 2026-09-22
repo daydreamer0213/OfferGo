@@ -56,9 +56,12 @@ try {
   const statsPage = renderFunnelPage({ plan: { id: planId }, dashboard: {
     platforms: [{ site: 'boss', currentRound: snapshot, lifetime: { started: 18, ...snapshot.immediatePositive } }]
   } });
-  const replyRow = statsPage.match(/data-feedback-platform="boss"[\s\S]*?<\/tr>/)?.[0] || '';
-  assert.match(replyRow, /5\.6%/, 'main reply share is 1 of 18 contacted jobs, never conditional 100%');
-  assert.doesNotMatch(replyRow, /100\.0%/);
+  const healthPath = statsPage.match(/data-health-platform="boss"[\s\S]*?<\/article>/)?.[0] || '';
+  assert.match(healthPath, /data-health-stage="started"[\s\S]*?<strong>18<\/strong>/,
+    'the main path keeps all 18 contacted jobs visible');
+  assert.match(healthPath, /data-health-stage="replied"[\s\S]*?<strong>1<\/strong>/,
+    'the main path shows one reply without presenting a conditional 100% as the overall result');
+  assert.doesNotMatch(healthPath, /100(?:\.0)?%/);
   assert.doesNotMatch(statsPage, /暂无明确状态|未知 0/);
   console.log('funnel_message_linkage_smoke ok');
 } finally { db.close(); }

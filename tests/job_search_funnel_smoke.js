@@ -256,6 +256,31 @@ function projectionRulesSmoke() {
   });
   assert.equal(closedAfterDeadline.readNoReplyMature, false,
     "a closed opportunity never becomes a later read-no-reply failure");
+
+  const completedWithOffer = projectFunnelEntry(entry, [
+    event("interview_scheduled", "2026-08-25T05:00:00.000Z", { source: "user_record" }),
+    event("interview_completed", "2026-08-26T05:00:00.000Z", { source: "user_record" }),
+    event("offer_received", "2026-08-27T05:00:00.000Z", { source: "user_record" })
+  ], { now: "2026-08-28T03:00:00.000Z" });
+  assert.equal(completedWithOffer.interviewCompleted.value, true);
+  assert.equal(completedWithOffer.offerReceived.value, true);
+  assert.equal(completedWithOffer.withdrawn.value, null);
+
+  const withdrawn = projectFunnelEntry(entry, [
+    event("interview_completed", "2026-08-26T05:00:00.000Z", { source: "user_record" }),
+    event("opportunity_withdrawn", "2026-08-27T05:00:00.000Z", { source: "user_record" })
+  ], { now: "2026-08-28T03:00:00.000Z" });
+  assert.equal(withdrawn.interviewCompleted.value, true, "withdrawal keeps already reached milestones");
+  assert.equal(withdrawn.offerReceived.value, false);
+  assert.equal(withdrawn.withdrawn.value, true);
+  assert.equal(withdrawn.terminalCurrent, true);
+
+  const reopenedWithdrawal = projectFunnelEntry(entry, [
+    event("opportunity_withdrawn", "2026-08-25T05:00:00.000Z", { source: "user_record" }),
+    event("opportunity_reopened", "2026-08-26T05:00:00.000Z", { source: "user_record", stage: "needs_user_action" })
+  ], { now: "2026-08-28T03:00:00.000Z" });
+  assert.equal(reopenedWithdrawal.withdrawn.value, false, "reopening clears the current withdrawal state");
+  assert.equal(reopenedWithdrawal.terminalCurrent, false);
 }
 
 function snapshotRulesSmoke() {
@@ -289,6 +314,8 @@ function snapshotRulesSmoke() {
     unknown: 0,
     waiting: 1
   });
+  assert(Object.hasOwn(snapshot.stages, "interviewCompleted"));
+  assert(Object.hasOwn(snapshot.stages, "offerReceived"));
 }
 
 function conditionalFunnelSmoke() {
@@ -317,7 +344,9 @@ function conditionalFunnelSmoke() {
     effectiveConversation: 2,
     resumeRequested: 0,
     interviewInvited: 1,
-    interviewConfirmed: 0
+    interviewConfirmed: 0,
+    interviewCompleted: 0,
+    offerReceived: 0
   }, "positive outcomes stay visible before the entry matures");
   assert.deepEqual(snapshot.earlyPositive, {
     read: 1,
@@ -325,7 +354,9 @@ function conditionalFunnelSmoke() {
     effectiveConversation: 1,
     resumeRequested: 0,
     interviewInvited: 1,
-    interviewConfirmed: 0
+    interviewConfirmed: 0,
+    interviewCompleted: 0,
+    offerReceived: 0
   }, "positive outcomes inside the 48-hour waiting window remain separately visible");
 
   const replyWindowSnapshot = buildFunnelSnapshot(
@@ -710,6 +741,59 @@ function enrollmentRulesSmoke() {
       jobId: inbound.jobId
     }).sourceKind, "reply_sent", "an inbound opportunity enters only after the user actually replies");
 
+    const outcomes = storageFixture(db, "outcome-stages", now);
+    let outcomeCard = ensureProgressCard(db, { ...outcomes, source: "boss", now });
+    const steps = [
+      ["interview_invited", "interview_invited", "收到面试邀请"],
+      ["interview_scheduled", "interview_scheduled", "已确认面试"],
+      ["interview_completed", "interview_completed", "已完成面试"],
+      ["offer_received", "offer_received", "已收到 Offer"]
+    ];
+    for (let index = 0; index < steps.length; index += 1) {
+      const [stage, eventType, summary] = steps[index];
+      outcomeCard = recordManualProgressAction(db, {
+        cardId: outcomeCard.id,
+        idempotencyKey: `progress:00000000-0000-4000-8000-00000000031${index}`,
+        stage,
+        eventType,
+        summary,
+        nextAction: "",
+        now: new Date(Date.parse(now) + ((index + 1) * 60_000)).toISOString()
+      });
+      assert.equal(outcomeCard.stage, stage);
+    }
+
+    const withdrawal = storageFixture(db, "withdraw-stage", now);
+    let withdrawalCard = ensureProgressCard(db, { ...withdrawal, source: "boss", now });
+    withdrawalCard = recordManualProgressAction(db, {
+      cardId: withdrawalCard.id,
+      idempotencyKey: "progress:00000000-0000-4000-8000-000000000320",
+      stage: "withdrawn",
+      eventType: "opportunity_withdrawn",
+      summary: "用户决定不再继续",
+      nextAction: "",
+      now: "2026-08-25T02:10:00.000Z"
+    });
+    assert.equal(withdrawalCard.stage, "withdrawn");
+    assert.throws(() => recordManualProgressAction(db, {
+      cardId: withdrawalCard.id,
+      idempotencyKey: "progress:00000000-0000-4000-8000-000000000321",
+      stage: "waiting_reply",
+      eventType: "reply_confirmed_sent",
+      summary: "不允许直接离开终止状态",
+      now: "2026-08-25T02:11:00.000Z"
+    }), (error) => error.code === "PROGRESS_STAGE_TRANSITION_INVALID");
+    withdrawalCard = recordManualProgressAction(db, {
+      cardId: withdrawalCard.id,
+      idempotencyKey: "progress:00000000-0000-4000-8000-000000000322",
+      stage: "needs_user_action",
+      eventType: "opportunity_reopened",
+      summary: "重新继续这份机会",
+      nextAction: "查看最新消息",
+      now: "2026-08-25T02:12:00.000Z"
+    });
+    assert.equal(withdrawalCard.stage, "needs_user_action");
+
     const rollback = storageFixture(db, "enroll-rollback", now);
     db.exec(`CREATE TRIGGER reject_funnel_entry BEFORE INSERT ON candidate_funnel_entries
       BEGIN SELECT RAISE(ABORT, 'funnel enrollment failed'); END`);
@@ -786,6 +870,7 @@ function enrollmentRulesSmoke() {
     db.close();
   }
 }
+
 
 function storageFixture(db, suffix, now, observation = {}) {
   const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(

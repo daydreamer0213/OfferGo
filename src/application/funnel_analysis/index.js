@@ -13,6 +13,7 @@ const { buildFunnelSnapshot, projectFunnelEntry } = require("../../core/funnel_m
 const { listUnresolvedMessageDiscoveryItems } = require("../../core/message_preview_state");
 const { listIncomingContacts } = require("./incoming_contacts");
 const { listCandidateResumeVersionLabels } = require("../../storage/candidate_store");
+const { buildHealthView } = require("./health_view");
 
 function createFunnelAnalysisService({ db, now = () => new Date().toISOString() } = {}) {
   if (!db) throw new Error("funnel analysis database is required");
@@ -54,7 +55,7 @@ function dashboard(db, { profileId, planId, now }) {
       const samplePolicy = roundPolicy(group.round);
       const snapshot = snapshotFor(db, selected, { profileId, now, policy: samplePolicy });
       const analysis = analyze(db, selected, snapshot, samplePolicy, profileId, site);
-      return { snapshot, summary: roundSummary(group.round, snapshot, analysis, samplePolicy) };
+      return { snapshot, summary: roundSummary(group.round, snapshot, analysis, samplePolicy, now) };
     };
     const currentResult = build(latest);
     const previousResult = previous ? build(previous) : null;
@@ -77,7 +78,7 @@ function dashboard(db, { profileId, planId, now }) {
     waiting: platforms.reduce((sum, item) => sum + item.currentRound.waiting, 0),
     unknown: platforms.reduce((sum, item) => sum + item.currentRound.unknown, 0), strength: 'facts', nextTarget: null
   };
-  return {
+  const result = {
     policy, platforms, activeRevisionId: current.id,
     advice: platforms.map(item => item.currentRound.advice && { site: item.site, ...item.currentRound.advice })
       .find(Boolean) || null,
@@ -111,6 +112,7 @@ function dashboard(db, { profileId, planId, now }) {
       "反馈计数包含刚联系的岗位；诊断按平台、当前有效策略与成熟规则独立计算。"
     ]
   };
+  return { ...result, health: buildHealthView(result) };
 }
 
 function platformRounds(rounds, site) {
@@ -151,7 +153,7 @@ function roundPolicy(round) {
   };
 }
 
-function roundSummary(round, snapshot, analysis, policy) {
+function roundSummary(round, snapshot, analysis, policy, now) {
   return {
     ...round,
     ...poolSummary(snapshot, policy),
@@ -161,7 +163,9 @@ function roundSummary(round, snapshot, analysis, policy) {
     priorityCheck: analysis.priorityCheck,
     advice: analysis.advice || null,
     immediatePositive: snapshot.immediatePositive,
-    earlyPositive: snapshot.earlyPositive
+    earlyPositive: snapshot.earlyPositive,
+    staleCount: snapshot.entries.filter((entry) => Date.parse(now) - Date.parse(entry.startedAt) >= 7 * 24 * 60 * 60 * 1000
+      && !entry.terminalCurrent && entry.offerReceived.value !== true).length
   };
 }
 
@@ -413,7 +417,9 @@ function stageEligible(entry, stage) {
     return entry.effectiveConversation.value === true;
   }
   if (stage === "interviewConfirmed") return entry.interviewInvited.value === true;
+  if (stage === "interviewCompleted") return entry.interviewConfirmed.value === true;
+  if (stage === "offerReceived") return entry.interviewCompleted.value === true;
   return false;
 }
 
-module.exports = { createFunnelAnalysisService, listIncomingContacts };
+module.exports = { createFunnelAnalysisService, listIncomingContacts, buildHealthView };

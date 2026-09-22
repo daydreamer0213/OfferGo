@@ -1,5 +1,6 @@
 const { escapeHtml, escapeAttr } = require('../http/response');
 const { renderDashboardFrame } = require('../ui/shell');
+const { buildHealthView } = require('../../application/funnel_analysis/health_view');
 const SITE_LABELS = { boss: 'BOSS', zhaopin: '智联' };
 
 function renderFunnelPage({ plan = {}, dashboard = {}, view = 'current' } = {}) {
@@ -8,6 +9,7 @@ function renderFunnelPage({ plan = {}, dashboard = {}, view = 'current' } = {}) 
   const lifetime = view === 'lifetime';
   const platforms = dashboard.platforms || [];
   const started = platforms.reduce((sum, item) => sum + count(lifetime ? item.lifetime?.started : item.currentRound?.started), 0);
+  const health = buildHealthView(dashboard);
   return renderDashboardFrame({ currentPath: path, todayPath: `/plan?planId=${planId}`, planId,
     stage: '求职体检', brandHref: `/plan?planId=${planId}`,
     content: `<main id="main-content" class="funnel-main feedback-main">
@@ -17,20 +19,63 @@ function renderFunnelPage({ plan = {}, dashboard = {}, view = 'current' } = {}) 
           <a href="${path}"${!lifetime ? ' aria-current="true"' : ''}>当前方案</a>
           <a href="${path}&amp;view=lifetime"${lifetime ? ' aria-current="true"' : ''}>累计记录</a>
         </nav><a class="feedback-message-link" href="/messages?planId=${planId}">查看消息</a></div>
-        <p class="feedback-scope">${lifetime ? '所有方案的本地记录' : '当前方案的联系与反馈'}</p>
-        <div class="feedback-table-scroll" role="region" aria-label="平台反馈对照" tabindex="0">
-          <table aria-label="${lifetime ? '累计记录' : '当前方案'}投递反馈"><thead><tr>
-            <th scope="col">平台</th><th scope="col">已联系岗位</th><th scope="col">已回复</th><th scope="col">回复占比</th>
-          </tr></thead><tbody>${platforms.map(item => renderPlatform(item, lifetime)).join('')}</tbody></table>
-        </div>
-        <p class="feedback-footnote">已联系包含确认投递或沟通的岗位；回复比例占本行已联系岗位，按已读取消息更新。</p>
+        <p class="feedback-scope">${lifetime ? '所有方案的本地记录' : '从联系岗位到拿到 Offer，每一步都按已确认的信息统计。'}</p>
+        ${lifetime ? renderLifetimeFeedback(platforms) : renderCurrentHealth(health, dashboard.advice, planId)}
         ${!started ? `<p class="feedback-empty">${lifetime ? '还没有联系岗位。' : '当前方案还没有联系岗位。'}<a href="/plan?planId=${planId}">去发现岗位</a></p>` : ''}
       </section>
       ${renderIncomingContacts(dashboard.incomingContacts, planId)}
-      ${!lifetime && started ? renderAdvice(dashboard, planId) : ''}
       ${!lifetime ? renderComparison(platforms) : ''}
       ${renderAdjustment(planId, dashboard.activeRevisionId)}
     </main>` });
+}
+
+function renderCurrentHealth(health, advice, planId) {
+  const overview = health.overview || {};
+  const summaries = [
+    ['联系岗位', overview.contacted],
+    ['收到回复', overview.replied],
+    ['有效沟通', overview.effectiveConversation],
+    ['面试邀请', overview.interviewInvited],
+    ['完成面试', overview.interviewCompleted],
+    ['收到 Offer', overview.offerReceived]
+  ];
+  const destination = advice ? adviceDestination(advice, planId) : null;
+  return `<div class="health-summary" aria-label="求职进展概览">${summaries.map(([label, value]) => `<div><strong>${count(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('')}</div>
+    <section class="health-diagnosis" aria-label="当前判断"><div><p class="section-label">现在最值得关注</p><h2>${escapeHtml(health.diagnosis?.title || '继续记录真实进展')}</h2><p>${escapeHtml(health.diagnosis?.detail || '')}</p></div>${destination ? `<a href="${escapeAttr(destination[0])}">${escapeHtml(destination[1])}</a>` : ''}</section>
+    <div class="health-platforms">${(health.platformFunnels || []).map(renderHealthPlatform).join('')}</div>
+    <p class="feedback-footnote">等待中的岗位还没有到判断时间；状态未知表示平台没有提供可靠信息，不会算作失败。${count(health.stale?.total) ? ` 另有 ${count(health.stale.total)} 个岗位超过 7 天没有新进展。` : ''}</p>`;
+}
+
+function adviceDestination(advice, planId) {
+  if (advice.stage === 'interviewInvited') return [`/resume-optimization?planId=${planId}`, '打开简历工作室'];
+  if (advice.stage === 'effectiveConversation') return [`/messages?planId=${planId}`, '查看消息与回复'];
+  if (['interviewConfirmed', 'interviewCompleted', 'offerReceived'].includes(advice.stage)) {
+    return [`/queue?planId=${planId}&site=${encodeURIComponent(advice.site)}&pool=interview`, '查看面试进展'];
+  }
+  return [`/queue?planId=${planId}&site=${encodeURIComponent(advice.site)}&pool=waiting_reply`, '查看等待回复的岗位'];
+}
+
+function renderHealthPlatform(platform) {
+  return `<article class="health-platform" data-health-platform="${escapeAttr(platform.site)}"><header><div><p class="section-label">${escapeHtml(platform.label)}</p><h3>进展路径</h3></div><p>${count(platform.waiting)} 个等待中 · ${count(platform.unknown)} 个状态未知${platform.staleCount ? ` · ${count(platform.staleCount)} 个超过 7 天无进展` : ''}</p></header>
+    <ol class="health-stage-track">${platform.stages.map(renderHealthStage).join('')}</ol></article>`;
+}
+
+function renderHealthStage(stage) {
+  const detail = stage.key === 'started'
+    ? '已记录的求职动作'
+    : stage.eligible
+      ? `${stage.eligible} 个可核对${stage.waiting ? ` · ${stage.waiting} 个仍在等待` : ''}${stage.unknown ? ` · ${stage.unknown} 个状态未知` : ''}`
+      : stage.unknown || stage.waiting
+        ? `${stage.waiting} 个仍在等待 · ${stage.unknown} 个状态未知`
+        : '还没有可核对记录';
+  return `<li data-health-stage="${escapeAttr(stage.key)}"><strong>${count(stage.reached)}</strong><div><span>${escapeHtml(stage.label)}</span><small>${escapeHtml(detail)}</small></div></li>`;
+}
+
+function renderLifetimeFeedback(platforms) {
+  return `<div class="feedback-table-scroll" role="region" aria-label="平台累计记录" tabindex="0"><table aria-label="累计记录投递反馈"><thead><tr>
+    <th scope="col">平台</th><th scope="col">已联系岗位</th><th scope="col">已回复</th><th scope="col">回复占比</th>
+    </tr></thead><tbody>${platforms.map(item => renderPlatform(item, true)).join('')}</tbody></table></div>
+    <p class="feedback-footnote">累计记录用于回看总量；当前方案页会展示完整进展路径。</p>`;
 }
 
 function renderPlatform(item, lifetime) {

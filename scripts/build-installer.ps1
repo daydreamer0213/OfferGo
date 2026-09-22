@@ -157,6 +157,11 @@ foreach ($RelativePath in @(
 New-Item -ItemType Directory -Force -Path (Join-Path $StageDir "runtime") | Out-Null
 Copy-Item -LiteralPath $NodeRoot -Destination (Join-Path $StageDir "runtime\node") -Recurse -Force
 
+& (Join-Path $PSScriptRoot "build-launcher.ps1") `
+  -OutputPath (Join-Path $StageDir "OfferGo.Launcher.exe") `
+  -IconPath (Join-Path $ProjectRoot "assets\OfferGo.ico")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $ForbiddenFiles = @(
   Get-ChildItem -LiteralPath $StageDir -Recurse -File |
     Where-Object {

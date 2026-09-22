@@ -1,6 +1,5 @@
 const { randomUUID } = require("node:crypto");
-const { createZhaopinMessageReader } = require("../adapters/sites/zhaopin_message_reader");
-const { createZhaopinMessageActionSender } = require("../adapters/sites/zhaopin_message_action_sender");
+const { createPlatformMessageReader, createPlatformMessageActionSender } = require("../composition/message_action_factories");
 const { createMessageActionService } = require("../application/message_actions");
 const { acquireSiteScanLease, getSiteScanLease, renewSiteScanLease, releaseSiteScanLease } = require("../core/storage");
 
@@ -10,8 +9,8 @@ function createMessageActionController({
   logger = null,
   now = () => new Date(),
   cleanupBrowser = defaultCleanupBrowser,
-  createReader = ({ browser }) => createZhaopinMessageReader({ browser }),
-  createSender = ({ browser, reader }) => createZhaopinMessageActionSender({ browser, reader }),
+  createReader = createPlatformMessageReader,
+  createSender = createPlatformMessageActionSender,
   acquireLease = acquireSiteScanLease,
   getLease = getSiteScanLease,
   renewLease = renewSiteScanLease,
@@ -37,7 +36,8 @@ function createMessageActionController({
     if (activeRuns.has(profileId) || service.active({ profileId }).length) {
       throw controllerError("MESSAGE_ACTION_PROFILE_BUSY", "当前已有一项消息操作正在执行。");
     }
-    if (getLease(db, "zhaopin")) throw controllerError("MESSAGE_ACTION_LEASE_BUSY", "智联正在执行其他任务，请稍后再试。");
+    const platform = String(input.platform || "");
+    if (getLease(db, platform)) throw controllerError("MESSAGE_ACTION_LEASE_BUSY", "招聘平台正在执行其他任务，请稍后再试。");
     const action = service.confirm({ ...input, profileId });
     if (action.status === "confirmed" && !scheduled.has(action.id)) {
       scheduled.add(action.id);
@@ -89,16 +89,16 @@ function createMessageActionController({
     let leaseAcquired = false;
     let current = initial;
     run.completion = Promise.resolve().then(async () => {
-      acquireLease(db, { site: "zhaopin", owner, command: "message-action", planId: null });
+      acquireLease(db, { site: current.platform, owner, command: "message-action", planId: null });
       leaseAcquired = true;
       heartbeat = setIntervalFn(() => {
-        try { renewLease(db, { site: "zhaopin", owner }); }
+        try { renewLease(db, { site: current.platform, owner }); }
         catch { abortController.abort(controllerError("MESSAGE_ACTION_LEASE_LOST", "消息操作控制权已丢失。")); }
       }, Math.max(1000, Number(leaseHeartbeatMs) || 30_000));
       current = service.transition({ profileId, actionId, expectedStatus: "confirmed", status: "selecting", clickCount: 0 });
       browser = await browserFactory();
-      const reader = createReader({ browser });
-      const sender = createSender({ browser, reader });
+      const reader = createReader({ browser, platform: current.platform, action: current });
+      const sender = createSender({ browser, reader, platform: current.platform, action: current });
       const inspection = await sender.inspectTarget(current, abortController.signal);
       const prepared = await sender.prepareAction(inspection, abortController.signal);
       current = service.transition({ profileId, actionId, expectedStatus: "selecting", status: "verified", clickCount: 0 });
@@ -123,7 +123,7 @@ function createMessageActionController({
     }).finally(async () => {
       if (heartbeat !== null) clearIntervalFn(heartbeat);
       try { await cleanupBrowser(browser); } catch {}
-      if (leaseAcquired) { try { releaseLease(db, { site: "zhaopin", owner }); } catch {} }
+      if (leaseAcquired) { try { releaseLease(db, { site: current.platform, owner }); } catch {} }
       if (activeRuns.get(profileId) === run) activeRuns.delete(profileId);
     });
     return run.completion;

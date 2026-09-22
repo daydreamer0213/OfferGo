@@ -30,7 +30,9 @@ function runSuite() {
     "assets/OfferGo.ico",
     "assets/OfferGo-icon.png",
     "installer/OfferGo.iss",
+    "installer/launcher/OfferGoLauncher.cs",
     "scripts/build-installer.ps1",
+    "scripts/build-launcher.ps1",
     "scripts/installed-self-check.ps1",
     "scripts/launch-installed.ps1",
     "scripts/prepare-user-data.ps1",
@@ -68,11 +70,11 @@ function runSuite() {
   assert.match(inno, /\[Icons\]/);
   assert.match(inno, /\{autodesktop\}/);
   assert.match(inno, /Name:\s*"desktopicon"[^\r\n]*Flags:\s*checkedonce/i);
-  assert.match(inno, /Name:\s*"\{autodesktop\}\\OfferGo"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"[^\r\n]*Tasks:\s*desktopicon/i);
-  assert.match(inno, /Name:\s*"\{group\}\\OfferGo"[^\r\n]*launch-installed\.ps1[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"/i);
-  assert.match(inno, /Flags:\s*nowait\s+postinstall\s+skipifsilent\s+runhidden/i);
+  assert.match(inno, /Name:\s*"\{autodesktop\}\\OfferGo"[^\r\n]*Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"[^\r\n]*Tasks:\s*desktopicon/i);
+  assert.match(inno, /Name:\s*"\{group\}\\OfferGo"[^\r\n]*Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"/i);
+  assert.match(inno, /Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*Flags:\s*nowait\s+postinstall\s+skipifsilent/i);
   assert.match(inno, /\{uninstallexe\}/);
-  assert.match(inno, /launch-installed\.ps1/);
+  assert.match(inno, /OfferGo\.Launcher\.exe/);
   assert.match(inno, /prepare-uninstall\.ps1/);
   assert.match(inno, /installed-self-check\.ps1/);
   assert(
@@ -92,9 +94,25 @@ function runSuite() {
   assert.match(build, /Get-FileHash/);
   assert.match(build, /runtime\\node/);
   assert.match(build, /assets\\OfferGo\.ico/);
+  assert.match(build, /build-launcher\.ps1/);
   assert.match(build, /docs\\agent-operation\.md/);
   assert.match(build, /\[switch\]\$StageOnly/);
   assert.doesNotMatch(build, /vendor\\edge-control-bridge/i);
+
+  const launchInstalled = read("scripts/launch-installed.ps1");
+  const startWorkspace = read("scripts/start-workspace.ps1");
+  for (const source of [launchInstalled, startWorkspace]) assert.match(source, /\[string\]\$ProgressPath/);
+  assert.match(launchInstalled, /Write-OfferGoProgress/);
+  for (const state of ["checking_install", "starting_service", "starting_browser", "checking_workspace", "ready", "failed"]) {
+    assert.match(launchInstalled + startWorkspace, new RegExp(`\\b${state}\\b`), `missing startup progress state ${state}`);
+  }
+  const launcher = read("installer/launcher/OfferGoLauncher.cs");
+  assert.match(launcher, /UseShellExecute\s*=\s*false/);
+  assert.match(launcher, /CreateNoWindow\s*=\s*true/);
+  assert.match(launcher, /launch-installed\.ps1/);
+  assert.match(launcher, /OfferGo\.ico/);
+  assert.match(launcher, /打开诊断信息/);
+  assert.match(launcher, /SystemInformation\.HighContrast|SystemInformation\.IsMenuAnimationEnabled/);
 
   const install = read("scripts/install.ps1");
   assert.doesNotMatch(
@@ -667,6 +685,7 @@ function assertStandardInstallerStageBoundary() {
     const stageDir = stageMatch[1].trim();
     assert(fs.existsSync(path.join(stageDir, "scripts", "migrate-browser-profile.ps1")), "installer stage must include explicit profile migration");
     assert(fs.existsSync(path.join(stageDir, "scripts", "prepare-user-data.ps1")), "installer stage must include stable user-data preparation");
+    assert(fs.existsSync(path.join(stageDir, "OfferGo.Launcher.exe")), "installer stage must include the native startup window");
     assertWindowsIcon(fs.readFileSync(path.join(stageDir, "assets", "OfferGo.ico")));
     for (const relativePath of [
       "Install.bat",

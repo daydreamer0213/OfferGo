@@ -50,13 +50,13 @@ Type: files; Name: "{app}\src\core\llm.js"
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\OfferGo"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"
+Name: "{group}\OfferGo"; Filename: "{app}\OfferGo.Launcher.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"
 Name: "{group}\OfferGo 使用说明"; Filename: "{app}\README.md"; WorkingDir: "{app}"
 Name: "{group}\卸载 OfferGo"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\OfferGo"; Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"; Tasks: desktopicon
+Name: "{autodesktop}\OfferGo"; Filename: "{app}\OfferGo.Launcher.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{#PowerShellExe}"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\scripts\launch-installed.ps1"""; Description: "启动 OfferGo"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runhidden
+Filename: "{app}\OfferGo.Launcher.exe"; Description: "启动 OfferGo"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\README.md"; Description: "查看 OfferGo 使用说明"; Flags: postinstall shellexec skipifsilent unchecked
 
 [Code]

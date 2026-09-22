@@ -23,6 +23,7 @@ const { isExplicitRecruiterRejection } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
+const { deriveRequestedActions, isInPlatformResumeRequest } = require("./message_requested_actions");
 const {
   generateQualityCheckedDraft,
   buildMessageDraftQualityContext
@@ -589,11 +590,19 @@ async function runBossMessageDiscovery({
     const capturedIdentity = selectedIdentity(selectedSnapshot);
     const capturedPlan = source === "zhaopin" ? getActiveSearchPlan(db, profileId) : null;
     clearSelectedIdentity(selectedSnapshot);
-    const inboundMessages = inboundDisplayMessages(incoming);
+    const requested = deriveRequestedActions({
+      platform: source,
+      messages: incoming.messages,
+      manualActions: incoming.manualActions
+    });
+    const inboundMessages = inboundDisplayMessages({
+      ...incoming,
+      manualActions: requested.requestedActions
+    });
     let classification;
     try {
-      const currentFacts = incoming.messages.length ? listCandidateFacts(db, profileId) : [];
-      const answerMemories = incoming.messages.length
+      const currentFacts = requested.replyMessages.length ? listCandidateFacts(db, profileId) : [];
+      const answerMemories = requested.replyMessages.length
         ? listCandidateAnswerMemories(db, {
           profileId,
           activeOnly: true,
@@ -601,7 +610,7 @@ async function runBossMessageDiscovery({
           limit: 100
         })
         : [];
-      if (incoming.messages.length) {
+      if (requested.replyMessages.length) {
         emitStatus(safeStatus("running", {
           queued: queue.length,
           processed,
@@ -617,12 +626,14 @@ async function runBossMessageDiscovery({
           job: resolved.job,
           facts: currentFacts,
           answerMemories,
+          platform: source,
+          requestedActions: requested.requestedActions,
           contextSource: resolved.contextSource || resolved.job.contextSource || ""
         };
         const quality = await generateQualityCheckedDraft({
           generate: (qualityInput) => classifyMessageGroup({
             ...baseInput,
-            messages: incoming.messages.map((message) => ({ ...message })),
+            messages: requested.replyMessages.map((message) => ({ ...message })),
             ...(qualityInput.draftQualityRevision
               ? { draftQualityRevision: qualityInput.draftQualityRevision }
               : {})
@@ -633,7 +644,7 @@ async function runBossMessageDiscovery({
           ...buildMessageDraftQualityContext(db, {
             profileId,
             job: resolved.job,
-            messageTexts: incoming.messages.map((message) => String(message?.text || ""))
+            messageTexts: requested.replyMessages.map((message) => String(message?.text || ""))
           })
         });
         classification = quality.sendable
@@ -659,10 +670,10 @@ async function runBossMessageDiscovery({
       for (const item of incoming.messages) item.text = "";
       clearSelectedSnapshot(selectedSnapshot);
     }
-    if (incoming.manualActions.length) {
+    if (requested.requestedActions.length) {
       classification = {
         ...classification,
-        manualActions: incoming.manualActions,
+        manualActions: requested.requestedActions,
         progressUpdate: { ...classification.progressUpdate, stage: "needs_user_action" }
       };
     }
@@ -1815,9 +1826,13 @@ function persistSelectedTimeline(port, db, input) {
   const events = (Array.isArray(input.messages) ? input.messages : []).map((item, index) => {
     const messageId = String(item?.messageId || "").trim();
     const rawKind = kinds.has(String(item?.contentKind || "")) ? String(item.contentKind) : "unknown_card";
-    const kind = rawKind === "text" && !String(item?.text || "").trim() ? "unknown_card" : rawKind;
     const direction = ["friend", "myself", "platform", "unknown"].includes(String(item?.direction || ""))
       ? String(item.direction) : String(item?.direction || "") === "system" ? "platform" : "unknown";
+    const inferredResumeRequest = input.platform === "boss" && direction === "friend"
+      && rawKind === "text" && isInPlatformResumeRequest(item?.text);
+    const kind = inferredResumeRequest
+      ? "resume_request"
+      : rawKind === "text" && !String(item?.text || "").trim() ? "unknown_card" : rawKind;
     return {
       messageKey: validDigest(item?.messageKey)
         ? item.messageKey

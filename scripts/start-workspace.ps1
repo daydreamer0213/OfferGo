@@ -5,6 +5,7 @@ param(
   [ValidateSet("edge", "portable")]
   [string]$BrowserMode = "portable",
   [string]$ProfileDir = "",
+  [string]$ProgressPath = "",
   [switch]$NoBrowser,
   [switch]$NoOpen
 )
@@ -37,6 +38,26 @@ $BrowserAuthority = @{
   browserMode = $BrowserMode
   cdpPort = $AuthorityCdpPort
   profilePath = $ProfilePath
+}
+
+function Write-OfferGoProgress {
+  param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("checking_install", "starting_service", "starting_browser", "checking_workspace", "ready", "failed")]
+    [string]$State,
+    [Parameter(Mandatory = $true)][string]$Message
+  )
+  if ([string]::IsNullOrWhiteSpace($ProgressPath)) { return }
+  $FullPath = [System.IO.Path]::GetFullPath($ProgressPath)
+  $Parent = Split-Path -Parent $FullPath
+  New-Item -ItemType Directory -Force -Path $Parent | Out-Null
+  $TempPath = Join-Path $Parent (".{0}.{1}.tmp" -f ([System.IO.Path]::GetFileName($FullPath)), [guid]::NewGuid().ToString("N"))
+  @{
+    state = $State
+    message = $Message
+    updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  } | ConvertTo-Json -Compress | Set-Content -LiteralPath $TempPath -Encoding utf8
+  Move-Item -LiteralPath $TempPath -Destination $FullPath -Force
 }
 
 function Test-Dashboard {
@@ -139,9 +160,11 @@ function Confirm-DashboardBrowserRuntime {
   throw "DASHBOARD_BROWSER_RECOVERY_FAILED: $Detail"
 }
 
+Write-OfferGoProgress -State "checking_install" -Message "正在检查 OfferGo 运行环境…"
 & (Join-Path $PSScriptRoot "install.ps1") -CheckOnly
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+Write-OfferGoProgress -State "starting_service" -Message "正在启动 OfferGo 服务…"
 $DashboardWasRunning = Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $BrowserAuthority
 if (-not $DashboardWasRunning) {
   $DataPreparation = & (Join-Path $PSScriptRoot "prepare-user-data.ps1") `
@@ -173,10 +196,12 @@ if (-not (Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $Browser
   throw "Dashboard failed to start on http://127.0.0.1:$Port. Check whether the port is occupied."
 }
 
+Write-OfferGoProgress -State "starting_browser" -Message "正在准备专用浏览器…"
 $RuntimeStatus = Confirm-DashboardBrowserRuntime `
   -DashboardPort $Port `
   -AllowRecovery:$DashboardWasRunning
 
+Write-OfferGoProgress -State "checking_workspace" -Message "正在检查工作区状态…"
 $url = "http://127.0.0.1:$Port/"
 Write-Host "OfferGo is ready: $url"
 if ($BrowserMode -eq "edge") {
@@ -191,3 +216,4 @@ if ([string]$RuntimeStatus.workspace.status -eq "login_required") {
 } else {
   Write-Host "工作区状态：已就绪。"
 }
+Write-OfferGoProgress -State "ready" -Message "OfferGo 已就绪，正在打开工作台…"

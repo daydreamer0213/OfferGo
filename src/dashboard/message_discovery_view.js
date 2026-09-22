@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const { listIncomingContacts } = require("../application/funnel_analysis");
 const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
 const { isCompetitionPromotion } = require("../core/message_routing_policy");
+const { presentMessageResult } = require("./message_presenter");
 
 function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageActionController = null, messageReplyActionToken = "", helpers }) {
   const {
@@ -84,6 +85,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const resultViews = displayResults.map((result, resultIndex) => {
     const viewKey = messageViewKey("result", [result.platform, result.cardId, result.conversationKey || result.messageGroupKey]);
     const job = result.job || {};
+    const presented = presentMessageResult(result);
     const sendable = ["boss", "zhaopin"].includes(result.platform);
     const platformLabel = result.platform === "zhaopin" ? "智联" : sendable ? "BOSS" : "来源待确认";
     const manualActions = (result.manualActions || []).filter((item) => item?.kind === "resume_request");
@@ -131,29 +133,18 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
       : "");
-    const source = result.contextSource === "local_cache"
-      ? "本地已有岗位资料"
-      : result.contextSource === "message_discovery_detail"
-        ? "本次后台只读岗位详情"
-        : "本地岗位资料";
-    const opportunityLine = job.availability === "offline"
-      ? "职位已下线，以下资料用于理解这段沟通"
-      : job.opportunityVerdict || "";
-    const decisionCard = `<section class="message-job-understanding">
-      <p class="line"><strong>沟通类型：</strong>${escapeHtml(messageIntentLabel(result.messageIntent))}${manualActions.length ? " · HR 邀请你发送简历" : ""}</p>
-      ${opportunityLine ? `<p class="line"><strong>这份机会：</strong>${escapeHtml(opportunityLine)}${job.availability !== "offline" && job.opportunitySummary ? ` · ${escapeHtml(job.opportunitySummary)}` : ""}</p>` : ""}
-      ${job.roleSummary ? `<p class="line"><strong>岗位主要做什么：</strong>${escapeHtml(job.roleSummary)}</p>` : ""}
-      ${job.fitLabel || job.fitSummary ? `<p class="line"><strong>简历匹配：</strong>${escapeHtml([job.fitLabel, job.fitSummary].filter(Boolean).join(" · "))}</p>` : ""}
-      <p class="line"><strong>工作安排：</strong>${escapeHtml(job.workSchedule || "工作安排未确认")}</p>
-      <details class="message-job-details"><summary>岗位与资料详情</summary>
-        <p class="line"><strong>公司业务：</strong>${escapeHtml(job.companyBusiness || "JD 暂未说明公司的具体业务。")}</p>
-        <p class="line"><strong>资料来源：</strong>${escapeHtml(source)}</p>
-        <p class="line"><strong>薪资：</strong>${escapeHtml(job.salary || "薪资未说明")}</p>
-      </details>
-    </section>`;
-    const hasVerifiedActionCard = result.platform === "zhaopin" && (inboxItem?.timeline || [])
+    const factRows = presented.knownFacts.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`).join("");
+    const detailRows = presented.details.map((item) => `<p class="line"><strong>${escapeHtml(item.label)}：</strong>${escapeHtml(item.value)}</p>`).join("");
+    const decisionCard = presented.opportunity || factRows || detailRows
+      ? `<section class="message-job-understanding">
+        ${presented.opportunity ? `<h3>这份岗位是否值得继续</h3><p class="message-opportunity"><strong>${escapeHtml(presented.opportunity.headline)}</strong>${presented.opportunity.reason ? `<span>${escapeHtml(presented.opportunity.reason)}</span>` : ""}</p>` : ""}
+        ${factRows ? `<h3>已确认信息</h3><dl class="message-known-facts">${factRows}</dl>` : ""}
+        ${detailRows ? `<details class="message-job-details"><summary>岗位与资料详情</summary>${detailRows}</details>` : ""}
+      </section>`
+      : "";
+    const hasVerifiedActionCard = ["boss", "zhaopin"].includes(result.platform) && (inboxItem?.timeline || [])
       .some((event) => event.kind === "resume_request" && event.direction === "friend");
-    const manualSection = manualActions.map((action) => `<div class="message-manual-action"><h4>${escapeHtml(action.title)}</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
+    const manualSection = manualActions.map(() => `<div class="message-manual-action"><h4>发送简历</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const missingFactSection = result.missingFactKey ? renderMissingFactForm(result, {
       profileId,
@@ -163,7 +154,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const nextSection = expired
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
       : `${manualSection}${missingFactSection}${replySection}`
-      || `<p class="risk-text">${escapeHtml(messageDiscoveryManualActionText(result))}</p>`;
+      || '<p class="line">这条消息暂时没有需要你处理的操作。</p>';
+    const actionCard = `<section class="message-next-step"><h3>HR 想让你做什么</h3><p class="message-request-summary">${escapeHtml(presented.recruiterRequest)}</p><h3>下一步</h3>${nextSection}</section>`;
     const sentForm = !expired && sendable && drafts && !durableDrafts.length
       ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
       : "";
@@ -177,7 +169,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
-      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)} · 阶段：${escapeHtml(progressStageLabel(result.stage))}</p>${inboundSection}${decisionCard}<h3>下一步</h3>${nextSection}${sentForm}</section>`
+      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${actionCard}${sentForm}${decisionCard}</section>`
     };
   });
   const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)).reduce((count, result) => count
@@ -362,14 +354,16 @@ function renderConversationTimeline(events, { escapeHtml, escapeAttr, messageAct
 }
 
 function renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) {
+  const platformLabel = event.platform === "boss" ? "BOSS" : "智联";
   const labels = {
     confirmed: "已确认，等待处理", selecting: "正在核对会话", verified: "已核对操作目标",
-    click_dispatched: "正在确认平台结果", succeeded: "已在智联完成处理",
-    target_mismatch: "会话已变化，本次未执行", platform_rejected: "智联未接受本次操作",
+    click_dispatched: "正在确认平台结果", succeeded: `已在${platformLabel}完成处理`,
+    target_mismatch: "会话已变化，本次未执行", platform_rejected: `${platformLabel}未接受本次操作`,
     ambiguous: "平台结果暂时无法确认，已停止重试", stopped: "本次操作已停止"
   };
   if (action) return `<div class="message-card-action" data-message-action-state="${escapeAttr(action.status)}"><strong>${escapeHtml(action.actionKind === "resume_request_accept" ? "同意发送简历" : "拒绝发送简历")}</strong><span>${escapeHtml(labels[action.status] || "等待处理")}</span></div>`;
-  if (event.platform !== "zhaopin") return '<div class="message-card-action message-card-action--notice"><span>OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。</span></div>';
+  if (event.platform === "boss") return `<div class="message-card-action" data-message-action-group><span>直接处理这项请求</span><div class="button-row"><button type="button" data-message-action-confirm data-platform="boss" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="accept_resume">确认发送 BOSS 中最近更新的附件简历</button></div><small data-message-action-feedback role="status">点击后 OfferGo 会重新核对当前会话和附件更新时间；无法唯一确认时不会发送。</small></div>`;
+  if (event.platform !== "zhaopin") return "";
   return `<div class="message-card-action" data-message-action-group><span>直接处理这项请求</span><div class="button-row"><button type="button" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="accept_resume">同意发送简历</button><button type="button" class="secondary" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="decline_resume">拒绝</button></div><small data-message-action-feedback role="status">点击后 OfferGo 会先核对当前会话，再执行一次。</small></div>`;
 }
 
@@ -495,10 +489,10 @@ function messageDiscoveryClientScript(scriptState) {
     updateSelection();
     if(initial.initialReplySend)applySendState(initial.initialReplySend);
     const actionTerminal=new Set(["succeeded","target_mismatch","platform_rejected","ambiguous","stopped"]);
-    const actionLabel=(status)=>({confirmed:"已确认，等待处理",selecting:"正在核对当前会话",verified:"会话已核对",click_dispatched:"正在确认智联结果",succeeded:"已处理完成",target_mismatch:"会话已变化，本次未执行",platform_rejected:"智联未接受本次操作",ambiguous:"结果暂时无法确认，已停止重试",stopped:"本次操作已停止"}[status]||"等待处理");
-    const actionError=(code)=>({MESSAGE_ACTION_PROFILE_BUSY:"已有一项消息操作正在执行，请等待完成。",MESSAGE_ACTION_LEASE_BUSY:"智联正在执行其他任务，请稍后再试。",MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE:"这条请求已经变化，请先同步最新消息。",MESSAGE_ACTION_DECISION_CONFLICT:"这条请求已经处理过。",MESSAGE_ACTION_PLATFORM_UNSUPPORTED:"当前平台操作还没有通过安全核验，本次没有执行。",MESSAGE_REPLY_SEND_ACTION_REQUIRED:"请刷新当前消息页面后重新确认。"}[code]||"这项操作没有执行，请同步最新消息后重试。");
+    const actionLabel=(status)=>({confirmed:"已确认，等待处理",selecting:"正在核对当前会话",verified:"会话已核对",click_dispatched:"正在确认平台结果",succeeded:"已处理完成",target_mismatch:"会话已变化，本次未执行",platform_rejected:"平台未接受本次操作",ambiguous:"结果暂时无法确认，已停止重试",stopped:"本次操作已停止"}[status]||"等待处理");
+    const actionError=(code)=>({MESSAGE_ACTION_PROFILE_BUSY:"已有一项消息操作正在执行，请等待完成。",MESSAGE_ACTION_LEASE_BUSY:"招聘平台正在执行其他任务，请稍后再试。",MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE:"这条请求已经变化，请先同步最新消息。",MESSAGE_ACTION_DECISION_CONFLICT:"这条请求已经处理过。",MESSAGE_ACTION_KIND_UNSUPPORTED:"当前平台不支持这个操作，本次没有执行。",MESSAGE_ACTION_PLATFORM_UNSUPPORTED:"当前平台操作还没有通过安全核验，本次没有执行。",MESSAGE_REPLY_SEND_ACTION_REQUIRED:"请刷新当前消息页面后重新确认。"}[code]||"这项操作没有执行，请同步最新消息后重试。");
     const pollMessageAction=async(actionId,group)=>{try{const response=await fetch("/api/message-action/status?profileId="+encodeURIComponent(initial.profileId)+"&actionId="+encodeURIComponent(actionId));const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.status)throw new Error(parsed.body?.errorCode||"MESSAGE_ACTION_FAILED");const node=group.querySelector("[data-message-action-feedback]");if(node)node.textContent=actionLabel(parsed.body.status);if(actionTerminal.has(parsed.body.status)){if(parsed.body.status==="succeeded")setTimeout(()=>requestReload(true),350);return;}setTimeout(()=>pollMessageAction(actionId,group),700);}catch(error){const node=group.querySelector("[data-message-action-feedback]");if(node)node.textContent=actionError(error.message);}};
-    for(const button of document.querySelectorAll("[data-message-action-confirm]"))button.addEventListener("click",async()=>{const group=button.closest("[data-message-action-group]");if(!group||group.dataset.pending==="true")return;group.dataset.pending="true";for(const peer of group.querySelectorAll("button"))peer.disabled=true;const status=group.querySelector("[data-message-action-feedback]");if(status)status.textContent="正在核对当前智联会话…";const actionKind="resume"+"_request_"+(button.dataset.actionKind==="accept_resume"?"accept":"decline");const body={profileId:initial.profileId,platform:button.dataset.platform,conversationKey:button.dataset.conversationKey,messageKey:button.dataset.messageKey,actionKind,idempotencyKey:crypto.randomUUID()};try{const response=await fetch("/api/message-action/confirm",{method:"POST",headers:{"content-type":"application/json","x-roleflow-action":initial.messageReplyActionToken},body:JSON.stringify(body)});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.id)throw new Error(parsed.body?.errorCode||"MESSAGE_ACTION_FAILED");if(status)status.textContent=actionLabel(parsed.body.status);pollMessageAction(parsed.body.id,group);}catch(error){group.dataset.pending="false";for(const peer of group.querySelectorAll("button"))peer.disabled=false;if(status)status.textContent=actionError(error.message);}});
+    for(const button of document.querySelectorAll("[data-message-action-confirm]"))button.addEventListener("click",async()=>{const group=button.closest("[data-message-action-group]");if(!group||group.dataset.pending==="true")return;group.dataset.pending="true";for(const peer of group.querySelectorAll("button"))peer.disabled=true;const status=group.querySelector("[data-message-action-feedback]");if(status)status.textContent="正在核对当前"+(button.dataset.platform==="boss"?" BOSS":"智联")+"会话…";const actionKind="resume"+"_request_"+(button.dataset.actionKind==="accept_resume"?"accept":"decline");const body={profileId:initial.profileId,platform:button.dataset.platform,conversationKey:button.dataset.conversationKey,messageKey:button.dataset.messageKey,actionKind,idempotencyKey:crypto.randomUUID()};try{const response=await fetch("/api/message-action/confirm",{method:"POST",headers:{"content-type":"application/json","x-roleflow-action":initial.messageReplyActionToken},body:JSON.stringify(body)});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.id)throw new Error(parsed.body?.errorCode||"MESSAGE_ACTION_FAILED");if(status)status.textContent=actionLabel(parsed.body.status);pollMessageAction(parsed.body.id,group);}catch(error){group.dataset.pending="false";for(const peer of group.querySelectorAll("button"))peer.disabled=false;if(status)status.textContent=actionError(error.message);}});
     const applySelection=(preferredKey=selectedKey,persist=true)=>{
       const rows=Array.from(document.querySelectorAll(".message-list-item[data-platform]"));
       for(const row of rows)row.hidden=false;
