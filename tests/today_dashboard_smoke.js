@@ -27,6 +27,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "today-d
 (async () => {
   assertEvaluationScriptExplainsMissingPlaywright();
   assertRendererIsPureAndEscapesHtml();
+  assertDualPlatformActionRendering();
   assertEarlyScanConfirmationRendering();
   await assertPriorityPanelStaysCompactAtDesktopWidth();
   assertScanStatusLabels();
@@ -111,6 +112,19 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "today-d
   console.error(error.stack || error.message);
   process.exitCode = 1;
 });
+
+function assertDualPlatformActionRendering() {
+  const html = renderTodayPage({
+    page: { todayPath: "/plan?planId=1", planId: 1, site: "boss", enabledPlatforms: ["boss", "zhaopin"] },
+    heading: { title: "今日任务" },
+    primary: { type: "notice", label: "等待当前平台" },
+    metrics: {},
+    runtime: { browserMode: "portable", cdpPort: 9222, site: "boss" },
+    profile: {}
+  });
+  assert.match(html, /name="site" value="both"/);
+  assert.match(html, />同时运行 BOSS \+ 智联<\/button>/);
+}
 
 function assertEvaluationScriptExplainsMissingPlaywright() {
   const evaluationScript = path.join(root, "scripts", "evaluate-today-dashboard.js");

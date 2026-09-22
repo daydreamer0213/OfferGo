@@ -50,6 +50,21 @@ async function main() {
   assert.equal(started.headers.location, "/workflow?runId=workflow-started");
   assert.deepEqual(calls[0], ["start", { planId: "7", site: "boss" }, { requestId: "request-start" }]);
 
+  const dual = responseRecorder();
+  service.start = async (input, context) => {
+    calls.push(["start", input, context]);
+    return {
+      workflow: { id: "workflow-boss" },
+      platformResults: [
+        { site: "boss", status: "started", workflowId: "workflow-boss" },
+        { site: "zhaopin", status: "started", workflowId: "workflow-zhaopin" }
+      ]
+    };
+  };
+  await controller.start(request("planId=7&site=both"), dual, { requestId: "request-dual" });
+  assert.equal(dual.statusCode, 303);
+  assert.equal(dual.headers.location, "/plan?planId=7&dual=started");
+
   const scope = responseRecorder();
   await controller.resume(
     request("workflowRunId=workflow-existing&browserMode=edge"),

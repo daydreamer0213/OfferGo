@@ -165,6 +165,7 @@ function claimWorkflowJobTask(db, {
   workflowRunId,
   leaseOwner,
   leaseTtlMs,
+  globalConcurrency = null,
   selectModelIdentity,
   now
 }) {
@@ -226,9 +227,12 @@ function claimWorkflowJobTask(db, {
       attemptCountInGeneration: attemptInGeneration,
       totalAttemptCount: totalAttemptNumber,
       lastAttemptModelRevision: modelConfigRevision,
+      globalConcurrency,
       now: normalizedClock
     });
-    if (Number(update.changes) !== 1) return null;
+    if (Number(update.changes) !== 1) {
+      return update.capacityBlocked ? { capacityBlocked: true } : null;
+    }
 
     insertJobAnalysisAttemptRow(db, {
       workflowRunId,

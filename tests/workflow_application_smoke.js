@@ -9,6 +9,7 @@ const {
   getWorkflowStatus
 } = require("../src/application/workflow");
 const { resolveNewWorkflowBrowser } = require("../src/dashboard/server");
+const { createDashboardWorkflowService } = require("../src/application/workflow/dashboard_service");
 
 async function main() {
   dashboardAuthorityResolverRejectsRequestDrift();
@@ -24,7 +25,39 @@ async function main() {
   await portableAnalysisControlKeepsAuthorityWithoutBrowserProbe();
   await scanScopeResumeContracts();
   await resumeControlAndStatusContracts();
+  await dualPlatformDispatchReusesSinglePlatformStart();
   console.log("workflow application smoke passed");
+}
+
+async function dualPlatformDispatchReusesSinglePlatformStart() {
+  const calls = [];
+  let active = 0;
+  let maxActive = 0;
+  const service = createDashboardWorkflowService({
+    db: {},
+    root: ".",
+    dbPath: "fixture.sqlite",
+    scanRuns: new Map(),
+    logger: { info() {}, warn() {}, error() {} },
+    startScan() {},
+    resolveNewWorkflowBrowser() { return { browserMode: "edge", cdpPort: null }; },
+    buildDashboardState() { return {}; },
+    ensureWorkspaceReady: async (site) => { calls.push(["workspace", site]); },
+    getBatchModelState: () => ({ settings: { batchBackup: { enabled: false } } }),
+    batchModelReady: () => true,
+    startWorkflowUseCase: async ({ input }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      calls.push(["start", input.site]);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return { workflow: { id: `workflow-${input.site}` } };
+    }
+  });
+  const result = await service.start({ planId: "7", site: "both" }, { requestId: "dual" });
+  assert.strictEqual(maxActive, 2, "dual platform dispatch must start the two existing workflows concurrently");
+  assert.deepStrictEqual(calls.filter(([kind]) => kind === "start"), [["start", "boss"], ["start", "zhaopin"]]);
+  assert.deepStrictEqual(result.platformResults.map(({ site, status }) => [site, status]), [["boss", "started"], ["zhaopin", "started"]]);
 }
 
 function exportsAndPlainData() {

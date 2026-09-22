@@ -160,10 +160,16 @@ function createMessageDiscoveryController(deps = {}) {
       throw messageDiscoveryError("WORKSPACE_PLATFORM_SELECTION_REQUIRED", "请先选择要读取消息的招聘平台。", 409);
     }
     const owner = randomUUID();
-    const leaseSite = enabledPlatforms[0];
+    const leaseSites = [];
     try {
-      acquireLease(db, { site: leaseSite, owner, command: "discover-messages", planId: null });
+      for (const site of enabledPlatforms) {
+        acquireLease(db, { site, owner, command: "discover-messages", planId: null });
+        leaseSites.push(site);
+      }
     } catch (error) {
+      for (const site of leaseSites) {
+        try { releaseLease(db, { site, owner }); } catch {}
+      }
       if (error?.code === "SCAN_ALREADY_RUNNING"
         || /constraint|locked|lease/i.test(String(error?.message || ""))) {
         throw messageDiscoveryError("MESSAGE_DISCOVERY_LEASE_BUSY", "招聘平台正在执行其他任务", 409);
@@ -203,7 +209,7 @@ function createMessageDiscoveryController(deps = {}) {
     const heartbeatMs = Math.max(1, Number(deps.leaseHeartbeatMs) || 30_000);
     const heartbeat = setIntervalFn(() => {
       try {
-        renewLease(db, { site: leaseSite, owner });
+        for (const site of leaseSites) renewLease(db, { site, owner });
       } catch {
         abortController.abort(messageDiscoveryError("MESSAGE_DISCOVERY_LEASE_LOST", "招聘平台任务占用状态已丢失"));
       }
@@ -367,14 +373,16 @@ function createMessageDiscoveryController(deps = {}) {
           code: messageDiscoveryErrorCode(error)
         });
       }
-      try {
-        releaseLease(db, { site: leaseSite, owner });
-      } catch (error) {
-        logger?.warn("message_discovery_lease_release_failed", {
-          profileId,
-          site: leaseSite,
-          code: messageDiscoveryErrorCode(error)
-        });
+      for (const site of leaseSites) {
+        try {
+          releaseLease(db, { site, owner });
+        } catch (error) {
+          logger?.warn("message_discovery_lease_release_failed", {
+            profileId,
+            site,
+            code: messageDiscoveryErrorCode(error)
+          });
+        }
       }
     });
     return { statusCode: 202, body: publicRun(run) };

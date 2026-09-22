@@ -716,7 +716,10 @@ async function durableResume() {
     const workflow = storage.createWorkflowRun(db, { site: 'zhaopin', profileId: saved.profileId, planId: saved.planId, localDay: require('../src/core/workflow_run').chinaLocalDay(), sequence: 1, keywords, planner: acquisition });
     storage.transitionWorkflowRun(db, { id: workflow.id, status: 'scanning' });
     storage.acquireSiteScanLease(db, { site: 'zhaopin', owner: 'first', planId: saved.planId, command: 'scan' });
-    assert.throws(() => storage.acquireSiteScanLease(db, { site: 'boss', owner: 'competing', planId: saved.planId, command: 'scan' }), error => /LEASE|RUNNING/.test(error.code));
+    const bossLease = storage.acquireSiteScanLease(db, { site: 'boss', owner: 'competing', planId: saved.planId, command: 'scan' });
+    assert.equal(bossLease.site, 'boss', 'BOSS and Zhaopin may hold independent scan leases');
+    assert.throws(() => storage.acquireSiteScanLease(db, { site: 'zhaopin', owner: 'duplicate', planId: saved.planId, command: 'scan' }), error => /LEASE|RUNNING/.test(error.code));
+    storage.releaseSiteScanLease(db, { site: 'boss', owner: 'competing' });
     storage.beginScanRun(db, { runId: 'first', site: 'zhaopin', planId: saved.planId, leaseOwner: 'first', command: 'scan' });
     const batchId = storage.createAndBindScanBatch(db, { runId: 'first', leaseOwner: 'first', site: 'zhaopin', keyword: 'AI,工程', profileId: saved.profileId, searchPlanId: saved.planId, filterSnapshot: { execution: snapshot } });
     storage.attachWorkflowScan(db, { id: workflow.id, scanRunId: 'first', scanBatchId: batchId });

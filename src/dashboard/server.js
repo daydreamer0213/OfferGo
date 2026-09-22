@@ -1481,7 +1481,7 @@ function createDashboardServer({
         if (!run) return sendJson(res, 404, { error: "简历处理任务不存在。" });
         return sendJson(res, 200, publicOnboardingRun(run));
       }
-      if (req.method === "GET" && url.pathname === "/api/scan-status") return sendJson(res, 200, scanStatus(scanRuns, url.searchParams.get("planId"), db));
+      if (req.method === "GET" && url.pathname === "/api/scan-status") return sendJson(res, 200, scanStatus(scanRuns, url.searchParams.get("planId"), db, requestedSite(url.searchParams.get("site"))));
       if (req.method === "GET" && url.pathname === "/api/workflow-status") {
         return workflowController.status(res, url.searchParams.get("runId"));
       }
@@ -2343,7 +2343,7 @@ async function handlePlanScan(req, res, { db, root, dataRoot = root, dbPath, sca
     const orphaned = interruptOrphanedScanRuns(db, { site: "boss", heartbeatTimeoutMs: PRODUCT_POLICY.operations.scanOrphanTimeoutMs });
     if (orphaned.interrupted) logger.warn("orphaned_scan_runs_interrupted", orphaned);
     const latestRun = getLatestScanRun(db, { planId: plan.id, site: "boss" });
-    if (latestRun?.status === "running" || [...scanRuns.values()].some((run) => !run.exited)) {
+    if (latestRun?.status === "running" || [...scanRuns.values()].some((run) => !run.exited && run.site === "boss")) {
       throw new Error("BOSS 已有扫描任务正在启动或运行，请等待当前任务结束。");
     }
     const activeLease = getSiteScanLease(db, "boss");
@@ -3281,8 +3281,8 @@ function startPlanScan(scanRuns, {
       throw error;
     }
   }
-  const run = { runId, kind: scanKind, resumeBatchId: effectiveResumeBatchId, workflowRunId: workflowRun?.id || "", startedAt: persisted.createdAt, output: "", error: "", exitCode: null, child: null, exited: false };
-  scanRuns.set(analysisOnly ? `workflow:${workflowRun.id}` : Number(planId), run);
+  const run = { runId, site, kind: scanKind, resumeBatchId: effectiveResumeBatchId, workflowRunId: workflowRun?.id || "", startedAt: persisted.createdAt, output: "", error: "", exitCode: null, child: null, exited: false };
+  scanRuns.set(analysisOnly ? `workflow:${workflowRun.id}` : `${site}:${Number(planId)}`, run);
   let exitRecorded = false;
   const recordExit = ({ exitCode = null, signal = "", error = null } = {}) => {
     if (exitRecorded) return;
@@ -3372,11 +3372,11 @@ function startPlanScan(scanRuns, {
   }
 }
 
-function scanStatus(scanRuns, planId, db = null) {
+function scanStatus(scanRuns, planId, db = null, site = "boss") {
   const normalizedPlanId = Number(planId || 0);
-  if (db) interruptOrphanedScanRuns(db, { site: "boss", heartbeatTimeoutMs: PRODUCT_POLICY.operations.scanOrphanTimeoutMs });
-  const local = scanRuns.get(normalizedPlanId);
-  const persisted = db && normalizedPlanId ? getLatestScanRun(db, { planId: normalizedPlanId, site: "boss" }) : null;
+  if (db) interruptOrphanedScanRuns(db, { site, heartbeatTimeoutMs: PRODUCT_POLICY.operations.scanOrphanTimeoutMs });
+  const local = scanRuns.get(`${site}:${normalizedPlanId}`) || (site === "boss" ? scanRuns.get(normalizedPlanId) : null);
+  const persisted = db && normalizedPlanId ? getLatestScanRun(db, { planId: normalizedPlanId, site }) : null;
   if (persisted) {
     const diagnostic = local?.runId === persisted.runId ? local : null;
     return {
@@ -3393,7 +3393,7 @@ function scanStatus(scanRuns, planId, db = null) {
       recovered: !diagnostic
     };
   }
-  const lease = db ? getSiteScanLease(db, "boss") : null;
+  const lease = db ? getSiteScanLease(db, site) : null;
   if (lease && (!normalizedPlanId || Number(lease.planId) === normalizedPlanId)) {
     return { state: "running", kind: lease.command, startedAt: lease.acquiredAt, recovered: true, planId: lease.planId };
   }
@@ -5456,8 +5456,8 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
     scanDefaults,
     scanBounds,
     dailyBCardLimit: boss.weightedCardLimit("B", dailyScan.maxCards),
-    run: scanStatus(scanRuns, planRecord.id, db),
-    resumableBatch: getLatestResumableBatch(db, { planId: planRecord.id, site: "boss" }),
+    run: scanStatus(scanRuns, planRecord.id, db, site),
+    resumableBatch: getLatestResumableBatch(db, { planId: planRecord.id, site }),
     validation: validateSearchPlan(plan, profile.profile),
     planDependency: getSearchPlanDependency(db, planRecord.id),
     versionDiff: compareProfileVersions(db, profile.id),
@@ -5473,7 +5473,11 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
       count: followUpCount,
       href: `/follow-ups?profileId=${profile.id}&planId=${planRecord.id}`
     } : null,
-    confirmation,
+    confirmation: searchParams.get("dual") === "started"
+      ? "BOSS 与智联已经同时开始；可切换平台查看各自进度。"
+      : searchParams.get("dual") === "partial"
+        ? "已有平台成功开始；另一个平台未能启动，请切换平台查看原因后重试。"
+        : confirmation,
     runtime: browserAuthority,
     options: {
       cities: PLAN_CITY_OPTIONS,

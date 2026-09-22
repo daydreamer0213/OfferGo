@@ -343,6 +343,7 @@ async function workerLoop(context, workerIndex, summary) {
       workflowRunId: context.workflowRunId,
       leaseOwner,
       leaseTtlMs: context.leaseTtlMs,
+      globalConcurrency: context.workerCount,
       selectModelIdentity: ({ attemptInGeneration }) => selectAttemptRuntime({
         attemptInGeneration,
         primaryRuntime: context.primaryRuntime,
@@ -350,6 +351,10 @@ async function workerLoop(context, workerIndex, summary) {
       }).identity,
       now: context.now()
     });
+    if (claimed?.capacityBlocked) {
+      await context.sleep(context.capacityPollMs);
+      continue;
+    }
     if (!claimed) {
       const counts = countWorkflowJobTaskStatusesForRun(context.db, context.workflowRunId);
       if (counts.pending === 0 && counts.running === 0 && counts.retryPending === 0) return;
@@ -481,6 +486,7 @@ function normalizeRunContext(input = {}) {
       : PRODUCT_POLICY.operations.modelAnalysis.retryBackoffMs,
     workerIdFactory: typeof input.workerIdFactory === "function" ? input.workerIdFactory : null,
     leaseTtlMs: PRODUCT_POLICY.operations.modelAnalysis.taskLeaseTtlMs,
+    capacityPollMs: 50,
     workerCount,
     signal: input.signal && typeof input.signal === "object" ? input.signal : null
   };

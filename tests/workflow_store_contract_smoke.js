@@ -24,7 +24,7 @@ const WORKFLOW_EXPORTS = [
 const MOVED_DEFINITIONS = [
   ...WORKFLOW_EXPORTS.filter((name) => ![
     "replaceWorkflowScanContext", "createWorkflowRun", "listWorkflowRuns", "transitionWorkflowRun",
-    "getWorkflowObservationJob", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
+    "getWorkflowObservationJob", "claimWorkflowJobTaskRow", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
     "listWorkflowStateInvariantViolations"
   ].includes(name)),
   "nonNegativeInteger", "workflowRunError",

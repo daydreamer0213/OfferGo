@@ -484,7 +484,7 @@ let db;
   assert.strictEqual(getSiteScanLease(db, "zhaopin"), null);
   assert.deepStrictEqual(getSitePacingState(db, "zhaopin").pacing, { pacedActions: 6, nextPacingCooldownAt: 7, detailActions: 8, nextDetailMicroCooldownAt: 9, nextDetailMacroCooldownAt: 10 });
 
-  const conflictingLease = acquireSiteScanLease(db, { site: "boss", owner: "fixture-owner", command: "scan", planId });
+  const conflictingLease = acquireSiteScanLease(db, { site: "zhaopin", owner: "fixture-owner", command: "scan", planId });
   let blockedBrowserCreations = 0;
   await assert.rejects(() => communicate(db, { batch: zhaopinBatchId, browser: "edge", "single-item": "1" }, {
     createBrowserFn: () => { blockedBrowserCreations += 1; return zhaopinBrowser; },

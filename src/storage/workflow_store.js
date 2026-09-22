@@ -899,9 +899,13 @@ function claimWorkflowJobTaskRow(db, {
   attemptCountInGeneration,
   totalAttemptCount,
   lastAttemptModelRevision,
+  globalConcurrency = 0,
   now
 }) {
-  return db.prepare(`
+  const capacity = Number.isInteger(Number(globalConcurrency)) && Number(globalConcurrency) > 0
+    ? Number(globalConcurrency)
+    : 0;
+  const result = db.prepare(`
     UPDATE workflow_job_tasks SET
       status = 'running',
       lease_owner = ?,
@@ -917,6 +921,10 @@ function claimWorkflowJobTaskRow(db, {
       AND attempt_count_in_generation = ?
       AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)
       AND (available_at IS NULL OR available_at <= ?)
+      AND (? = 0 OR (
+        SELECT count(*) FROM workflow_job_tasks
+        WHERE status = 'running' AND lease_expires_at > ?
+      ) < ?)
   `).run(
     leaseOwner,
     leasedAt,
@@ -929,8 +937,15 @@ function claimWorkflowJobTaskRow(db, {
     taskId,
     attemptCountInGeneration - 1,
     now,
-    now
+    now,
+    capacity,
+    now,
+    capacity
   );
+  if (Number(result.changes || 0) === 1 || capacity === 0) return result;
+  const active = Number(db.prepare(`SELECT count(*) AS n FROM workflow_job_tasks
+    WHERE status = 'running' AND lease_expires_at > ?`).get(now).n);
+  return { ...result, capacityBlocked: active >= capacity };
 }
 
 function insertJobAnalysisAttemptRow(db, {

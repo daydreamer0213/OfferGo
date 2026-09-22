@@ -292,6 +292,11 @@ async function main() {
     db.prepare("SELECT command FROM site_scan_leases WHERE site = 'boss'").get().command,
     "discover-messages"
   );
+  assert.strictEqual(
+    db.prepare("SELECT command FROM site_scan_leases WHERE site = 'zhaopin'").get().command,
+    "discover-messages",
+    "a combined message read must reserve both platform lanes"
+  );
   await waitFor(() => db.prepare("SELECT COUNT(*) AS count FROM lease_renew_audit").get().count > 0);
 
   response = await postForm(base, "/api/progress", {

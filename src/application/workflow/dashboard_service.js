@@ -79,6 +79,7 @@ function createDashboardWorkflowService({
   getBatchModelState,
   batchModelReady,
   getBatchBackup = () => null,
+  startWorkflowUseCase = startWorkflow,
   planRescore = rescorePlanObservations,
   schedule = setTimeout,
   controlGraceMs = PRODUCT_POLICY.operations.modelAnalysis.taskLeaseTtlMs
@@ -93,6 +94,24 @@ function createDashboardWorkflowService({
 
   async function start(params = {}, { requestId = "" } = {}) {
     const site = String(params.site || "boss").trim().toLowerCase();
+    if (site === "both") {
+      const settled = await Promise.allSettled(["boss", "zhaopin"].map((platform) =>
+        startForSite({ ...params, site: platform }, { requestId }, platform)));
+      const platformResults = settled.map((result, index) => {
+        const platform = index === 0 ? "boss" : "zhaopin";
+        return result.status === "fulfilled"
+          ? { site: platform, status: result.value.alreadyActive ? "active" : "started", workflowId: result.value.workflow.id }
+          : { site: platform, status: "failed", errorCode: String(result.reason?.code || "WORKFLOW_RUN_START_FAILED") };
+      });
+      const successful = settled.find((result) => result.status === "fulfilled");
+      if (!successful) throw settled[0].reason;
+      logger?.info?.("dual_platform_workflow_started", { requestId, platformResults });
+      return { ...successful.value, platformResults };
+    }
+    return startForSite(params, { requestId }, site);
+  }
+
+  async function startForSite(params, { requestId }, site) {
     if (!new Set(["boss", "zhaopin"]).has(site)) {
       throw appError("UNKNOWN_SITE", "请选择 BOSS 或智联。", { statusCode: 400 });
     }
@@ -101,7 +120,7 @@ function createDashboardWorkflowService({
     const backupRuntime = modelState.settings?.batchBackup?.enabled
       ? getBatchBackup()
       : null;
-    return startWorkflow({
+    return startWorkflowUseCase({
       db,
       input: {
         ...params,
@@ -298,15 +317,14 @@ function createDashboardWorkflowService({
     });
     if (orphaned.interrupted) scopedLogger?.warn?.("orphaned_scan_runs_interrupted", orphaned);
     const latestRun = getLatestScanRun(database, { planId, site });
-    if (latestRun?.status === "running" || [...activeRuns.values()].some((run) => !run.exited)) {
-      throw appError("WORKFLOW_SCAN_ALREADY_RUNNING", "BOSS 已有扫描任务正在运行，请先完成当前任务。", { statusCode: 409 });
+    if (latestRun?.status === "running" || [...activeRuns.values()].some((run) => !run.exited && run.site === site)) {
+      throw appError("WORKFLOW_SCAN_ALREADY_RUNNING", `${site === "zhaopin" ? "智联" : "BOSS"} 已有扫描任务正在运行，请先完成当前任务。`, { statusCode: 409 });
     }
-    const activeLease = getSiteScanLease(database, site)
-      || getSiteScanLease(database, site === "boss" ? "zhaopin" : "boss");
+    const activeLease = getSiteScanLease(database, site);
     if (activeLease) {
       throw appError(
         "WORKFLOW_SCAN_LEASE_ACTIVE",
-        `BOSS 已有扫描任务运行中（${activeLease.command}）。`,
+        `${site === "zhaopin" ? "智联" : "BOSS"} 已有扫描任务运行中（${activeLease.command}）。`,
         { statusCode: 409 }
       );
     }
@@ -508,7 +526,7 @@ function normalizeCdpPort(value, fallback = PORTABLE_CDP_PORT) {
 
 function exactActiveWorkflowRun(scanRuns, workflow) {
   if (!workflow) return null;
-  const keys = [`workflow:${workflow.id}`, Number(workflow.planId)];
+  const keys = [`workflow:${workflow.id}`, `${workflow.site || "boss"}:${Number(workflow.planId)}`, Number(workflow.planId)];
   for (const key of keys) {
     const local = scanRuns.get(key);
     if (local && !local.exited && local.workflowRunId === workflow.id && local.child) return local;

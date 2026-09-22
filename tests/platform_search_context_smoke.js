@@ -58,9 +58,9 @@ try {
   assert.deepEqual(listWorkflowRuns(db, { profileId: first.profileId, localDay: "2026-09-06", site: "zhaopin" }).map((row) => row.id), ["zhaopin-slot"]);
 
   acquireSiteScanLease(db, { site: "boss", owner: "boss-owner", ttlMs: 60_000 });
-  assert.throws(() => acquireSiteScanLease(db, { site: "zhaopin", owner: "zhaopin-owner", ttlMs: 60_000 }), (error) => error.code === "SCAN_ALREADY_RUNNING");
-  assert.equal(releaseSiteScanLease(db, { site: "boss", owner: "boss-owner" }), true);
   acquireSiteScanLease(db, { site: "zhaopin", owner: "zhaopin-owner", ttlMs: 60_000 });
+  assert.throws(() => acquireSiteScanLease(db, { site: "zhaopin", owner: "zhaopin-duplicate", ttlMs: 60_000 }), (error) => error.code === "SCAN_ALREADY_RUNNING");
+  assert.equal(releaseSiteScanLease(db, { site: "boss", owner: "boss-owner" }), true);
   assert.equal(releaseSiteScanLease(db, { site: "zhaopin", owner: "zhaopin-owner" }), true);
 } finally {
   db.close();

@@ -25,6 +25,10 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
       const params = await readRequestParams(req);
       planId = Number(params.planId || 0);
       const result = await service.start(params, { requestId });
+      if (Array.isArray(result.platformResults)) {
+        const partial = result.platformResults.some((item) => item.status === "failed");
+        return redirect(res, `/plan?planId=${encodeURIComponent(planId)}&dual=${partial ? "partial" : "started"}`);
+      }
       return redirect(res, `/workflow?runId=${encodeURIComponent(result.workflow.id)}`);
     } catch (error) {
       return renderUiError(

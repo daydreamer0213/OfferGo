@@ -53,6 +53,7 @@ const {
   await testRunWorkflowAnalysisWorkflowFatalPreservesIncrementalResults();
   await testRunWorkflowAnalysisPersistsTelemetryOnAttempt();
   await testRunWorkflowAnalysisTwoWorkersClaimDistinctTasks();
+  await testConcurrentWorkflowsShareConfiguredCapacity();
   await testRunWorkflowAnalysisRetryCooldownCannotBeBypassed();
   await testRunWorkflowAnalysisConfigurationPauseStopsClaiming();
   await testRunWorkflowAnalysisQueueDrainedCounts();
@@ -81,6 +82,44 @@ function testErrorKindConstants() {
     CONTROLLED_STOP: "controlled_stop"
   });
   assert(Object.isFrozen(WORKFLOW_ANALYSIS_ERROR_KINDS));
+}
+
+async function testConcurrentWorkflowsShareConfiguredCapacity() {
+  const db = openDb(":memory:");
+  try {
+    const first = seedWorkflow(db, { analyses: [{}], localDay: "2026-09-20", modelConfigRevision: "shared-capacity" });
+    const second = seedWorkflow(db, { analyses: [{}], localDay: "2026-09-21", modelConfigRevision: "shared-capacity" });
+    for (const fixture of [first, second]) {
+      initializeWorkflowJobTasks(db, {
+        workflowRunId: fixture.workflowId,
+        batchId: fixture.batchId,
+        jobs: observationEntries(db, fixture.batchId),
+        modelConfigRevision: "shared-capacity",
+        now: new Date().toISOString()
+      });
+    }
+    let active = 0;
+    let maxActive = 0;
+    const run = (fixture) => runWorkflowAnalysis({
+      db,
+      workflowRunId: fixture.workflowId,
+      primaryRuntime: { revision: "shared-capacity", concurrency: 1, modelConfig: { provider: "mock", providers: { mock: { model: "shared" } } } },
+      createAnalyzeJob: () => async () => ({}),
+      analyzeScannedJob: async (job) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return analyzedJob(job);
+      },
+      logger: silentLogger()
+    });
+    const results = await Promise.all([run(first), run(second)]);
+    assert.deepStrictEqual(results.map((result) => result.status), ["drained", "drained"]);
+    assert.strictEqual(maxActive, 1, "parallel platform workflows must share the configured model concurrency");
+  } finally {
+    db.close();
+  }
 }
 
 function testRetryableCodeMapping() {
