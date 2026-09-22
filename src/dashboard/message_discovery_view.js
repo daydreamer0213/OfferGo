@@ -88,6 +88,9 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const presented = presentMessageResult(result);
     const sendable = ["boss", "zhaopin"].includes(result.platform);
     const platformLabel = result.platform === "zhaopin" ? "智联" : sendable ? "BOSS" : "来源待确认";
+    const manualSentLabel = result.platform === "boss"
+      ? "我已在 BOSS 手动发送"
+      : result.platform === "zhaopin" ? "我已在智联手动发送" : "我已手动发送";
     const manualActions = (result.manualActions || []).filter((item) => item?.kind === "resume_request");
     const matchingContact = incomingContacts.find((item) => item.platform === result.platform
       && Number(item.cardId) === Number(result.cardId)
@@ -105,7 +108,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       const id = draft.id > 0 ? `message-draft-${draft.id}` : `message-draft-${resultIndex}-${messageIndex}`;
       const editable = draft.id > 0;
       const sent = editable && sendable
-        ? `<form method="post" action="/api/progress" data-sent-draft="${id}"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="draftId" value="${draft.id}"><input type="hidden" name="finalText" value=""><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
+        ? `<form method="post" action="/api/progress" data-sent-draft="${id}"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="draftId" value="${draft.id}"><input type="hidden" name="finalText" value=""><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">${escapeHtml(manualSentLabel)}</button></form>`
         : "";
       const alternativeSelector = draftItems.length > 1
         ? `<input type="radio" name="message-send-choice-${Number(result.cardId)}" data-send-select="${draft.id}">选择这版回复`
@@ -134,16 +137,20 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
       : "");
     const factRows = presented.jobFacts.map((item) => `<span><strong>${escapeHtml(item.label)}：</strong>${escapeHtml(item.value)}</span>`).join("");
+    const roleTaskRows = presented.roleTasks.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
     const connectionRows = presented.resumeConnections.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-    const decisionCard = presented.roleSummary || presented.businessContext || connectionRows || presented.attentionPoint || presented.recommendationNote || factRows
+    const jobOverview = presented.roleSummary || roleTaskRows || presented.businessContext || factRows
       ? `<section class="message-job-understanding">
-        ${presented.roleSummary || presented.businessContext ? `<h3>这个岗位主要做什么</h3>${presented.roleSummary ? `<p class="message-role-summary">${escapeHtml(presented.roleSummary)}</p>` : ""}${presented.businessContext ? `<p class="message-business-context">${escapeHtml(presented.businessContext)}</p>` : ""}` : ""}
+        ${presented.roleSummary || roleTaskRows || presented.businessContext ? `<h3>这个岗位主要做什么</h3>${presented.roleSummary ? `<p class="message-role-summary">${escapeHtml(presented.roleSummary)}</p>` : ""}${roleTaskRows ? `<ul class="message-role-tasks">${roleTaskRows}</ul>` : ""}${presented.businessContext ? `<p class="message-business-context">${escapeHtml(presented.businessContext)}</p>` : ""}` : ""}
+        ${factRows ? `<h3>岗位信息</h3><p class="message-job-facts">${factRows}</p>` : ""}
+      </section>`
+      : "";
+    const fitDetails = connectionRows || presented.attentionPoint || presented.recommendationNote
+      ? `<details class="message-job-details"><summary>查看匹配分析</summary>
         ${connectionRows ? `<h3>你的经历为什么相关</h3><ul class="message-decision-list message-resume-connections">${connectionRows}</ul>` : ""}
         ${presented.attentionPoint ? `<h3>需要留意</h3><p class="message-attention-point">${escapeHtml(presented.attentionPoint)}</p>` : ""}
         ${presented.recommendationNote ? `<h3>是否值得继续聊</h3><p class="message-recommendation-note">${escapeHtml(presented.recommendationNote)}</p>` : ""}
-        ${factRows ? `<p class="message-job-facts"><strong>岗位信息</strong>${factRows}</p>` : ""}
-      </section>`
-      : "";
+      </details>` : "";
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const missingFactSection = result.missingFactKey ? renderMissingFactForm(result, {
       profileId,
@@ -154,7 +161,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
       : `${missingFactSection}${replySection}`;
     const sentForm = !expired && sendable && drafts && !durableDrafts.length
-      ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
+      ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">${escapeHtml(manualSentLabel)}</button></form>`
       : "";
     const viewId = `message-view-${viewKey}`;
     const title = job.title || "岗位处理结果";
@@ -166,7 +173,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
-      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${decisionCard}${responseSection}${sentForm}</section>`
+      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${jobOverview}${responseSection}${sentForm}${fitDetails}</section>`
     };
   });
   const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)).reduce((count, result) => count

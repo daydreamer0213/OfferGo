@@ -81,7 +81,22 @@ assert.equal(sanitizeDraftForRequestedActions(
 assert.equal(sanitizeDraftForRequestedActions(
   "好的，我稍后发简历给您。",
   { platform: "boss", requestedActions: [{ kind: "resume_request" }] }
-), "", "a resume-only historical draft should disappear instead of competing with the platform action");
+), "好的，我把简历发您，您先看看。", "a resume-only historical draft should become a short human acknowledgement");
+
+for (const historical of [
+  "您好，我对产品专员（容器云/AI基础设施方向）这个岗位感兴趣，工作地点和薪资都符合我的预期。期待您的回复。",
+  "您好，感谢您的联系。请告知接收方式，"
+]) {
+  assert.equal(sanitizeDraftForRequestedActions(
+    historical,
+    { platform: "zhaopin", requestedActions: [{ kind: "resume_request" }] }
+  ), "好的，我把简历发您，您先看看。", "a generic resume-request template must be replaced with a natural acknowledgement");
+}
+
+assert.equal(sanitizeDraftForRequestedActions(
+  "好的，明天下午三点可以沟通。简历我现在发您。",
+  { platform: "zhaopin", requestedActions: [{ kind: "resume_request" }] }
+), "好的，明天下午三点可以沟通。", "a concrete answer to another recruiter question must be preserved");
 
 assert.equal(sanitizeDraftForRequestedActions(
   "您好，我现在方便沟通。",

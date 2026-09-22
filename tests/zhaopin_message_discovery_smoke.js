@@ -755,7 +755,9 @@ async function manualOnlyReopenSmoke() {
     resolveJobContext: createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId, now: () => NOW }), now: () => NOW, sleepFn: async () => {}
   });
   assert.equal(summary.processed, 1);
-  assert.equal(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  const resumeDrafts = listOpenMessageReplyDrafts(db, { profileId: fixture.profileId });
+  assert.equal(resumeDrafts.length, 1);
+  assert.equal(resumeDrafts[0].currentText, "好的，我把简历发您，您先看看。");
   db.close();
   db = openDb(path.join(root, "message-discovery.sqlite"));
   const context = listMessageInboundContexts(db, { profileId: fixture.profileId })[0];

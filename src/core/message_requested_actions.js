@@ -1,4 +1,5 @@
 const SUPPORTED_PLATFORMS = new Set(["boss", "zhaopin"]);
+const RESUME_REQUEST_ACKNOWLEDGEMENT = "好的，我把简历发您，您先看看。";
 
 function deriveRequestedActions({ platform, messages = [], manualActions = [] } = {}) {
   const source = String(platform || "").trim().toLowerCase();
@@ -58,11 +59,14 @@ function sanitizeDraftForRequestedActions(value, { platform, requestedActions = 
       removedResumeHandling = true;
       continue;
     }
-    if (removedResumeHandling && isResumeTransferFollowUp(clause)) continue;
+    if (isStandaloneResumeTransferPrompt(clause)
+      || (removedResumeHandling && isResumeTransferFollowUp(clause))) continue;
     remaining.push(clause);
   }
   const sanitized = remaining.join("").trim();
-  return isGenericActionAcknowledgement(sanitized) ? "" : sanitized;
+  return !sanitized || isGenericActionAcknowledgement(sanitized) || isGenericResumeRequestTemplate(sanitized)
+    ? RESUME_REQUEST_ACKNOWLEDGEMENT
+    : sanitized;
 }
 
 function normalizeManualActions(value) {
@@ -110,17 +114,31 @@ function isDraftResumeHandlingClause(value) {
 
 function isResumeTransferFollowUp(value) {
   const text = String(value || "").replace(/\s+/g, "");
-  return /(?:BOSS直聘|智联|邮箱|邮件|e-?mail|微信|wechat|qq|怎么发|哪里发|哪种方式|什么方式)/i.test(text)
+  return /(?:BOSS直聘|智联|邮箱|邮件|e-?mail|微信|wechat|qq|怎么发|哪里发|哪种方式|什么方式|接收方式)/i.test(text)
     || /^(?:我)?(?:可以|会|马上|稍后|随后|现在)?(?:整理|上传|发送|发|提供|提交).{0,12}(?:过去|给您|给你|一下|一份)?[，,。！？!?；;]*$/i.test(text);
+}
+
+function isStandaloneResumeTransferPrompt(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  return /^(?:请|麻烦|烦请)?告知.{0,8}(?:简历|履历)?接收方式[，,。！？!?；;]*$/i.test(text);
 }
 
 function isGenericActionAcknowledgement(value) {
   return /^(?:好的?|可以|没问题|收到|行|嗯|谢谢)[，,。！？!?；;\s]*$/i.test(String(value || ""));
 }
 
+function isGenericResumeRequestTemplate(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  if (/^(?:您好|你好)?(?:，|,)?(?:感谢您的?联系|谢谢您的?联系)[，,。！？!?；;]*$/.test(text)) return true;
+  return /(?:我对).{0,80}(?:岗位|职位)(?:感兴趣)/.test(text)
+    && /(?:工作地点|地点).{0,30}(?:薪资|待遇).{0,40}(?:符合|合适|接受)/.test(text)
+    && /(?:期待|等候).{0,12}(?:回复|消息)/.test(text);
+}
+
 module.exports = {
   deriveRequestedActions,
   findPendingResumeRequest,
   isInPlatformResumeRequest,
-  sanitizeDraftForRequestedActions
+  sanitizeDraftForRequestedActions,
+  RESUME_REQUEST_ACKNOWLEDGEMENT
 };

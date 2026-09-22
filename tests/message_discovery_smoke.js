@@ -2088,7 +2088,7 @@ async function messageGroupBoundarySmoke() {
   });
   assert.strictEqual(resumeOnlyModelCalls, 0, "a resume-only group must not call the text model");
   assert.strictEqual(resumeOnlySummary.processed, 1);
-  assert.deepStrictEqual(resumeOnlySummary.results[0].messages, []);
+  assert.deepStrictEqual(resumeOnlySummary.results[0].messages, ["好的，我把简历发您，您先看看。"]);
   assert.deepStrictEqual(resumeOnlySummary.results[0].manualActions, [{ kind: "resume_request" }]);
   assert.deepStrictEqual(resumeOnlySummary.results[0].inboundMessages, [
     { kind: "resume_request", text: "HR 邀请你发送简历" }
@@ -2112,7 +2112,7 @@ async function messageGroupBoundarySmoke() {
   });
   assert.strictEqual(textualResumeOnlyModelCalls, 0, "a textual resume-only request must become a platform action without calling the reply model");
   assert.deepStrictEqual(textualResumeOnlySummary.results[0].manualActions, [{ kind: "resume_request" }]);
-  assert.deepStrictEqual(textualResumeOnlySummary.results[0].messages, []);
+  assert.deepStrictEqual(textualResumeOnlySummary.results[0].messages, ["好的，我把简历发您，您先看看。"]);
   const textualResumeEvents = listMessageEvents(db, {
     profileId: textualResumeOnly.profileId,
     platform: "boss",

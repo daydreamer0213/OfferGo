@@ -6,6 +6,7 @@ function presentMessageResult(result = {}) {
   return {
     recruiterRequest: recruiterRequest(result),
     roleSummary: plainRoleSummary(job.roleSummary),
+    roleTasks: plainRoleTasks(job.roleTasks),
     businessContext: businessContext(job.companyBusiness),
     resumeConnections: safeList(job.resumeConnections, 3),
     attentionPoint: safeText(job.attentionPoint),
@@ -16,6 +17,10 @@ function presentMessageResult(result = {}) {
       fact("工作安排", job.workSchedule)
     ])
   };
+}
+
+function plainRoleTasks(value) {
+  return safeList(value, 4).map((item) => readableSpacing(item.replace(/^JD[：:]\s*/i, "")));
 }
 
 function plainRoleSummary(value) {

@@ -13,6 +13,7 @@ const view = presentMessageResult({
     salary: "15-25K·13薪",
     workSchedule: "工作安排未确认",
     roleSummary: "负责企业知识库产品开发",
+    roleTasks: ["梳理企业知识管理需求", "协调研发把功能落地"],
     companyBusiness: "为企业提供知识管理服务",
     fitLabel: "中",
     fitSummary: "核心硬性要求只有可迁移证据，最高归入可投。",
@@ -29,6 +30,7 @@ const view = presentMessageResult({
 
 assert.equal(view.recruiterRequest, "HR 想请你发送简历，并回复其他问题。" );
 assert.equal(view.roleSummary, "负责企业知识库产品开发");
+assert.deepStrictEqual(view.roleTasks, ["梳理企业知识管理需求", "协调研发把功能落地"]);
 assert.equal(view.businessContext, "业务方向：为企业提供知识管理服务。");
 assert.deepStrictEqual(view.jobFacts, [
   { label: "薪资", value: "15-25K·13薪" },
@@ -57,11 +59,21 @@ assert.equal(schedule.recruiterRequest, "HR 补充了岗位或流程信息。" )
 const cloudRole = presentMessageResult({
   job: {
     roleSummary: "负责容器云与AI基础设施产品的竞品分析、需求分析与场景梳理，输出需求文档与验收标准，并协调跨团队推进功能从需求到验收的闭环交付。",
+    roleTasks: [
+      "JD：研究容器云与 AI 基础设施的竞品和业务场景",
+      "JD：把客户需求整理成功能范围和验收标准",
+      "JD：协调研发、测试推进产品落地"
+    ],
     companyBusiness: "JD 显示该岗位属于容器云与AI基础设施相关业务场景。"
   }
 });
 assert.equal(cloudRole.roleSummary,
   "这个岗位主要围绕容器云与 AI 基础设施做产品工作：先研究竞品和业务场景，把客户或内部需求整理成具体功能和验收标准，再跟进研发、测试等团队把功能真正落地。");
 assert.equal(cloudRole.businessContext, "业务方向：容器云与 AI 基础设施。");
+assert.deepStrictEqual(cloudRole.roleTasks, [
+  "研究容器云与 AI 基础设施的竞品和业务场景",
+  "把客户需求整理成功能范围和验收标准",
+  "协调研发、测试推进产品落地"
+]);
 
 console.log("message_presenter_smoke ok");

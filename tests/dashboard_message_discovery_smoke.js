@@ -21,12 +21,14 @@ const {
   listSiteAccessEvents,
   recordMessageReplyDrafts,
   saveMessageInboundContext,
+  deleteMessageInboundContext,
   getMessageInboundContext,
   closeMessageReplyDrafts,
   saveWorkspacePlatformPreference,
-  upsertMessageEvents
+  upsertMessageEvents,
+  listMessageEvents
 } = require("../src/core/storage");
-const { upsertMessageInboxItem, markMessageInboxItemDone } = require("../src/application/message_inbox");
+const { upsertMessageInboxItem, markMessageInboxItemDone, deleteMessageInboxItem } = require("../src/application/message_inbox");
 const {
   ensureProgressCard,
   transitionProgressCard,
@@ -642,6 +644,32 @@ async function main() {
     progressUpdate: { stage: "needs_user_action" },
     occurredAt: "2026-09-17T02:30:00.000Z"
   });
+  saveMessageInboundContext(db, {
+    profileId: fixture.profileId,
+    cardId: zhaopinCard.id,
+    platform: "zhaopin",
+    messageGroupKey: `sha256:${"d".repeat(64)}`,
+    conversationKey: zhaopinDateConversationKey,
+    sourceJobId: "zhaopin:dashboardZhaopinMessageJob",
+    lastMessageId: "207",
+    messageIntent: "manual_review",
+    messageCategory: "other",
+    inboundMessages: [{ kind: "resume_request", text: RESUME_REQUEST_SUMMARY }],
+    manualActions: [{ kind: "resume_request" }],
+    createdAt: "2026-09-17T02:30:00.000Z",
+    updatedAt: "2026-09-17T02:30:00.000Z"
+  });
+  recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: zhaopinCard.id,
+    jobId: zhaopinJobId,
+    messageGroupKey: `sha256:${"d".repeat(64)}`,
+    questionSummary: RESUME_REQUEST_SUMMARY,
+    messageIntent: "manual_review",
+    messageCategory: "other",
+    messages: ["好的，我把简历发您，您先看看。"],
+    createdAt: "2026-09-17T02:30:00.000Z"
+  });
   upsertMessageInboxItem(db, {
     profileId: fixture.profileId,
     platform: "zhaopin",
@@ -694,9 +722,19 @@ async function main() {
     .map((match) => match[0]).filter((card) => card.includes("<strong>智联左侧日期测试</strong>"));
   assert(zhaopinCards.length > 0, "zhaopin message card must render in the left list");
   assert(
-    zhaopinCards.some((card) => /智联<\/span> · 9\/17 10:30 · 索要简历/.test(card)),
+    zhaopinCards.some((card) => /智联<\/span> · 9\/17 10:30/.test(card) && /示例公司 · 索要简历/.test(card)),
     "the zhaopin message time must be visible in the left job card"
   );
+  const restoredZhaopinActions = listMessageEvents(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinDateConversationKey
+  });
+  assert.equal(restoredZhaopinActions.length, 1, "a trusted legacy resume invitation must regain its durable action event");
+  assert.equal(restoredZhaopinActions[0].kind, "resume_request");
+  assert.equal(restoredZhaopinActions[0].platformMessageId, "207");
+  assert.equal(restoredZhaopinActions[0].metadata.cardType, "11");
+  assert.match(understoodPage.body, new RegExp(`data-message-key="${restoredZhaopinActions[0].messageKey}"`));
   assert(understoodPreviews.some(text => text.includes(OPEN_HR_TEXT)), "newest question must precede an older long greeting");
   assert(understoodPreviews.some(text => text.includes("有 &lt;证书&gt; 吗？")), "same intent must still show its distinct question with HTML escaping");
   assert(!understoodPage.body.includes("有 <证书> 吗？"));
@@ -704,6 +742,9 @@ async function main() {
   for (const expected of [
     "这个岗位主要做什么",
     "把企业知识转成可追溯的智能问答能力",
+    "梳理企业知识管理场景和实际需求",
+    "把需求拆成产品功能和验收标准",
+    "协调研发和测试完成上线交付",
     "业务方向：企业知识管理。",
     "你的经历为什么相关",
     "你在 OfferGo 中做过知识库问答链路、需求拆解和验收规则设计，这与岗位要交付的企业知识产品直接相关。",
@@ -749,6 +790,7 @@ async function main() {
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-platform="boss"[^>]+data-action-kind="accept_resume"/);
+  assert(understoodPage.body.includes("我已在智联手动发送"), "manual sent labels must use the actual source platform");
   assert.match(understoodPage.body, /看到您的简历和岗位比较匹配/);
   assert(understoodPage.body.includes("您好，方便的。我也想进一步了解这个岗位。"),
     "historical drafts must retain the useful reply alongside the resume action");
@@ -763,20 +805,32 @@ async function main() {
     reasonCode: "MESSAGE_REPLY_WINDOW_EXPIRED",
     resolvedAt: "2026-09-18T01:06:00.000Z"
   });
+  markMessageInboxItemDone(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinDateConversationKey,
+    reasonCode: "MESSAGE_REPLY_WINDOW_EXPIRED",
+    resolvedAt: "2026-09-18T02:30:00.000Z"
+  });
   const expiredActionPage = await request(base, `/messages?profileId=${fixture.profileId}`);
   assert(expiredActionPage.body.includes("超过 7 天，已结束处理"));
   assert.doesNotMatch(expiredActionPage.body, /data-message-action-confirm[^>]+data-platform="zhaopin"[^>]+data-action-kind="(?:accept_resume|decline_resume)"/,
     "expired resume invitations must keep their history without actionable platform controls");
   assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
-  assertHeadingsInOrder(understoodPage.body, [
+  const understoodDetailStart = understoodPage.body.indexOf("<h2>AI 应用开发工程师</h2>");
+  const understoodDetailEnd = understoodPage.body.indexOf('<section id="message-detail-', understoodDetailStart + 1);
+  const understoodDetail = understoodPage.body.slice(understoodDetailStart,
+    understoodDetailEnd > understoodDetailStart ? understoodDetailEnd : undefined);
+  assertHeadingsInOrder(understoodDetail, [
     "<h3>完整会话</h3>",
     "<h3>这个岗位主要做什么</h3>",
+    "<h3>岗位信息</h3>",
+    "<h3>回复草稿</h3>",
     "<h3>你的经历为什么相关</h3>",
     "<h3>需要留意</h3>",
-    "<h3>是否值得继续聊</h3>",
-    "<h3>回复草稿</h3>"
+    "<h3>是否值得继续聊</h3>"
   ]);
-  assert.doesNotMatch(understoodPage.body, /<details class="message-job-details">/);
+  assert.match(understoodPage.body, /<details class="message-job-details">[\s\S]*?<summary>查看匹配分析<\/summary>[\s\S]*?<h3>你的经历为什么相关<\/h3>/);
   assert.doesNotMatch(understoodPage.body, /HR 想让你做什么|HR 想请你发送简历，并回复其他问题|<h3>下一步<\/h3>/);
   assert.doesNotMatch(understoodPage.body, /OfferGo 已识别这项请求/);
   assert.doesNotMatch(understoodPage.body, /<h3>岗位理解<\/h3>[\s\S]*?<h3>结论<\/h3>/, "compact cards must not repeat adjacent generic headings");
@@ -785,6 +839,21 @@ async function main() {
       < understoodPage.body.indexOf('class="message-draft"'),
     "job analysis must appear before the reply draft"
   );
+  closeMessageReplyDrafts(db, {
+    profileId: fixture.profileId,
+    cardId: zhaopinCard.id,
+    closedAt: "2026-09-17T02:31:00.000Z"
+  });
+  deleteMessageInboundContext(db, {
+    profileId: fixture.profileId,
+    cardId: zhaopinCard.id,
+    messageGroupKey: `sha256:${"d".repeat(64)}`
+  });
+  deleteMessageInboxItem(db, {
+    profileId: fixture.profileId,
+    platform: "zhaopin",
+    conversationKey: zhaopinDateConversationKey
+  });
   for (const rawValue of ["interview_invitation", "information_request", "manual_review"]) {
     assert(!understoodPage.body.includes(rawValue), `raw intent must stay out of markup: ${rawValue}`);
   }
@@ -817,8 +886,8 @@ async function main() {
   }
   assert(understoodPage.body.includes("需要你确认一项个人信息"));
   assert(understoodPage.body.includes("生成回复草稿"));
-  assert.strictEqual((understoodPage.body.match(/name="action" value="reply_confirmed_sent"/g) || []).length, 3);
-  assert.strictEqual((understoodPage.body.match(/<textarea/g) || []).length, 4);
+  assert.strictEqual((understoodPage.body.match(/name="action" value="reply_confirmed_sent"/g) || []).length, 4);
+  assert.strictEqual((understoodPage.body.match(/<textarea/g) || []).length, 5);
   assert.strictEqual((understoodPage.body.match(/type="radio" name="message-send-choice-\d+" data-send-select="\d+"/g) || []).length, 2,
     "alternative drafts for one HR conversation must use one radio group");
   assert.strictEqual((understoodPage.body.match(/type="radio" name="message-send-choice-\d+" data-send-select="\d+" checked/g) || []).length, 0,
@@ -1918,6 +1987,11 @@ function jobUnderstandingCompletedRun(fixture) {
       title: "AI 应用开发工程师",
       company: "示例科技",
       roleSummary: "把企业知识转成可追溯的智能问答能力",
+      roleTasks: [
+        "梳理企业知识管理场景和实际需求",
+        "把需求拆成产品功能和验收标准",
+        "协调研发和测试完成上线交付"
+      ],
       companyBusiness: "JD 显示该岗位服务于企业知识管理。",
       fitLabel: "中",
       fitSummary: "核心硬性要求只有可迁移证据，最高归入可投。",

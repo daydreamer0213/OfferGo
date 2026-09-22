@@ -23,7 +23,11 @@ const { isExplicitRecruiterRejection } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
-const { deriveRequestedActions, isInPlatformResumeRequest } = require("./message_requested_actions");
+const {
+  deriveRequestedActions,
+  isInPlatformResumeRequest,
+  RESUME_REQUEST_ACKNOWLEDGEMENT
+} = require("./message_requested_actions");
 const {
   generateQualityCheckedDraft,
   buildMessageDraftQualityContext
@@ -1113,7 +1117,7 @@ function resumeRequestClassification(platform = "boss") {
     messageCategory: "other",
     messageSummary: `招聘方请求附件简历，需要你在 ${platform === "zhaopin" ? "智联" : "BOSS"} 中确认。`,
     missingFact: null,
-    messages: [],
+    messages: [RESUME_REQUEST_ACKNOWLEDGEMENT],
     progressUpdate: { stage: "needs_user_action" }
   };
 }
@@ -1329,10 +1333,12 @@ function projectMessageDecisionCard(job = {}) {
   const matchHighlights = decisionMatchHighlights(analysis);
   const questionsToConfirm = decisionQuestionsToConfirm(analysis);
   const attentionGap = decisionAttentionGap(analysis);
+  const roleTasks = decisionRoleTasks(analysis);
   return {
     title: safeProjectionText(job.title, 160),
     company: safeProjectionText(job.company, 160),
     roleSummary: safeProjectionText(analysis.roleSummary, 300),
+    ...(roleTasks.length ? { roleTasks } : {}),
     ...companyDecisionSummary(analysis),
     fitLabel,
     fitSummary,
@@ -1355,6 +1361,19 @@ function projectMessageDecisionCard(job = {}) {
     opportunitySummary: availability === "offline" ? "" : opportunitySummary,
     availability
   };
+}
+
+function decisionRoleTasks(analysis = {}) {
+  const seen = new Set();
+  const result = [];
+  for (const value of Array.isArray(analysis.responsibilityEvidence) ? analysis.responsibilityEvidence : []) {
+    const text = safeProjectionText(value, 240).replace(/^JD[：:]\s*/i, "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+    if (result.length >= 4) break;
+  }
+  return result;
 }
 
 function companyDecisionSummary(analysis) {

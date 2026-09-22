@@ -34,7 +34,12 @@ const {
   getActiveSearchPlan,
   closeMessageReplyDrafts
 } = require("../core/storage");
-const { listMessageInboxItems, getMessageInboxSyncState, listMessageEvents } = require("../application/message_inbox");
+const {
+  listMessageInboxItems,
+  getMessageInboxSyncState,
+  listMessageEvents,
+  restoreLegacyZhaopinResumeRequestEvent
+} = require("../application/message_inbox");
 const { getCandidateProfile } = require("../application/candidate_queries");
 const { getJob } = require("../application/job_queries");
 const {
@@ -568,14 +573,14 @@ function createMessageDiscoveryController(deps = {}) {
         )).filter(Boolean)
         : [];
       const drafts = Array.isArray(item?.drafts)
-        ? item.drafts.slice(0, 2).map((draft) => ({
+        ? uniqueDrafts(item.drafts.slice(0, 2).map((draft) => ({
           id: Math.max(0, Number(draft?.id) || 0),
           text: sanitizeDraftForRequestedActions(safeText(draft?.text, 4000), {
             platform,
             requestedActions: manualActions
           }),
           revision: Math.max(0, Number(draft?.revision) || 0)
-        })).filter((draft) => draft.id > 0 && draft.text)
+        })).filter((draft) => draft.id > 0 && draft.text))
         : [];
       return {
         cardId: Math.max(0, Number(item?.cardId) || 0),
@@ -731,7 +736,7 @@ function createMessageDiscoveryController(deps = {}) {
       const openDrafts = byCard.get(result.cardId) || [];
       if (!openDrafts.length && !result.drafts.some((draft) => messageReplyDraftExists(db, { draftId: draft.id, profileId }))) return result;
       if (!openDrafts.length) return null;
-      const drafts = openDrafts
+      const drafts = uniqueDrafts(openDrafts
         .sort((left, right) => left.draftIndex - right.draftIndex)
         .slice(0, 2)
         .map((draft) => ({
@@ -742,7 +747,7 @@ function createMessageDiscoveryController(deps = {}) {
           }),
           revision: draft.revision
         }))
-        .filter((draft) => draft.text);
+        .filter((draft) => draft.text));
       return { ...result, drafts, messages: drafts.map((draft) => draft.text) };
     }).filter(Boolean);
   }
@@ -847,13 +852,6 @@ function createMessageDiscoveryController(deps = {}) {
     const platform = row.source === row.card_source && ["boss", "zhaopin"].includes(row.source) ? row.source : "";
     const first = drafts[0] || contexts[0] || {};
     const conversationKey = safeDigest(first.conversationKey) || safeDigest(contexts[0]?.conversationKey);
-    const timeline = platform && conversationKey ? listMessageEvents(db, {
-      profileId,
-      platform,
-      conversationKey,
-      limit: 500
-    }) : [];
-    const pendingResumeRequest = findPendingResumeRequest({ platform, events: timeline });
     const selectedGroupKey = safeDigest(first.messageGroupKey) || safeDigest(contexts[0]?.messageGroupKey);
     const classification = selectedGroupKey
       ? getMessageGroupClassification(db, { profileId, cardId, messageGroupKey: selectedGroupKey }) || {}
@@ -861,19 +859,31 @@ function createMessageDiscoveryController(deps = {}) {
     const openGroupKeys = new Set(drafts.map((draft) => draft.messageGroupKey));
     const activeContexts = contexts.filter((context) => openGroupKeys.has(context.messageGroupKey)
       || !messageReplyDraftGroupExists(db, { profileId, cardId, messageGroupKey: context.messageGroupKey }));
+    if (platform === "zhaopin" && conversationKey) {
+      const actionContext = activeContexts.find((context) => context.conversationKey === conversationKey
+        && context.manualActions.some((item) => item?.kind === "resume_request"));
+      if (actionContext) restoreLegacyZhaopinResumeRequestEvent(db, { profileId, context: actionContext });
+    }
+    const timeline = platform && conversationKey ? listMessageEvents(db, {
+      profileId,
+      platform,
+      conversationKey,
+      limit: 500
+    }) : [];
+    const pendingResumeRequest = findPendingResumeRequest({ platform, events: timeline });
     const inboundMessages = sanitizeInboundMessages(activeContexts.flatMap((context) => context.inboundMessages));
     const manualActions = sanitizeManualActions([
       ...activeContexts.flatMap((context) => context.manualActions),
       ...(pendingResumeRequest ? [{ kind: "resume_request" }] : [])
     ], row.source);
-    const safeDrafts = drafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
+    const safeDrafts = uniqueDrafts(drafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
       id: draft.id,
       text: sanitizeDraftForRequestedActions(draft.currentText, {
         platform,
         requestedActions: manualActions
       }),
       revision: draft.revision
-    })).filter((draft) => draft.text);
+    })).filter((draft) => draft.text));
     const activePlan = getActiveSearchPlan(db, profileId);
     const contextPlanId = row.source === "zhaopin" ? activePlan?.id : row.plan_id;
     const trusted = platform && contextPlanId ? findMessageDiscoveryJobContext(db, { profileId, planId: contextPlanId, sourceId: row.source_id, platform }) : null;
@@ -1123,6 +1133,7 @@ function sanitizeJobUnderstanding(value) {
     title: safeInlineText(job.title, 160),
     company: safeInlineText(job.company, 160),
     roleSummary: safeInlineText(job.roleSummary, 300),
+    roleTasks: safeInlineList(job.roleTasks, 4, 240),
     companyBusiness: safeInlineText(job.companyBusiness, 300),
     fitLabel: safeInlineText(job.fitLabel, 20),
     fitSummary: safeInlineText(job.fitSummary, 180),
@@ -1146,6 +1157,8 @@ function mergeCurrentDecisionNarrative(savedValue, currentValue) {
   return {
     ...saved,
     roleSummary: current.roleSummary || saved.roleSummary,
+    roleTasks: Array.isArray(current.roleTasks) && current.roleTasks.length
+      ? current.roleTasks : saved.roleTasks,
     companyBusiness: current.companyBusiness || saved.companyBusiness,
     resumeConnections: Array.isArray(current.resumeConnections) && current.resumeConnections.length
       ? current.resumeConnections : saved.resumeConnections,
@@ -1159,6 +1172,16 @@ function safeInlineList(value, itemLimit, textLimit) {
     .map((item) => safeInlineText(item, textLimit))
     .filter(Boolean)
     .slice(0, itemLimit);
+}
+
+function uniqueDrafts(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).filter((draft) => {
+    const text = String(draft?.text || "").trim();
+    if (!text || seen.has(text)) return false;
+    seen.add(text);
+    return true;
+  });
 }
 
 function safeDigest(value) {
