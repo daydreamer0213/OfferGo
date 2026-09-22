@@ -61,6 +61,9 @@ try {
   const installer = fs.readFileSync(path.join(root, "installer", "OfferGo.iss"), "utf8");
   assert.match(installer, /Flags:\s*checkedonce/i);
   assert.match(installer, /Name:\s*"\{autodesktop\}\\OfferGo"/i);
+  assert.match(installer, /Check:\s*ShouldInstallDesktopShortcut/i);
+  assert.match(installer, /WizardIsTaskSelected\('desktopicon'\)/i);
+  assert.match(installer, /FileExists\(ExpandConstant\('\{autodesktop\}\\OfferGo\.lnk'\)\)/i);
   assert.match(installer, /WorkingDir:\s*"\{app\}"/i);
   assert.match(installer, /Flags:\s*nowait\s+postinstall/i);
 

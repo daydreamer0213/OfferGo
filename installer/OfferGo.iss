@@ -53,13 +53,19 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{group}\OfferGo"; Filename: "{app}\OfferGo.Launcher.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"
 Name: "{group}\OfferGo 使用说明"; Filename: "{app}\README.md"; WorkingDir: "{app}"
 Name: "{group}\卸载 OfferGo"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\OfferGo"; Filename: "{app}\OfferGo.Launcher.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"; Tasks: desktopicon
+Name: "{autodesktop}\OfferGo"; Filename: "{app}\OfferGo.Launcher.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\OfferGo.ico"; Check: ShouldInstallDesktopShortcut
 
 [Run]
 Filename: "{app}\OfferGo.Launcher.exe"; Description: "启动 OfferGo"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\README.md"; Description: "查看 OfferGo 使用说明"; Flags: postinstall shellexec skipifsilent unchecked
 
 [Code]
+function ShouldInstallDesktopShortcut(): Boolean;
+begin
+  Result := WizardIsTaskSelected('desktopicon') or
+    FileExists(ExpandConstant('{autodesktop}\OfferGo.lnk'));
+end;
+
 function RunPowerShellScript(const ScriptName, Arguments: String; var ResultCode: Integer): Boolean;
 var
   CommandLine: String;

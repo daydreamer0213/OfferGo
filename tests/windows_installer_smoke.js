@@ -70,7 +70,10 @@ function runSuite() {
   assert.match(inno, /\[Icons\]/);
   assert.match(inno, /\{autodesktop\}/);
   assert.match(inno, /Name:\s*"desktopicon"[^\r\n]*Flags:\s*checkedonce/i);
-  assert.match(inno, /Name:\s*"\{autodesktop\}\\OfferGo"[^\r\n]*Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"[^\r\n]*Tasks:\s*desktopicon/i);
+  assert.match(inno, /Name:\s*"\{autodesktop\}\\OfferGo"[^\r\n]*Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"[^\r\n]*Check:\s*ShouldInstallDesktopShortcut/i);
+  assert.match(inno, /function\s+ShouldInstallDesktopShortcut\(\):\s*Boolean/i);
+  assert.match(inno, /WizardIsTaskSelected\('desktopicon'\)/i);
+  assert.match(inno, /FileExists\(ExpandConstant\('\{autodesktop\}\\OfferGo\.lnk'\)\)/i);
   assert.match(inno, /Name:\s*"\{group\}\\OfferGo"[^\r\n]*Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*WorkingDir:\s*"\{app\}"[^\r\n]*IconFilename:\s*"\{app\}\\assets\\OfferGo\.ico"/i);
   assert.match(inno, /Filename:\s*"\{app\}\\OfferGo\.Launcher\.exe"[^\r\n]*Flags:\s*nowait\s+postinstall\s+skipifsilent/i);
   assert.match(inno, /\{uninstallexe\}/);
