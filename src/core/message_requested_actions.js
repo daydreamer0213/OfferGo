@@ -34,13 +34,35 @@ function findPendingResumeRequest({ platform, events = [] } = {}) {
   for (let index = values.length - 1; index >= 0; index -= 1) {
     const event = values[index];
     if (String(event?.direction || "") !== "friend") continue;
-    if (isResumeReceiptAcknowledgement(event?.text)) return null;
     if (event?.kind === "resume_request"
       || (event?.kind === "text" && isInPlatformResumeRequest(event?.text))) {
       return { ...event, kind: "resume_request" };
     }
+    if (isResumeReceiptAcknowledgement(event?.text)) return null;
   }
   return null;
+}
+
+function sanitizeDraftForRequestedActions(value, { platform, requestedActions = [] } = {}) {
+  const text = String(value || "").replace(/\r\n?/g, "\n").trim();
+  const source = String(platform || "").trim().toLowerCase();
+  const sendsResumeInPlatform = SUPPORTED_PLATFORMS.has(source)
+    && Array.isArray(requestedActions)
+    && requestedActions.some((item) => item?.kind === "resume_request");
+  if (!text || !sendsResumeInPlatform) return text;
+
+  let removedResumeHandling = false;
+  const remaining = [];
+  for (const clause of splitClauses(text)) {
+    if (isDraftResumeHandlingClause(clause)) {
+      removedResumeHandling = true;
+      continue;
+    }
+    if (removedResumeHandling && isResumeTransferFollowUp(clause)) continue;
+    remaining.push(clause);
+  }
+  const sanitized = remaining.join("").trim();
+  return isGenericActionAcknowledgement(sanitized) ? "" : sanitized;
 }
 
 function normalizeManualActions(value) {
@@ -80,8 +102,25 @@ function isResumeReceiptAcknowledgement(value) {
   return /(?:已经|已|刚刚)?(?:收到|看到|看过|查看过|下载了).{0,8}(?:简历|履历)|(?:简历|履历).{0,8}(?:已经|已)?(?:收到|看到|看过|查看过|下载)/.test(text);
 }
 
+function isDraftResumeHandlingClause(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  if (!/(?:简历|履历)/i.test(text)) return false;
+  return /(?:发|发送|分享|提供|上传|投递|提交|整理|稍后|随后|邮箱|邮件|e-?mail|微信|wechat|qq|怎么|哪里|哪种方式|什么方式)/i.test(text);
+}
+
+function isResumeTransferFollowUp(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  return /(?:BOSS直聘|智联|邮箱|邮件|e-?mail|微信|wechat|qq|怎么发|哪里发|哪种方式|什么方式)/i.test(text)
+    || /^(?:我)?(?:可以|会|马上|稍后|随后|现在)?(?:整理|上传|发送|发|提供|提交).{0,12}(?:过去|给您|给你|一下|一份)?[，,。！？!?；;]*$/i.test(text);
+}
+
+function isGenericActionAcknowledgement(value) {
+  return /^(?:好的?|可以|没问题|收到|行|嗯|谢谢)[，,。！？!?；;\s]*$/i.test(String(value || ""));
+}
+
 module.exports = {
   deriveRequestedActions,
   findPendingResumeRequest,
-  isInPlatformResumeRequest
+  isInPlatformResumeRequest,
+  sanitizeDraftForRequestedActions
 };

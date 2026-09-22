@@ -19,7 +19,10 @@ const { communicationRuntimeBlock, scanRuntimeBlock } = require("../core/communi
 const { resolveBossRiskWindow } = require("../core/boss_risk_window");
 const { sameBrowserTabId } = require("../core/browser_tab_identity");
 const { PRODUCT_POLICY } = require("../core/product_policy");
-const { findPendingResumeRequest } = require("../core/message_requested_actions");
+const {
+  findPendingResumeRequest,
+  sanitizeDraftForRequestedActions
+} = require("../core/message_requested_actions");
 const {
   setSiteRuntimeState,
   getSiteRuntimeState,
@@ -553,13 +556,19 @@ function createMessageDiscoveryController(deps = {}) {
       });
       const context = getLatestInboundContextIdentity(db, Number(item?.cardId) || 0) || {};
       const platform = ["boss", "zhaopin"].includes(persisted?.source) ? persisted.source : "";
+      const manualActions = sanitizeManualActions(item?.manualActions, platform);
       const messages = Array.isArray(item?.messages)
-        ? item.messages.slice(0, 2).map((message) => safeText(message, 4000)).filter(Boolean)
+        ? item.messages.slice(0, 2).map((message) => sanitizeDraftForRequestedActions(
+          safeText(message, 4000), { platform, requestedActions: manualActions }
+        )).filter(Boolean)
         : [];
       const drafts = Array.isArray(item?.drafts)
         ? item.drafts.slice(0, 2).map((draft) => ({
           id: Math.max(0, Number(draft?.id) || 0),
-          text: safeText(draft?.text, 4000),
+          text: sanitizeDraftForRequestedActions(safeText(draft?.text, 4000), {
+            platform,
+            requestedActions: manualActions
+          }),
           revision: Math.max(0, Number(draft?.revision) || 0)
         })).filter((draft) => draft.id > 0 && draft.text)
         : [];
@@ -577,7 +586,7 @@ function createMessageDiscoveryController(deps = {}) {
         missingFactKey: String(item?.missingFactKey || "").slice(0, 80),
         missingFactQuestion: safeInlineText(item?.missingFactQuestion, 160),
         manualActionReason: safeText(item?.manualActionReason, 240),
-        manualActions: sanitizeManualActions(item?.manualActions, platform),
+        manualActions,
         contextSource: ["local_cache", "message_discovery_detail"].includes(item?.contextSource)
           ? item.contextSource
           : "",
@@ -720,7 +729,15 @@ function createMessageDiscoveryController(deps = {}) {
       const drafts = openDrafts
         .sort((left, right) => left.draftIndex - right.draftIndex)
         .slice(0, 2)
-        .map((draft) => ({ id: draft.id, text: draft.currentText, revision: draft.revision }));
+        .map((draft) => ({
+          id: draft.id,
+          text: sanitizeDraftForRequestedActions(draft.currentText, {
+            platform: result.platform,
+            requestedActions: result.manualActions
+          }),
+          revision: draft.revision
+        }))
+        .filter((draft) => draft.text);
       return { ...result, drafts, messages: drafts.map((draft) => draft.text) };
     }).filter(Boolean);
   }
@@ -840,11 +857,18 @@ function createMessageDiscoveryController(deps = {}) {
     const activeContexts = contexts.filter((context) => openGroupKeys.has(context.messageGroupKey)
       || !messageReplyDraftGroupExists(db, { profileId, cardId, messageGroupKey: context.messageGroupKey }));
     const inboundMessages = sanitizeInboundMessages(activeContexts.flatMap((context) => context.inboundMessages));
+    const manualActions = sanitizeManualActions([
+      ...activeContexts.flatMap((context) => context.manualActions),
+      ...(pendingResumeRequest ? [{ kind: "resume_request" }] : [])
+    ], row.source);
     const safeDrafts = drafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
       id: draft.id,
-      text: draft.currentText,
+      text: sanitizeDraftForRequestedActions(draft.currentText, {
+        platform,
+        requestedActions: manualActions
+      }),
       revision: draft.revision
-    }));
+    })).filter((draft) => draft.text);
     const activePlan = getActiveSearchPlan(db, profileId);
     const contextPlanId = row.source === "zhaopin" ? activePlan?.id : row.plan_id;
     const trusted = platform && contextPlanId ? findMessageDiscoveryJobContext(db, { profileId, planId: contextPlanId, sourceId: row.source_id, platform }) : null;
@@ -878,10 +902,7 @@ function createMessageDiscoveryController(deps = {}) {
       missingFactKey: safeDrafts.length ? "" : safeText(classification.missingFactKey, 80),
       missingFactQuestion: safeDrafts.length ? "" : safeInlineText(classification.missingFactQuestion, 160),
       manualActionReason: "",
-      manualActions: sanitizeManualActions([
-        ...activeContexts.flatMap((context) => context.manualActions),
-        ...(pendingResumeRequest ? [{ kind: "resume_request" }] : [])
-      ], row.source),
+      manualActions,
       contextSource: "local_cache",
       contextComplete,
       job,

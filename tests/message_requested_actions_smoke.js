@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
 const {
   deriveRequestedActions,
-  findPendingResumeRequest
+  findPendingResumeRequest,
+  sanitizeDraftForRequestedActions
 } = require("../src/core/message_requested_actions");
 
 const resumeOnly = deriveRequestedActions({
@@ -53,7 +54,7 @@ assert.deepStrictEqual(externalChannel.replyMessages, [{ messageKey: "m5", text:
 const historicalRequest = findPendingResumeRequest({
   platform: "boss",
   events: [
-    { messageKey: "old-request", direction: "friend", kind: "text", text: "如方便的话，可以发下您的简历吗，谢谢" },
+    { messageKey: "old-request", direction: "friend", kind: "text", text: "你好，看到您的简历和岗位比较匹配，如方便的话，可以发下您的简历吗，谢谢" },
     { messageKey: "new-question", direction: "friend", kind: "text", text: "现在方便沟通吗？" }
   ]
 });
@@ -64,5 +65,27 @@ assert.equal(findPendingResumeRequest({
   platform: "boss",
   events: [{ messageKey: "email-request", direction: "friend", kind: "text", text: "请把简历发到 hr@example.com" }]
 }), null, "external-channel requests must not become platform attachment actions");
+
+assert.equal(sanitizeDraftForRequestedActions(
+  "您好，方便的。我也想进一步了解这个岗位。简历我稍后发给您，您看是通过BOSS直聘直接发送，还是需要发到邮箱？",
+  { platform: "boss", requestedActions: [{ kind: "resume_request" }] }
+), "您好，方便的。我也想进一步了解这个岗位。",
+"a historical BOSS draft must retain the useful reply while removing the duplicate resume promise and invented email option");
+
+assert.equal(sanitizeDraftForRequestedActions(
+  "你好，现在方便沟通。请问简历怎么发给您比较方便？我可以整理后发过去。",
+  { platform: "boss", requestedActions: [{ kind: "resume_request" }] }
+), "你好，现在方便沟通。",
+"a historical draft must not ask how to send a resume when the platform action handles it");
+
+assert.equal(sanitizeDraftForRequestedActions(
+  "好的，我稍后发简历给您。",
+  { platform: "boss", requestedActions: [{ kind: "resume_request" }] }
+), "", "a resume-only historical draft should disappear instead of competing with the platform action");
+
+assert.equal(sanitizeDraftForRequestedActions(
+  "您好，我现在方便沟通。",
+  { platform: "boss", requestedActions: [] }
+), "您好，我现在方便沟通。", "ordinary drafts must remain unchanged");
 
 console.log("message_requested_actions_smoke ok");

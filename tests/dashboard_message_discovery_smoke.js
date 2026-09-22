@@ -546,7 +546,7 @@ async function main() {
       { messageKey: `sha256:${"2".repeat(64)}`, platformMessageId: "102", direction: "friend", kind: "text", text: OPEN_HR_TEXT, occurredAt: "2026-07-31T01:01:00.000Z", metadata: {} },
       { messageKey: `sha256:${"3".repeat(64)}`, platformMessageId: "103", direction: "myself", kind: "text", text: "您好，可以进一步了解。", occurredAt: "2026-07-31T01:02:00.000Z", metadata: {} },
       { messageKey: `sha256:${"4".repeat(64)}`, platformMessageId: "104", direction: "friend", kind: "media_ignored", text: "", occurredAt: "2026-07-31T01:03:00.000Z", metadata: { mediaKind: "voice" } },
-      { messageKey: `sha256:${"5".repeat(64)}`, platformMessageId: "105", direction: "friend", kind: "text", text: "如方便的话，可以发下您的简历吗，谢谢", occurredAt: "2026-07-31T01:04:00.000Z", metadata: {} }
+      { messageKey: `sha256:${"5".repeat(64)}`, platformMessageId: "105", direction: "friend", kind: "text", text: "你好，看到您的简历和岗位比较匹配，如方便的话，可以发下您的简历吗，谢谢", occurredAt: "2026-07-31T01:04:00.000Z", metadata: {} }
     ]
   });
   upsertMessageInboxItem(db, {
@@ -745,7 +745,13 @@ async function main() {
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-platform="boss"[^>]+data-action-kind="accept_resume"/);
-  assert.match(understoodPage.body, /如方便的话，可以发下您的简历吗，谢谢/);
+  assert.match(understoodPage.body, /看到您的简历和岗位比较匹配/);
+  assert(understoodPage.body.includes("您好，方便的。我也想进一步了解这个岗位。"),
+    "historical drafts must retain the useful reply alongside the resume action");
+  assert(!understoodPage.body.includes("简历我稍后发给您"));
+  assert(!understoodPage.body.includes("还是需要发到邮箱"));
+  assert(!understoodPage.body.includes("请问简历怎么发给您比较方便"));
+  assert(!understoodPage.body.includes("我可以整理后发过去"));
   markMessageInboxItemDone(db, {
     profileId: fixture.profileId,
     platform: "zhaopin",
@@ -1953,10 +1959,13 @@ function jobUnderstandingCompletedRun(fixture) {
           title: "ATTACKER LOCATION TITLE",
           instruction: "ATTACKER LOCATION INSTRUCTION"
         }],
-        messages: ["岗位草稿甲", "岗位草稿乙"],
+        messages: [
+          "您好，方便的。我也想进一步了解这个岗位。简历我稍后发给您，您看是通过BOSS直聘直接发送，还是需要发到邮箱？",
+          "你好，现在方便沟通。请问简历怎么发给您比较方便？我可以整理后发过去。"
+        ],
         drafts: [
-          { id: 8101, text: "岗位草稿甲", revision: 0 },
-          { id: 8102, text: "岗位草稿乙", revision: 0 }
+          { id: 8101, text: "您好，方便的。我也想进一步了解这个岗位。简历我稍后发给您，您看是通过BOSS直聘直接发送，还是需要发到邮箱？", revision: 0 },
+          { id: 8102, text: "你好，现在方便沟通。请问简历怎么发给您比较方便？我可以整理后发过去。", revision: 0 }
         ],
         analysis: "PRIVATE_RAW_ANALYSIS",
         navigationUrl: "PRIVATE_NAVIGATION_URL"
