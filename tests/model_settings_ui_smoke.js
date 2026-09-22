@@ -38,6 +38,7 @@ main().catch((error) => {
 async function main() {
   db = openDb(dbPath);
   const connectionProfiles = [];
+  const publicSettingsReads = [];
   let primaryVerificationGate = null;
   let distinctSaveGate = null;
   server = createDashboardServer({
@@ -47,6 +48,10 @@ async function main() {
     dataRoot: root,
     dbPath,
     modelConfig: fallback,
+    modelSettingsLoader: (options) => {
+      publicSettingsReads.push(options.inspectCredential);
+      return loadModelSettings(options);
+    },
     connectionTester: async ({ settings }) => {
       connectionProfiles.push(settings.taskProfile || "batch_backup");
       if (primaryVerificationGate && settings.taskProfile === "deep_analysis") {
@@ -88,6 +93,7 @@ async function main() {
 
   const settings = await fetch(baseUrl + "/settings?firstRun=1&next=%2Fonboarding");
   const settingsHtml = await settings.text();
+  assert.strictEqual(publicSettingsReads.at(-1), false, "settings GET must not synchronously decrypt the API key");
   assert.strictEqual(settings.status, 200);
   for (const text of [
     'id="model-profile-deep_analysis"',

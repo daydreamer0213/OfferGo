@@ -16,6 +16,7 @@ function renderNavigation({ currentPath = "", todayPath = "", planId = "" } = {}
     const messagesHref = currentRoute === "/messages" ? current : `/messages?planId=${encodedPlanId}${zhaopin ? '&workSite=zhaopin' : ''}`;
     const resumeRoutes = ["/resume-optimization", "/profile", "/resumes", "/onboarding"];
     const resumeHref = resumeRoutes.includes(currentRoute) ? current : `/resume-optimization?planId=${encodedPlanId}`;
+    const utilityQuery = `?planId=${encodedPlanId}${zhaopin ? "&site=zhaopin" : ""}`;
     return [
       navigationGroup("工作台", [
         navigationLink(planHref, "今日任务", currentRoute === "/plan")
@@ -23,7 +24,7 @@ function renderNavigation({ currentPath = "", todayPath = "", planId = "" } = {}
       navigationGroup("求职", [
         navigationLink(workflowHref, "发现岗位", currentRoute === "/workflow"),
         navigationLink(jobsHref, "岗位记录", ["/queue", "/jobs"].includes(currentRoute)),
-        zhaopin ? "" : navigationLink(`/funnel?planId=${encodedPlanId}`, "求职体检", currentRoute === "/funnel")
+        navigationLink(`/funnel?planId=${encodedPlanId}`, "求职体检", currentRoute === "/funnel")
       ]),
       navigationGroup("沟通", [
         navigationLink(messagesHref, "消息与回复", currentRoute === "/messages"),
@@ -34,9 +35,9 @@ function renderNavigation({ currentPath = "", todayPath = "", planId = "" } = {}
         navigationLink(`/interview?planId=${encodedPlanId}`, "面试训练", currentRoute === "/interview")
       ]),
       navigationGroup("", [
-        navigationLink("/settings/platforms", "招聘平台", currentRoute === "/settings/platforms"),
-        navigationLink("/settings", "模型与设置", currentRoute === "/settings"),
-        navigationLink("/diagnostics", "运行诊断", currentRoute === "/diagnostics")
+        navigationLink(currentRoute === "/settings/platforms" ? current : `/settings/platforms${utilityQuery}`, "招聘平台", currentRoute === "/settings/platforms"),
+        navigationLink(currentRoute === "/settings" ? current : `/settings${utilityQuery}`, "模型与设置", currentRoute === "/settings"),
+        navigationLink(currentRoute === "/diagnostics" ? current : `/diagnostics${utilityQuery}`, "运行诊断", currentRoute === "/diagnostics")
       ], "sidebar-utility")
     ].join("");
   }

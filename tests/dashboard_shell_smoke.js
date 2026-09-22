@@ -148,12 +148,15 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
     assert.match(onboarding.body, /<form class="panel form-stack" method="post" action="\/api\/resume" enctype="multipart\/form-data">/);
 
     const settings = await getText(baseUrl, "/settings");
-    assertSharedFrame(settings.body, "/settings", "settings");
+    assertSharedFrame(settings.body, `/settings\?planId=${queueFixture.planId}`, "settings");
     assert.match(settings.body, /<form class="model-profile-form" method="post" action="\/api\/settings\/model"/);
+    assert.match(settings.body, />发现岗位<\/a>/, "settings must keep the full navigation when a plan exists");
+    assert.match(settings.body, />求职体检<\/a>/, "settings must keep cross-platform funnel navigation");
     assert.doesNotMatch(settings.body, /data-page-primary=/, "settings must explicitly have no page-level primary marker");
 
     const diagnostics = await getText(baseUrl, "/diagnostics");
-    assertSharedFrame(diagnostics.body, "/diagnostics", "diagnostics");
+    assertSharedFrame(diagnostics.body, `/diagnostics\?planId=${queueFixture.planId}`, "diagnostics");
+    assert.match(diagnostics.body, />发现岗位<\/a>/, "diagnostics must keep the full navigation when a plan exists");
     assert.doesNotMatch(diagnostics.body, /data-page-primary=/, "diagnostics must explicitly have no page-level primary marker");
     assertCurrentLink(jobs.body, `/jobs?planId=${queueFixture.planId}&amp;batch=latest`, "岗位记录");
     for (const [pathname, name] of [

@@ -737,11 +737,11 @@ function createDashboardServer({
     connectionStatus: "verified",
     modelConfig: { provider: "mock", providers: { mock: { model: "offline-structured-mock" } } }
   };
-  const getPublicModelSettings = () => modelSettingsLoader
-    ? modelSettingsLoader({ root: dataRoot, fallbackModelConfig: modelConfig })
+  const getPublicModelSettings = () => publicModelSettingsState(modelSettingsLoader
+    ? modelSettingsLoader({ root: dataRoot, fallbackModelConfig: modelConfig, inspectCredential: false })
     : forceMock
       ? offlineMockState
-      : loadModelSettings({ root: dataRoot, fallbackModelConfig: modelConfig });
+      : loadModelSettings({ root: dataRoot, fallbackModelConfig: modelConfig, inspectCredential: false }));
   const runtimeModelCache = createModelRuntimeCache({
     signature: () => modelRuntimeFileSignature(dataRoot),
     resolve: (taskProfile) => runtimeModelResolver
@@ -1248,6 +1248,7 @@ function createDashboardServer({
       }));
       if (req.method === "GET" && url.pathname === "/settings") {
         const modelState = getPublicModelSettings();
+        const navigation = dashboardNavigationContext(db, url, "/settings");
         const sharedPrimaryCredential = ["deep_analysis", "batch_screening"].every((taskProfile) =>
           modelState.settings?.taskProfiles?.[taskProfile]?.credentialRef !== "independent"
         );
@@ -1259,14 +1260,16 @@ function createDashboardServer({
         return sendHtml(res, renderModelSettingsPage({
           modelState,
           searchParams: url.searchParams,
-          primaryModelsReady
+          primaryModelsReady,
+          navigation
         }));
       }
       if (req.method === "GET" && url.pathname === "/settings/platforms") {
         return sendHtml(res, renderWorkspacePlatformSettingsPage({
           preference: getWorkspacePlatformPreference(db),
           workspace: visibleWorkspaceRuntime(),
-          searchParams: url.searchParams
+          searchParams: url.searchParams,
+          navigation: dashboardNavigationContext(db, url, "/settings/platforms")
         }));
       }
       if (req.method === "GET" && url.pathname === "/profile") return sendHtml(res, renderProfilePage({ db, searchParams: url.searchParams }));
@@ -1315,7 +1318,7 @@ function createDashboardServer({
       if (req.method === "GET" && url.pathname === "/communication") return sendHtml(res, renderCommunicationCenterPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/jobs/export.csv") return handleFilteredJobExport(res, db, url.searchParams);
       if (req.method === "GET" && url.pathname === "/jobs") return sendHtml(res, renderDashboard(getDashboardData(db, url.searchParams)));
-      if (req.method === "GET" && url.pathname === "/diagnostics") return sendHtml(res, renderDiagnosticsPage(logger.listRecent(), url.searchParams.get("events"), diagnosticsActionToken));
+      if (req.method === "GET" && url.pathname === "/diagnostics") return sendHtml(res, renderDiagnosticsPage(logger.listRecent(), url.searchParams.get("events"), diagnosticsActionToken, dashboardNavigationContext(db, url, "/diagnostics")));
       if (req.method === "GET" && url.pathname === "/health") {
         return sendJson(res, 200, {
           ok: true,
@@ -5063,7 +5066,7 @@ function resumePreviewScript() {
   return `<script>async function previewResumeModelInput(button){const form=button.closest("form");const box=form.querySelector(".resume-preview");const summary=box.querySelector("summary");const pre=box.querySelector("pre");button.disabled=true;try{const response=await fetch("/api/resume/preview",{method:"POST",body:new FormData(form)});const data=await response.json();if(!response.ok)throw new Error(data.error||"预览失败");const labels={name:"姓名",phone:"电话/手机",email:"邮箱",idCard:"身份证号",address:"详细住址"};const masked=Object.entries(data.redactions||{}).map(([key,count])=>(labels[key]||key)+" "+count+" 处").join("、")||"未发现需遮蔽字段";summary.textContent="将发送 "+data.charCount+" 字；"+masked;pre.textContent=data.text;box.hidden=false;box.open=true}catch(error){summary.textContent=error.message;pre.textContent="";box.hidden=false;box.open=true}finally{button.disabled=false}}</script>`;
 }
 
-function renderWorkspacePlatformSettingsPage({ preference, workspace, searchParams }) {
+function renderWorkspacePlatformSettingsPage({ preference, workspace, searchParams, navigation = {} }) {
   const selected = preference?.platforms?.length === 2
     ? "both"
     : preference?.platforms?.[0] || "";
@@ -5101,10 +5104,10 @@ function renderWorkspacePlatformSettingsPage({ preference, workspace, searchPara
       <div class="platform-settings-actions"><p>以后可以随时修改。取消某个平台只代表 OfferGo 不再使用它，不会关闭你的网页或删除历史数据。</p><button type="submit">${firstRun ? "保存并继续" : "保存设置"}</button></div>
     </form>
   </main>`;
-  return renderLegacyDashboardPage({ title: "招聘平台", currentPath: "/settings/platforms", stage: "招聘平台", body });
+  return renderLegacyDashboardPage({ title: "招聘平台", currentPath: navigation.currentPath || "/settings/platforms", todayPath: navigation.todayPath || "", planId: navigation.planId || "", stage: "招聘平台", body });
 }
 
-function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady = false }) {
+function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady = false, navigation = {} }) {
   const settings = modelState.settings || {};
   const currentCredentials = [
     settings.sharedCredential,
@@ -5183,7 +5186,7 @@ function renderModelSettingsPage({ modelState, searchParams, primaryModelsReady 
     <script id="model-preset-data" type="application/json">${presetJson}</script>
     ${modelSettingsClientScript()}
   </main>`;
-  return renderLegacyDashboardPage({ title: "模型设置", currentPath: "/settings", stage: "设置", body });
+  return renderLegacyDashboardPage({ title: "模型设置", currentPath: navigation.currentPath || "/settings", todayPath: navigation.todayPath || "", planId: navigation.planId || "", stage: "设置", body });
 }
 
 function renderModelTaskProfileSection({ definition, settings, presets, modelState, selected }) {
@@ -5572,7 +5575,7 @@ function modelSettingsBack(error, fallback) {
     : fallback;
 }
 
-function renderDiagnosticsPage(entries = [], events = "", actionToken = "") {
+function renderDiagnosticsPage(entries = [], events = "", actionToken = "", navigation = {}) {
   const showAll = events === "all";
   const rows = entries.filter((entry) => showAll || ["warn", "error"].includes(entry.level)).map((entry) => {
     const error = entry.error || {};
@@ -5593,7 +5596,31 @@ function renderDiagnosticsPage(entries = [], events = "", actionToken = "") {
   const filterNotice = showAll
     ? `<p class="hint">正在显示最近 120 条脱敏日志（含常规事件）。<a href="/diagnostics">只看问题和建议行动</a></p>`
     : `<p class="hint">问题和建议行动优先：默认只显示 warn 和 error。<a href="/diagnostics?events=all">显示所有常规事件</a></p>`;
-  return renderLegacyDashboardPage({ title: "诊断日志", currentPath: "/diagnostics", stage: "诊断", body: `<main id="main-content"><h1>诊断日志</h1><section class="panel"><h2>需要协助时</h2><p>复制的是运行状态和版本，不包含简历、岗位内容、登录信息或本机文件路径。</p><div class="button-row"><button type="button" data-copy-runtime-diagnostics>复制诊断信息</button><button type="button" class="secondary" data-open-runtime-logs>打开日志文件夹</button></div><p class="hint" data-runtime-diagnostics-feedback aria-live="polite">完整日志保存在当前用户的 RoleFlow 数据目录。</p></section>${filterNotice}<p class="hint">下方仅展示最近 120 条脱敏日志。</p><span class="nav-scroll-hint">左右滑动查看完整日志表格</span><section class="panel diagnostics-scroll"><table class="diagnostics"><thead><tr><th>时间</th><th>级别</th><th>组件</th><th>事件</th><th>请求</th><th>错误码</th><th>摘要</th></tr></thead><tbody>${rows || "<tr><td colspan=\"7\">暂无日志</td></tr>"}</tbody></table></section></main><script>(function(){const actionToken=${JSON.stringify(String(actionToken || ""))};const feedback=document.querySelector('[data-runtime-diagnostics-feedback]');const copy=document.querySelector('[data-copy-runtime-diagnostics]');const open=document.querySelector('[data-open-runtime-logs]');copy?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics');if(!response.ok)throw new Error();const value=JSON.stringify(await response.json(),null,2);await navigator.clipboard.writeText(value);feedback.textContent='诊断信息已复制。';}catch{feedback.textContent='复制失败，请重试。';}});open?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics/open-logs',{method:'POST',headers:{'content-type':'application/json','x-roleflow-action':actionToken},body:'{}'});if(!response.ok)throw new Error();feedback.textContent='日志文件夹已打开。';}catch{feedback.textContent='无法打开日志文件夹，请重试。';}});}());</script>` });
+  return renderLegacyDashboardPage({ title: "诊断日志", currentPath: navigation.currentPath || "/diagnostics", todayPath: navigation.todayPath || "", planId: navigation.planId || "", stage: "诊断", body: `<main id="main-content"><h1>诊断日志</h1><section class="panel"><h2>需要协助时</h2><p>复制的是运行状态和版本，不包含简历、岗位内容、登录信息或本机文件路径。</p><div class="button-row"><button type="button" data-copy-runtime-diagnostics>复制诊断信息</button><button type="button" class="secondary" data-open-runtime-logs>打开日志文件夹</button></div><p class="hint" data-runtime-diagnostics-feedback aria-live="polite">完整日志保存在当前用户的 RoleFlow 数据目录。</p></section>${filterNotice}<p class="hint">下方仅展示最近 120 条脱敏日志。</p><span class="nav-scroll-hint">左右滑动查看完整日志表格</span><section class="panel diagnostics-scroll"><table class="diagnostics"><thead><tr><th>时间</th><th>级别</th><th>组件</th><th>事件</th><th>请求</th><th>错误码</th><th>摘要</th></tr></thead><tbody>${rows || "<tr><td colspan=\"7\">暂无日志</td></tr>"}</tbody></table></section></main><script>(function(){const actionToken=${JSON.stringify(String(actionToken || ""))};const feedback=document.querySelector('[data-runtime-diagnostics-feedback]');const copy=document.querySelector('[data-copy-runtime-diagnostics]');const open=document.querySelector('[data-open-runtime-logs]');copy?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics');if(!response.ok)throw new Error();const value=JSON.stringify(await response.json(),null,2);await navigator.clipboard.writeText(value);feedback.textContent='诊断信息已复制。';}catch{feedback.textContent='复制失败，请重试。';}});open?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics/open-logs',{method:'POST',headers:{'content-type':'application/json','x-roleflow-action':actionToken},body:'{}'});if(!response.ok)throw new Error();feedback.textContent='日志文件夹已打开。';}catch{feedback.textContent='无法打开日志文件夹，请重试。';}});}());</script>` });
+}
+
+function dashboardNavigationContext(db, url, route) {
+  const requestedPlan = getSearchPlan(db, url.searchParams.get("planId"));
+  const activePlanId = requestedPlan?.id
+    || listCandidateProfiles(db).find((profile) => profile.activePlanId)?.activePlanId
+    || "";
+  if (!activePlanId) return { currentPath: `${route}${url.search || ""}`, todayPath: "", planId: "" };
+  const site = url.searchParams.get("site") === "zhaopin" ? "zhaopin" : "boss";
+  const currentParams = new URLSearchParams(url.searchParams);
+  currentParams.set("planId", String(activePlanId));
+  if (site === "zhaopin") currentParams.set("site", "zhaopin");
+  else currentParams.delete("site");
+  const query = currentParams.toString();
+  return {
+    currentPath: `${route}${query ? `?${query}` : ""}`,
+    todayPath: `/plan?planId=${encodeURIComponent(activePlanId)}${site === "zhaopin" ? "&site=zhaopin" : ""}`,
+    planId: activePlanId
+  };
+}
+
+function publicModelSettingsState(state = {}) {
+  if (!state.keyStored || state.keyErrorCode) return state;
+  return { ...state, keyConfigured: true, keyReadable: true };
 }
 
 function buildRuntimeDiagnostics({ applicationVersion, launchSessionId, browser, workspace }) {

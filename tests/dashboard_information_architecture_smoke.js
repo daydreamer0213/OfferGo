@@ -31,6 +31,15 @@ const utilities = renderNavigation({ ...plan, currentPath: "/diagnostics" });
 assertCurrent(utilities, "/diagnostics", "运行诊断");
 assert.match(utilities, />模型与设置</);
 
+const zhaopinUtilities = renderNavigation({
+  currentPath: "/settings?planId=7&site=zhaopin",
+  todayPath: "/plan?planId=7&site=zhaopin",
+  planId: 7
+});
+assert.match(zhaopinUtilities, />发现岗位</);
+assert.match(zhaopinUtilities, />求职体检</);
+assert.match(zhaopinUtilities, /href="\/settings\?planId=7&amp;site=zhaopin"[^>]*aria-current="page"/);
+
 console.log("dashboard_information_architecture_smoke ok");
 
 function assertCurrent(markup, href, label) {
