@@ -205,6 +205,7 @@ const { createResumeOptimizationService } = require("../application/resume_optim
 const { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues } = require("./pages/resume_optimization");
 const { createMockInterviewService } = require("../application/mock_interview");
 const { renderMockInterviewPage, MOCK_INTERVIEW_SCRIPT } = require("./pages/mock_interview");
+const { createModelRuntimeCache, modelRuntimeFileSignature } = require("../application/model_runtime_cache");
 
 const DASHBOARD_ASSETS = Object.freeze({
   "/assets/offergo-icon.png": {
@@ -722,11 +723,15 @@ function createDashboardServer({
     : forceMock
       ? offlineMockState
       : loadModelSettings({ root: dataRoot, fallbackModelConfig: modelConfig });
-  const getRuntimeModelState = (taskProfile) => runtimeModelResolver
-    ? runtimeModelResolver({ root: dataRoot, fallbackModelConfig: modelConfig, taskProfile })
-    : forceMock
-      ? offlineMockState
-      : resolveRuntimeModelConfig({ root: dataRoot, fallbackModelConfig: modelConfig, taskProfile });
+  const runtimeModelCache = createModelRuntimeCache({
+    signature: () => modelRuntimeFileSignature(dataRoot),
+    resolve: (taskProfile) => runtimeModelResolver
+      ? runtimeModelResolver({ root: dataRoot, fallbackModelConfig: modelConfig, taskProfile })
+      : forceMock
+        ? offlineMockState
+        : resolveRuntimeModelConfig({ root: dataRoot, fallbackModelConfig: modelConfig, taskProfile })
+  });
+  const getRuntimeModelState = (taskProfile) => runtimeModelCache.get(taskProfile);
   const getRuntimeModel = (taskProfile) => getRuntimeModelState(taskProfile).modelConfig;
   const modelStateReady = (state, taskProfile, options = {}) => {
     if ((allowOfflineMock || forceMock) && !modelReadinessChecker) return true;
@@ -742,7 +747,12 @@ function createDashboardServer({
     const fingerprint = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
     const existing = modelSettingsSaveFlights.get(fingerprint);
     if (existing) return existing;
-    const pending = modelSettingsSaveTail.then(operation, operation);
+    const saveAndInvalidate = async () => {
+      const result = await operation();
+      runtimeModelCache.invalidate();
+      return result;
+    };
+    const pending = modelSettingsSaveTail.then(saveAndInvalidate, saveAndInvalidate);
     modelSettingsSaveTail = pending.then(() => undefined, () => undefined);
     modelSettingsSaveFlights.set(fingerprint, pending);
     const clear = () => {
