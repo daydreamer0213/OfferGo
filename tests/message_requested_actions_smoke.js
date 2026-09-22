@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
-const { deriveRequestedActions } = require("../src/core/message_requested_actions");
+const {
+  deriveRequestedActions,
+  findPendingResumeRequest
+} = require("../src/core/message_requested_actions");
 
 const resumeOnly = deriveRequestedActions({
   platform: "boss",
@@ -46,5 +49,20 @@ const externalChannel = deriveRequestedActions({
 });
 assert.deepStrictEqual(externalChannel.requestedActions, [], "an explicit external channel must not become an in-platform send action");
 assert.deepStrictEqual(externalChannel.replyMessages, [{ messageKey: "m5", text: "请把简历发到 hr@example.com" }]);
+
+const historicalRequest = findPendingResumeRequest({
+  platform: "boss",
+  events: [
+    { messageKey: "old-request", direction: "friend", kind: "text", text: "如方便的话，可以发下您的简历吗，谢谢" },
+    { messageKey: "new-question", direction: "friend", kind: "text", text: "现在方便沟通吗？" }
+  ]
+});
+assert.equal(historicalRequest?.messageKey, "old-request",
+  "a pending resume request must survive a newer recruiter question so both actions remain available");
+
+assert.equal(findPendingResumeRequest({
+  platform: "boss",
+  events: [{ messageKey: "email-request", direction: "friend", kind: "text", text: "请把简历发到 hr@example.com" }]
+}), null, "external-channel requests must not become platform attachment actions");
 
 console.log("message_requested_actions_smoke ok");

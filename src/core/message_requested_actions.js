@@ -27,6 +27,22 @@ function deriveRequestedActions({ platform, messages = [], manualActions = [] } 
   return { requestedActions, replyMessages };
 }
 
+function findPendingResumeRequest({ platform, events = [] } = {}) {
+  const source = String(platform || "").trim().toLowerCase();
+  if (!SUPPORTED_PLATFORMS.has(source)) return null;
+  const values = Array.isArray(events) ? events : [];
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const event = values[index];
+    if (String(event?.direction || "") !== "friend") continue;
+    if (isResumeReceiptAcknowledgement(event?.text)) return null;
+    if (event?.kind === "resume_request"
+      || (event?.kind === "text" && isInPlatformResumeRequest(event?.text))) {
+      return { ...event, kind: "resume_request" };
+    }
+  }
+  return null;
+}
+
 function normalizeManualActions(value) {
   const result = [];
   if (Array.isArray(value) && value.some((item) => item?.kind === "resume_request")) {
@@ -59,4 +75,13 @@ function isGreetingOnly(clause) {
   return /^(?:您好|你好|嗨|hi|hello)[，,。！？!?；;\s]*$/i.test(String(clause || ""));
 }
 
-module.exports = { deriveRequestedActions, isInPlatformResumeRequest };
+function isResumeReceiptAcknowledgement(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  return /(?:已经|已|刚刚)?(?:收到|看到|看过|查看过|下载了).{0,8}(?:简历|履历)|(?:简历|履历).{0,8}(?:已经|已)?(?:收到|看到|看过|查看过|下载)/.test(text);
+}
+
+module.exports = {
+  deriveRequestedActions,
+  findPendingResumeRequest,
+  isInPlatformResumeRequest
+};

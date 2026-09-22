@@ -546,7 +546,7 @@ async function main() {
       { messageKey: `sha256:${"2".repeat(64)}`, platformMessageId: "102", direction: "friend", kind: "text", text: OPEN_HR_TEXT, occurredAt: "2026-07-31T01:01:00.000Z", metadata: {} },
       { messageKey: `sha256:${"3".repeat(64)}`, platformMessageId: "103", direction: "myself", kind: "text", text: "您好，可以进一步了解。", occurredAt: "2026-07-31T01:02:00.000Z", metadata: {} },
       { messageKey: `sha256:${"4".repeat(64)}`, platformMessageId: "104", direction: "friend", kind: "media_ignored", text: "", occurredAt: "2026-07-31T01:03:00.000Z", metadata: { mediaKind: "voice" } },
-      { messageKey: `sha256:${"5".repeat(64)}`, platformMessageId: "105", direction: "friend", kind: "resume_request", text: RESUME_REQUEST_SUMMARY, occurredAt: "2026-07-31T01:04:00.000Z", metadata: {} }
+      { messageKey: `sha256:${"5".repeat(64)}`, platformMessageId: "105", direction: "friend", kind: "text", text: "如方便的话，可以发下您的简历吗，谢谢", occurredAt: "2026-07-31T01:04:00.000Z", metadata: {} }
     ]
   });
   upsertMessageInboxItem(db, {
@@ -745,6 +745,7 @@ async function main() {
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="accept_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-action-kind="decline_resume"/);
   assert.match(understoodPage.body, /data-message-action-confirm[^>]+data-platform="boss"[^>]+data-action-kind="accept_resume"/);
+  assert.match(understoodPage.body, /如方便的话，可以发下您的简历吗，谢谢/);
   markMessageInboxItemDone(db, {
     profileId: fixture.profileId,
     platform: "zhaopin",

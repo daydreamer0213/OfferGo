@@ -19,6 +19,7 @@ const { communicationRuntimeBlock, scanRuntimeBlock } = require("../core/communi
 const { resolveBossRiskWindow } = require("../core/boss_risk_window");
 const { sameBrowserTabId } = require("../core/browser_tab_identity");
 const { PRODUCT_POLICY } = require("../core/product_policy");
+const { findPendingResumeRequest } = require("../core/message_requested_actions");
 const {
   setSiteRuntimeState,
   getSiteRuntimeState,
@@ -823,6 +824,14 @@ function createMessageDiscoveryController(deps = {}) {
     if (!row) throw messageDiscoveryError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "durable draft context is missing", 500);
     const platform = row.source === row.card_source && ["boss", "zhaopin"].includes(row.source) ? row.source : "";
     const first = drafts[0] || contexts[0] || {};
+    const conversationKey = safeDigest(first.conversationKey) || safeDigest(contexts[0]?.conversationKey);
+    const timeline = platform && conversationKey ? listMessageEvents(db, {
+      profileId,
+      platform,
+      conversationKey,
+      limit: 500
+    }) : [];
+    const pendingResumeRequest = findPendingResumeRequest({ platform, events: timeline });
     const selectedGroupKey = safeDigest(first.messageGroupKey) || safeDigest(contexts[0]?.messageGroupKey);
     const classification = selectedGroupKey
       ? getMessageGroupClassification(db, { profileId, cardId, messageGroupKey: selectedGroupKey }) || {}
@@ -859,7 +868,7 @@ function createMessageDiscoveryController(deps = {}) {
       platform,
       sourceJobId: row.source_id,
       messageGroupKey: selectedGroupKey || safeDigest(activeContexts[0]?.messageGroupKey),
-      conversationKey: safeDigest(first.conversationKey) || safeDigest(activeContexts[0]?.conversationKey),
+      conversationKey,
       stage: String(classification.stage || row.stage || "reply_ready"),
       messageIntent: MESSAGE_INTENTS.has(first.messageIntent)
         ? first.messageIntent
@@ -869,7 +878,10 @@ function createMessageDiscoveryController(deps = {}) {
       missingFactKey: safeDrafts.length ? "" : safeText(classification.missingFactKey, 80),
       missingFactQuestion: safeDrafts.length ? "" : safeInlineText(classification.missingFactQuestion, 160),
       manualActionReason: "",
-      manualActions: sanitizeManualActions(activeContexts.flatMap((context) => context.manualActions), row.source),
+      manualActions: sanitizeManualActions([
+        ...activeContexts.flatMap((context) => context.manualActions),
+        ...(pendingResumeRequest ? [{ kind: "resume_request" }] : [])
+      ], row.source),
       contextSource: "local_cache",
       contextComplete,
       job,
@@ -1204,12 +1216,12 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
   const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
   const items = listMessageInboxItems(db, { profileId }).map((item) => presentInboxItem({
     ...item,
-    timeline: listMessageEvents(db, {
+    timeline: projectActionableTimeline(item.platform, listMessageEvents(db, {
       profileId,
       platform: item.platform,
       conversationKey: item.conversationKey,
       limit: 500
-    })
+    }))
   }));
   const visibleItems = items.filter((item) => item.actionGroup !== "needs_review");
   const groups = {
@@ -1234,6 +1246,14 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
       total: visibleItems.length
     }
   };
+}
+
+function projectActionableTimeline(platform, events) {
+  const pending = findPendingResumeRequest({ platform, events });
+  if (!pending) return events;
+  return events.map((event) => event.messageKey === pending.messageKey
+    ? { ...event, kind: "resume_request" }
+    : event);
 }
 
 function presentInboxItem(item) {
