@@ -472,6 +472,8 @@ class ZhaopinSiteAdapter {
       }
       const stoppedEmpty = state.selectedIndex === refreshedCard.index
         && state.detailRequestState === 'empty' && state.cards[refreshedCard.index]?.signature === refreshedCard.signature;
+      const awaitingPaneTransition = !wasSelected && Boolean(beforeUrl)
+        && state.selectedIndex === refreshedCard.index && state.detail?.url === beforeUrl;
       if (stoppedEmpty && typeof beforeEmptyRetry === 'function' && !retryUsed) {
         retryUsed = true;
         const pacingStarted = this.detailNow();
@@ -496,15 +498,15 @@ class ZhaopinSiteAdapter {
         if (postRetryEmptySamples++ >= 1) throw zhaopinError('ZHAOPIN_DETAIL_LOAD_TIMEOUT',
           '智联岗位详情未加载完成，本轮进度已保留。请稍后确认智联详情能正常显示，再点击“继续本轮”。');
       }
-      if (state.loading) unconfirmedSamples = 0;
+      if (state.loading || awaitingPaneTransition) unconfirmedSamples = 0;
       else if (++unconfirmedSamples >= 6) return null;
       const remaining = deadline - this.detailNow();
       if (remaining <= 0) {
-        if (state.loading) throw zhaopinError('ZHAOPIN_DETAIL_LOAD_TIMEOUT',
+        if (state.loading || awaitingPaneTransition) throw zhaopinError('ZHAOPIN_DETAIL_LOAD_TIMEOUT',
           '智联岗位详情未加载完成，本轮进度已保留。请稍后确认智联详情能正常显示，再点击“继续本轮”。');
         return null;
       }
-      await this.waitWithChecks(signal, assertTabBindings, Math.min(state.loading ? 500 : 120, remaining));
+      await this.waitWithChecks(signal, assertTabBindings, Math.min(state.loading || awaitingPaneTransition ? 500 : 120, remaining));
     }
   }
 

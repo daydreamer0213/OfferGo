@@ -477,6 +477,23 @@ async function main() {
     assert.equal(await identityConflictAdapter.readVisiblePaneDetail('cdp-zl', identityConflictState.cards[1]), null, 'loaded but mismatched detail identity is rejected without the long loading deadline');
     assert.equal(identityConflictClock, 600, 'non-loading identity failures keep the original six 120ms samples');
 
+    let stalePaneClock = 0;
+    const stalePaneBridge = fakeBrowser({ cardSourceIds: true, onActivate: ({ selectedIndex, overrides }) => {
+      if (selectedIndex === 1) Object.assign(overrides, { detailRequestState: 'ready', loading: false, detail: fullDetail(0) });
+    } });
+    const stalePaneAdapter = new ZhaopinSiteAdapter({
+      browser: stalePaneBridge,
+      nowFn: () => stalePaneClock,
+      sleepFn: async (ms = 120) => {
+        stalePaneClock += ms;
+        if (stalePaneClock >= 5000) stalePaneBridge.setState({ detail: fullDetail(1) });
+      },
+      randomFn: () => 0
+    });
+    const stalePaneState = await stalePaneAdapter.readSearchState('cdp-zl');
+    assert.equal((await stalePaneAdapter.readVisiblePaneDetail('cdp-zl', stalePaneState.cards[1])).sourceId, 'SYNTH1', 'a newly selected card may wait for the previous ready pane to transition');
+    assert(stalePaneClock >= 5000, 'the stale ready pane is allowed to settle beyond the old six-sample window');
+
     const loadingBatch = storage.createBatch(db, 'zhaopin', 'AI', 'loading-timeout');
     const loadingTargets = [], loadingTerminal = [];
     const loadingBridge = fakeBrowser({ loadingOnSwitch: true });
