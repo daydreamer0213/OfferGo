@@ -382,7 +382,7 @@ class ZhaopinSiteAdapter {
       if (scope.focusAttempted) await this.browser.cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: false });
     };
     try {
-      await this.browser.setPageLifecycleActive(tabId);
+      await this.activateSearchPage(tabId);
       scope.focusAttempted = true;
       await this.browser.cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true });
       return close;
@@ -392,6 +392,17 @@ class ZhaopinSiteAdapter {
         throw cleanupError;
       }
       throw error;
+    }
+  }
+
+  async activateSearchPage(tabId) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.browser.setPageLifecycleActive(tabId);
+      } catch (error) {
+        if (attempt >= 2 || !isTransientLifecycleAttachmentError(error)) throw error;
+        await this.sleep(250);
+      }
     }
   }
 
@@ -662,6 +673,13 @@ function sameFilterSummary(current, saved) {
     .map(value => String(value || '').replace(/\s+/g, ' ').trim())
     .filter(value => value && !ZHAOPIN_DEFAULT_FILTER_LABELS.has(value));
   return JSON.stringify(selected(current)) === JSON.stringify(selected(saved));
+}
+
+function isTransientLifecycleAttachmentError(error) {
+  const message = String(error?.message || '');
+  return error?.code === 'BROWSER_COMMAND_FAILED'
+    && message.includes('Page.setWebLifecycleState')
+    && message.includes('Not attached to an active page');
 }
 
 async function resolveZhaopinSearchTab(browser, expectedTabId = null) {

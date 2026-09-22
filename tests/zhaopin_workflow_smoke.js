@@ -97,6 +97,29 @@ async function main() {
   restoring.setState({ filterSummary: ['默认占位'] });
   const readyAdapter = new ZhaopinSiteAdapter({ browser: restoring, sleepFn: async () => restoring.setState({ filterSummary: ['广东'] }) });
   assert.equal((await readyAdapter.waitForSearchReady('cdp-zl', { searchTemplate: canonicalizeZhaopinSearchTemplate('https://www.zhaopin.com/jobs/?pageMode=search&jl=548'), keyword: 'AI', filterSummary: ['广东'] })).filterSummary[0], '广东', 'restoration must wait out transient placeholder filters');
+  const transientLifecycle = fakeBrowser({ renderScope: true });
+  let lifecycleAttempts = 0;
+  transientLifecycle.setPageLifecycleActive = async id => {
+    transientLifecycle.calls.push({ type: 'lifecycle', id });
+    lifecycleAttempts++;
+    if (lifecycleAttempts === 1) {
+      throw Object.assign(new Error('Page.setWebLifecycleState failed: {"code":-32000,"message":"Not attached to an active page"}'), { code: 'BROWSER_COMMAND_FAILED' });
+    }
+  };
+  const lifecycleWaits = [];
+  const transientLifecycleAdapter = new ZhaopinSiteAdapter({ browser: transientLifecycle, sleepFn: async ms => lifecycleWaits.push(ms) });
+  const releaseTransientLifecycle = await transientLifecycleAdapter.openSearchRenderScope('cdp-zl');
+  await releaseTransientLifecycle();
+  assert.equal(lifecycleAttempts, 2, 'a just-navigated page gets one bounded lifecycle activation retry');
+  assert.deepEqual(lifecycleWaits, [250], 'the retry waits briefly for the new page target to attach');
+  assert.deepEqual(transientLifecycle.calls.filter(call => call.type === 'cdp').map(call => call.params.enabled), [true, false], 'focus emulation is still balanced after the retry');
+
+  const permanentLifecycle = fakeBrowser({ renderScope: true });
+  let permanentAttempts = 0;
+  const permanentFailure = Object.assign(new Error('Page.setWebLifecycleState failed: another failure'), { code: 'BROWSER_COMMAND_FAILED' });
+  permanentLifecycle.setPageLifecycleActive = async () => { permanentAttempts++; throw permanentFailure; };
+  await assert.rejects(() => new ZhaopinSiteAdapter({ browser: permanentLifecycle, sleepFn: async () => assert.fail('unrelated lifecycle failures must not wait or retry') }).openSearchRenderScope('cdp-zl'), error => error === permanentFailure);
+  assert.equal(permanentAttempts, 1, 'only the observed transient target-attachment failure is retryable');
   const fullDetail = (index = 0) => ({ index, signature: `card-${index}`, title: `岗位${index}`, company: '公司', salary: '10-20K', location: '广州', description: '完整岗位职责与任职要求。'.repeat(20), url: `https://www.zhaopin.com/jobdetail/SYNTH${index}.htm` });
   const selectedRecovery = fakeBrowser({ cardSourceIds: true, onActivate: ({ expectedEmpty, overrides }) => {
     if (expectedEmpty) Object.assign(overrides, { detailRequestState: 'ready', loading: false, detail: fullDetail(0) });
