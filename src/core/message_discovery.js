@@ -1328,6 +1328,7 @@ function projectMessageDecisionCard(job = {}) {
   const workSchedule = decisionWorkSchedule(analysis);
   const matchHighlights = decisionMatchHighlights(analysis);
   const questionsToConfirm = decisionQuestionsToConfirm(analysis);
+  const attentionGap = decisionAttentionGap(analysis);
   return {
     title: safeProjectionText(job.title, 160),
     company: safeProjectionText(job.company, 160),
@@ -1343,6 +1344,9 @@ function projectMessageDecisionCard(job = {}) {
       workSchedule,
       questionsToConfirm
     }),
+    resumeConnections: decisionResumeConnections(analysis, attentionGap),
+    attentionPoint: decisionAttentionPoint(attentionGap),
+    recommendationNote: decisionRecommendationNote(analysis, attentionGap),
     workSchedule,
     salary,
     opportunityVerdict: availability === "offline"
@@ -1492,6 +1496,190 @@ function decisionContinueCondition({ recommendation, salary, workSchedule, quest
     ? "只有以下条件都满足时，才建议继续交流："
     : "以下条件都满足时，建议继续交流：";
   return `${prefix}${conditions.join("；")}。`;
+}
+
+function decisionResumeConnections(analysis, attentionGap) {
+  const requirements = Array.isArray(analysis.requirementMatches) ? analysis.requirementMatches : [];
+  const directGroups = new Map();
+  for (const item of requirements) {
+    if (item?.state !== "matched" || (!item.foundation && !item.central) || genericRequirement(item.requirement)) continue;
+    const evidence = safeProjectionText(item.resumeEvidence, 320).replace(/^简历[:：]\s*/, "");
+    if (!evidence || lowQualityResumeEvidence(evidence)) continue;
+    const key = resumeEvidenceSource(evidence);
+    const group = directGroups.get(key) || { evidence, requirements: [] };
+    const label = readableRequirement(item.requirement);
+    if (label && !group.requirements.includes(label)) group.requirements.push(label);
+    directGroups.set(key, group);
+  }
+  const connections = [...directGroups.values()].map((group) => {
+    const evidence = naturalResumeEvidence(group.evidence);
+    const focus = joinChinese(group.requirements);
+    return evidence && focus ? readableEvidenceSpacing(`${evidence}。这与岗位需要的${focus}直接相关。`) : "";
+  }).filter(Boolean);
+
+  for (const item of Array.isArray(analysis.responsibilityMatches) ? analysis.responsibilityMatches : []) {
+    if (item?.state !== "matched" && item?.state !== "transferable") continue;
+    if (lowQualityResumeEvidence(item.resumeEvidence)) continue;
+    const evidence = naturalResumeEvidence(item.resumeEvidence);
+    if (!evidence || connections.some((text) => text.startsWith(evidence))) continue;
+    connections.push(`${evidence}。这能对应岗位${readableResponsibility(item.jdEvidence)}。`);
+    if (connections.length >= 3) return connections;
+  }
+
+  for (const item of requirements) {
+    if (item === attentionGap || item?.state !== "transferable" || item.foundation || item.central || genericRequirement(item.requirement)) continue;
+    if (lowQualityResumeEvidence(item.resumeEvidence)) continue;
+    const evidence = naturalResumeEvidence(item.resumeEvidence);
+    const focus = readableRequirement(item.requirement);
+    if (!evidence || !focus || connections.some((text) => text.startsWith(evidence))) continue;
+    connections.push(`${evidence}。这能说明你在${focus}方面有实践基础。`);
+    if (connections.length >= 3) break;
+  }
+  return connections.slice(0, 3);
+}
+
+function decisionAttentionGap(analysis) {
+  const requirements = Array.isArray(analysis.requirementMatches) ? analysis.requirementMatches : [];
+  return requirements.find((item) => (item?.foundation || item?.central)
+    && ["missing", "unknown", "transferable"].includes(item?.state)) || null;
+}
+
+function decisionAttentionPoint(gap) {
+  if (!gap) return "";
+  const requirement = readableRequirement(gap.requirement);
+  const scope = technologyScope(gap.jdEvidence);
+  const basis = candidateBasis(gap.resumeEvidence);
+  if (scope) {
+    return readableEvidenceSpacing(`岗位会接触${scope}。${basis || "你目前有相近的技术基础"}，简历里还没有直接体现这些平台的项目经验。沟通时最值得确认的是，公司需要入职后立即独立承担，还是接受有相关基础后再上手。`);
+  }
+  if (gap.state === "transferable") {
+    return readableEvidenceSpacing(`岗位比较看重${requirement}。${basis || "你有相近经历"}，但和岗位的实际场景还不完全相同。沟通时最值得确认的是，公司需要入职后立即独立承担，还是接受相关经验迁移。`);
+  }
+  return readableEvidenceSpacing(`岗位比较看重${requirement}，但简历里暂时没有直接证据。沟通时需要确认这是不是入职前必须具备的条件。`);
+}
+
+function decisionRecommendationNote(analysis, gap) {
+  if (gap) {
+    const requirement = safeProjectionText(gap.requirement, 120);
+    const continuePhrase = analysis.recommendation === "not_recommended" ? "才值得继续聊" : "值得继续聊";
+    const duration = requirement.match(/((?:半年|\d+\s*年)(?:以上)?)/);
+    if (duration && /经验/.test(requirement)) {
+      return readableEvidenceSpacing(`如果公司愿意根据实际项目能力评估，而不是严格卡${duration[1]}经验，这份岗位${continuePhrase}；如果年限是硬门槛，就不建议继续投入时间。`);
+    }
+    const basis = recommendationBasis(gap.resumeEvidence);
+    const focus = recommendationFocus(gap.requirement);
+    if (/(?:精通|熟练|掌握)/.test(requirement)) {
+      return readableEvidenceSpacing(`如果公司接受你用现有项目经历证明基础，并允许入职后继续补足${focus}的熟练度，这份岗位${continuePhrase}；如果要求入职后立即熟练独立承担，匹配度会明显下降。`);
+    }
+    const opening = analysis.recommendation === "not_recommended" ? "只有公司接受" : "如果公司接受";
+    return `${opening}你从${basis}逐步上手${focus}，这份岗位${continuePhrase}；如果要求入职后立即独立承担这部分工作，匹配度会明显下降。`;
+  }
+  if (analysis.recommendation === "not_recommended") {
+    const reason = safeProjectionText((analysis.hardBlockers || [])[0]?.requirement, 120);
+    return reason ? `目前不建议优先投入时间，主要因为岗位明确要求${reason}。` : "目前不建议优先投入时间。";
+  }
+  return "从现有经历看，岗位核心工作有直接对应，可以继续了解。";
+}
+
+function naturalResumeEvidence(value) {
+  let text = safeProjectionText(value, 320).replace(/^简历[:：]\s*/, "").replace(/[、，；:：。.]$/, "");
+  text = text
+    .replace(/将大模型分析拆为岗位理解与人岗匹配[^。]*生成分层建议/, "把大模型分析拆成岗位理解与人岗匹配，并用结构化校验和条件规则生成建议")
+    .replace(/通过GitHub Actions执行回归检查[^。]*进入实际使用验收/, "通过 GitHub Actions 做回归检查，并把安装包推进到实际使用验收")
+    .replace(/GitHub Actions执行/g, "GitHub Actions 执行")
+    .replace(/发布BOSS版Windows/g, "发布 BOSS 版 Windows ")
+    .replace(/\s+/g, " ");
+  let match = text.match(/^OfferGo(?:\|AI 求职工作台)?\s*(?:项目)?[：，,]?\s*(.+)$/i);
+  if (match) {
+    const detail = match[1].replace(/^将/, "把");
+    if (/^独立开发(?:[，,]|$)/.test(detail)) {
+      return readableEvidenceSpacing(`你独立开发 OfferGo${detail.replace(/^独立开发/, "")}`);
+    }
+    return readableEvidenceSpacing(`你在 OfferGo 中${detail}`);
+  }
+  match = text.match(/^德勤(?:咨询(?:\(北京\)有限公司)?)?\s*ai\s*应用工程师(?:经历)?[：，,]?\s*(.+)$/i);
+  if (match) return readableEvidenceSpacing(`你在德勤的 AI 应用工程师经历中，${match[1].replace(/^参与/, "参与过")}`);
+  match = text.match(/^德勤(?:咨询)?\s*参与(.+)$/i);
+  if (match) return readableEvidenceSpacing(`你在德勤的 AI 应用工程师经历中，参与过${match[1]}`);
+  match = text.match(/^独立开发\s*OfferGo(?:\|AI 求职工作台)?[，,]?\s*(.*)$/i);
+  if (match) return readableEvidenceSpacing(`你独立开发 OfferGo${match[1] ? `，${match[1]}` : ""}`);
+  match = text.match(/^长期目标与反馈学习\s*Agent\s*项目[，,]?\s*(.+)$/i);
+  if (match) return readableEvidenceSpacing(`你在“长期目标与反馈学习 Agent”项目中，${match[1]}`);
+  match = text.match(/^(参与|实现)(.+)$/);
+  if (match) return readableEvidenceSpacing(`你在德勤的 AI 应用工程师经历中，${match[1]}过${match[2]}`);
+  match = text.match(/^技能列表包含\s*(.+)$/);
+  if (match) return readableEvidenceSpacing(`你具备${match[1]}基础`);
+  return text ? readableEvidenceSpacing(`你的相关经历包括：${text}`) : "";
+}
+
+function resumeEvidenceSource(value) {
+  if (/OfferGo/i.test(value)) return "offergo";
+  if (/德勤/i.test(value)) return "deloitte";
+  return value.slice(0, 80);
+}
+
+function genericRequirement(value) {
+  return /(?:学历|专业优先|应届生|年相关经验|逻辑清晰|主动性强|沟通协作)/.test(String(value || ""));
+}
+
+function lowQualityResumeEvidence(value) {
+  return /(?:未(?:直接|明确)?提及|未(?:直接|明确)?体现|简历(?:中)?缺少|缺少(?:直接|相关|明确).*(?:证据|经验)|无(?:直接|相关|明确|项目|经验|证据)|仅有|只有)/.test(String(value || ""));
+}
+
+function readableRequirement(value) {
+  const text = safeProjectionText(value, 120);
+  if (/需求分析.*场景梳理/.test(text)) return "需求分析和场景梳理";
+  if (/验收标准/.test(text)) return "制定可验证的验收标准";
+  if (/熟练运用AI工具/.test(text)) return "用 AI 工具辅助调研和文档";
+  if (/相关实习或项目经验/.test(text)) return "相关 AI 项目";
+  if (/云原生.*AI平台/.test(text)) return "云原生与 AI 平台技术";
+  if (/精通\s*Java/i.test(text)) return "Java 开发";
+  if (/(?:熟练|精通).*Python/i.test(text)) return "Python 开发";
+  if (/掌握\s*Asyncio/i.test(text)) return "Asyncio 异步编程";
+  return readableEvidenceSpacing(text.replace(/能力$/, "").replace(/优先$/, ""));
+}
+
+function readableResponsibility(value) {
+  const text = safeProjectionText(value, 220).replace(/^JD[:：]\s*/, "");
+  if (/从需求.*到验收.*完整闭环/.test(text)) return "从需求到验收的交付闭环";
+  return "的主要工作";
+}
+
+function technologyScope(value) {
+  const text = safeProjectionText(value, 260).replace(/^JD[:：]\s*/, "");
+  const match = text.match(/对(.+?)等技术方向/);
+  return match ? match[1].replace(/\s+/g, " ") : "";
+}
+
+function candidateBasis(value) {
+  const text = safeProjectionText(value, 220).replace(/^简历[:：]\s*/, "").replace(/[。.]$/, "");
+  const docker = text.match(/技能列表包含\s*(Docker)/i);
+  if (docker) return "你目前明确具备的相关基础主要是 Docker";
+  const positive = text.split(/[，；](?=(?:但|未提及|未体现|缺少|不足|无))/)[0];
+  return positive ? naturalResumeEvidence(positive) : "";
+}
+
+function recommendationBasis(value) {
+  return /Docker/i.test(String(value || "")) ? " Docker 和现有 AI 应用经验" : "现有相关经验";
+}
+
+function recommendationFocus(value) {
+  return /云原生.*AI平台/.test(String(value || "")) ? "云原生与 AI 平台" : readableRequirement(value);
+}
+
+function readableEvidenceSpacing(value) {
+  return String(value || "")
+    .replace(/([\p{Script=Han}])([A-Za-z])/gu, "$1 $2")
+    .replace(/([A-Za-z0-9.])([\p{Script=Han}])/gu, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function joinChinese(values) {
+  const items = (Array.isArray(values) ? values : []).filter(Boolean);
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return `${items[0]}、${items[1]}`;
+  return `${items.slice(0, -1).join("、")}和${items.at(-1)}`;
 }
 
 function decisionAcceptedCondition(value) {

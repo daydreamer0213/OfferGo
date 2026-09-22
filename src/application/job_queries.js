@@ -1,3 +1,3 @@
-const { getJobIdentity } = require("../storage/job_store");
+const { getJob, getJobIdentity } = require("../storage/job_store");
 
-module.exports = { getJobIdentity };
+module.exports = { getJob, getJobIdentity };

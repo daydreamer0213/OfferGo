@@ -702,20 +702,17 @@ async function main() {
   assert(!understoodPage.body.includes("有 <证书> 吗？"));
   assert(understoodPage.body.includes("AI 应用开发工程师"));
   for (const expected of [
-    "这份岗位是否值得继续",
-    "可以了解，但要先确认关键问题",
-    "为什么匹配",
-    "简历中已有明确经历：企业知识库问答项目",
-    "需要确认",
-    "请确认生产环境运维是否为日常核心职责。",
-    "什么情况下值得继续",
-    "如果薪资和工作安排符合你的预期，并且生产环境运维不是日常核心职责，建议继续交流。",
-    "已确认信息",
-    "主要工作",
+    "这个岗位主要做什么",
     "把企业知识转成可追溯的智能问答能力",
-    "公司业务",
-    "JD 显示该岗位服务于企业知识管理。",
-    "薪资",
+    "业务方向：企业知识管理。",
+    "你的经历为什么相关",
+    "你在 OfferGo 中做过知识库问答链路、需求拆解和验收规则设计，这与岗位要交付的企业知识产品直接相关。",
+    "需要留意",
+    "你有知识库问答项目经验，但生产环境运维是否属于日常核心职责还需要问清楚。",
+    "是否值得继续聊",
+    "如果运维工作只占辅助部分，这个岗位值得继续了解；如果需要长期承担生产值班，则与你的主要经历偏离较大。",
+    "岗位信息",
+    "薪资：",
     "15-25K·13薪",
     "发送简历",
     "确认发送 BOSS 中最近更新的附件简历",
@@ -729,6 +726,12 @@ async function main() {
     "您好，感谢邀请，请问面试时间和形式如何安排？",
   ]) assert(understoodPage.body.includes(expected), `missing user decision content: ${expected}`);
   for (const hidden of [
+    "这份岗位是否值得继续",
+    "为什么匹配",
+    "什么情况下值得继续",
+    "已确认信息",
+    "简历中已有明确经历",
+    "请确认岗位是否接受相近经历替代",
     "沟通类型：",
     "简历匹配：",
     "工作安排未确认",
@@ -767,12 +770,10 @@ async function main() {
   assert.doesNotMatch(understoodPage.body, /请自行到(?: BOSS|智联)|原始会话/);
   assertHeadingsInOrder(understoodPage.body, [
     "<h3>完整会话</h3>",
-    "<h3>这份岗位是否值得继续</h3>",
-    "<h3>为什么匹配</h3>",
-    "<h3>需要确认</h3>",
-    "<h3>什么情况下值得继续</h3>",
-    "<h3>已确认信息</h3>",
-    "<h3>岗位职责与公司</h3>",
+    "<h3>这个岗位主要做什么</h3>",
+    "<h3>你的经历为什么相关</h3>",
+    "<h3>需要留意</h3>",
+    "<h3>是否值得继续聊</h3>",
     "<h3>回复草稿</h3>"
   ]);
   assert.doesNotMatch(understoodPage.body, /<details class="message-job-details">/);
@@ -1926,7 +1927,10 @@ function jobUnderstandingCompletedRun(fixture) {
       opportunitySummary: "核心硬性要求只有可迁移证据，最高归入可投。",
       matchHighlights: ["简历中已有明确经历：企业知识库问答项目"],
       questionsToConfirm: ["请确认生产环境运维是否为日常核心职责。"],
-      continueCondition: "如果薪资和工作安排符合你的预期，并且生产环境运维不是日常核心职责，建议继续交流。"
+      continueCondition: "如果薪资和工作安排符合你的预期，并且生产环境运维不是日常核心职责，建议继续交流。",
+      resumeConnections: ["你在 OfferGo 中做过知识库问答链路、需求拆解和验收规则设计，这与岗位要交付的企业知识产品直接相关。"],
+      attentionPoint: "你有知识库问答项目经验，但生产环境运维是否属于日常核心职责还需要问清楚。",
+      recommendationNote: "如果运维工作只占辅助部分，这个岗位值得继续了解；如果需要长期承担生产值班，则与你的主要经历偏离较大。"
     };
     const summary = {
       status: "completed",

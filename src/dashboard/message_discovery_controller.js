@@ -36,6 +36,7 @@ const {
 } = require("../core/storage");
 const { listMessageInboxItems, getMessageInboxSyncState, listMessageEvents } = require("../application/message_inbox");
 const { getCandidateProfile } = require("../application/candidate_queries");
+const { getJob } = require("../application/job_queries");
 const {
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
@@ -550,6 +551,10 @@ function createMessageDiscoveryController(deps = {}) {
   function sanitizeResults(results) {
     if (!Array.isArray(results)) return [];
     return results.map((item) => {
+      const currentJob = getJob(db, Number(item?.jobId) || 0);
+      const currentDecision = currentJob?.analysis?.semanticStatus === "complete"
+        ? projectMessageDecisionCard(currentJob)
+        : null;
       const persisted = getPersistedCardJobIdentity(db, {
         cardId: Number(item?.cardId) || 0,
         jobId: Number(item?.jobId) || 0
@@ -591,7 +596,7 @@ function createMessageDiscoveryController(deps = {}) {
           ? item.contextSource
           : "",
         contextComplete: item?.contextComplete === true,
-        job: sanitizeJobUnderstanding(item?.job),
+        job: sanitizeJobUnderstanding(mergeCurrentDecisionNarrative(item?.job, currentDecision)),
         inboundMessages: sanitizeInboundMessages(item?.inboundMessages),
         draftQualityWarnings: sanitizeDraftQualityWarnings(item?.draftQualityWarnings),
         drafts,
@@ -1124,11 +1129,28 @@ function sanitizeJobUnderstanding(value) {
     matchHighlights: safeInlineList(job.matchHighlights, 3, 180),
     questionsToConfirm: safeInlineList(job.questionsToConfirm, 3, 180),
     continueCondition: safeInlineText(job.continueCondition, 300),
+    resumeConnections: safeInlineList(job.resumeConnections, 3, 360),
+    attentionPoint: safeInlineText(job.attentionPoint, 420),
+    recommendationNote: safeInlineText(job.recommendationNote, 420),
     workSchedule: safeInlineText(job.workSchedule, 180),
     salary: safeInlineText(job.salary, 80),
     opportunityVerdict: safeInlineText(job.opportunityVerdict, 80),
     opportunitySummary: safeInlineText(job.opportunitySummary, 180),
     availability: job.availability === "offline" ? "offline" : "unknown"
+  };
+}
+
+function mergeCurrentDecisionNarrative(savedValue, currentValue) {
+  const saved = savedValue && typeof savedValue === "object" && !Array.isArray(savedValue) ? savedValue : {};
+  const current = currentValue && typeof currentValue === "object" && !Array.isArray(currentValue) ? currentValue : {};
+  return {
+    ...saved,
+    roleSummary: current.roleSummary || saved.roleSummary,
+    companyBusiness: current.companyBusiness || saved.companyBusiness,
+    resumeConnections: Array.isArray(current.resumeConnections) && current.resumeConnections.length
+      ? current.resumeConnections : saved.resumeConnections,
+    attentionPoint: current.attentionPoint || saved.attentionPoint,
+    recommendationNote: current.recommendationNote || saved.recommendationNote
   };
 }
 

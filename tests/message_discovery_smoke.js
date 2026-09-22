@@ -128,6 +128,9 @@ function decisionCardProjectionSmoke() {
     matchHighlights: ["岗位方向与候选人的 RAG 项目经历一致"],
     questionsToConfirm: ["请确认：生产环境运维经验是否为必须条件。"],
     continueCondition: "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位不强制要求“生产环境运维经验”，或你能够接受这项要求。",
+    resumeConnections: [],
+    attentionPoint: "",
+    recommendationNote: "从现有经历看，岗位核心工作有直接对应，可以继续了解。",
     workSchedule: "工作安排未确认",
     salary: "15-25K·13薪",
     opportunityVerdict: "值得继续聊",
@@ -187,6 +190,65 @@ function decisionCardProjectionSmoke() {
   ]);
   assert.strictEqual(readableGuidance.continueCondition,
     "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位将“车企车云或智能网联AI中台落地经验”作为加分项，而不是必须条件。");
+
+  const naturalNarrative = projectMessageDecisionCard({
+    ...base,
+    analysis: {
+      ...base.analysis,
+      fitLevel: "C",
+      recommendation: "caution",
+      requirementMatches: [{
+        requirement: "需求分析与场景梳理能力",
+        state: "matched",
+        foundation: true,
+        central: true,
+        jdEvidence: "JD：具备良好的需求分析、场景梳理、范围拆解及结构化文档能力",
+        resumeEvidence: "简历：OfferGo项目将大模型分析拆为岗位理解与人岗匹配，对职责、核心要求逐项关联简历证据，结合结构化输出校验和明确条件规则生成分层建议。"
+      }, {
+        requirement: "制定可验证验收标准能力",
+        state: "matched",
+        foundation: true,
+        central: true,
+        jdEvidence: "JD：能够协助制定明确、可验证的验收标准",
+        resumeEvidence: "简历：OfferGo项目结合结构化输出校验和明确条件规则生成分层建议。"
+      }, {
+        requirement: "云原生与AI平台技术认知",
+        state: "transferable",
+        foundation: true,
+        central: true,
+        jdEvidence: "JD：对容器云、Kubernetes、云原生、AI 基础设施、模型部署及推理服务等技术方向有兴趣和基础认知",
+        resumeEvidence: "简历：技能列表包含 Docker。"
+      }, {
+        requirement: "熟悉RESTful API设计规范",
+        state: "transferable",
+        foundation: false,
+        central: false,
+        jdEvidence: "JD：熟悉 RESTful API 设计规范",
+        resumeEvidence: "简历：技能列表包含 FastAPI，但未直接提及 RESTful API 设计规范。"
+      }, {
+        requirement: "熟练运用AI工具优先",
+        state: "transferable",
+        foundation: false,
+        central: false,
+        jdEvidence: "JD：能熟练运用 AI 工具辅助调研与文档撰写者优先",
+        resumeEvidence: "简历：德勤咨询 ai应用工程师，参与 Agent 动态工具选择能力建设。"
+      }],
+      responsibilityMatches: [{
+        state: "transferable",
+        jdEvidence: "JD：跟进功能从需求、研发、测试到验收的完整闭环。",
+        resumeEvidence: "简历：OfferGo|AI 求职工作台项目，通过GitHub Actions执行回归检查，公开发布BOSS版Windows v1.3.2安装包与便携包，进入实际使用验收。"
+      }]
+    }
+  });
+  assert.deepStrictEqual(naturalNarrative.resumeConnections, [
+    "你在 OfferGo 中把大模型分析拆成岗位理解与人岗匹配，并用结构化校验和条件规则生成建议。这与岗位需要的需求分析和场景梳理、制定可验证的验收标准直接相关。",
+    "你在 OfferGo 中通过 GitHub Actions 做回归检查，并把安装包推进到实际使用验收。这能对应岗位从需求到验收的交付闭环。",
+    "你在德勤的 AI 应用工程师经历中，参与过 Agent 动态工具选择能力建设。这能说明你在用 AI 工具辅助调研和文档方面有实践基础。"
+  ]);
+  assert.strictEqual(naturalNarrative.attentionPoint,
+    "岗位会接触容器云、Kubernetes、云原生、AI 基础设施、模型部署及推理服务。你目前明确具备的相关基础主要是 Docker，简历里还没有直接体现这些平台的项目经验。沟通时最值得确认的是，公司需要入职后立即独立承担，还是接受有相关基础后再上手。");
+  assert.strictEqual(naturalNarrative.recommendationNote,
+    "如果公司接受你从 Docker 和现有 AI 应用经验逐步上手云原生与 AI 平台，这份岗位值得继续聊；如果要求入职后立即独立承担这部分工作，匹配度会明显下降。");
 
   const guarded = projectMessageDecisionCard({
     ...base,
@@ -420,6 +482,9 @@ async function uniqueCandidateAndPrivacySmoke() {
       "请确认：行业经验是否为必须条件。"
     ],
     continueCondition: "以下条件都满足时，建议继续交流：薪资 20-30K 在你的接受范围内；“团队技术栈”得到你可以接受的答复；岗位不强制要求“生产值班经验”，或你能够接受这项要求。",
+    resumeConnections: [],
+    attentionPoint: "",
+    recommendationNote: "从现有经历看，岗位核心工作有直接对应，可以继续了解。",
     workSchedule: "工作安排未确认",
     salary: "20-30K",
     opportunityVerdict: "可以了解，但要先确认关键问题",

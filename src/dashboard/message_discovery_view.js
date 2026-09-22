@@ -133,18 +133,15 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`
       : "");
-    const factRows = presented.knownFacts.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`).join("");
-    const detailRows = presented.details.map((item) => `<p class="line"><strong>${escapeHtml(item.label)}：</strong>${escapeHtml(item.value)}</p>`).join("");
-    const matchRows = presented.matchHighlights.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-    const questionRows = presented.questionsToConfirm.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-    const decisionCard = presented.opportunity || matchRows || questionRows || presented.continueCondition || factRows || detailRows
+    const factRows = presented.jobFacts.map((item) => `<span><strong>${escapeHtml(item.label)}：</strong>${escapeHtml(item.value)}</span>`).join("");
+    const connectionRows = presented.resumeConnections.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+    const decisionCard = presented.roleSummary || presented.businessContext || connectionRows || presented.attentionPoint || presented.recommendationNote || factRows
       ? `<section class="message-job-understanding">
-        ${presented.opportunity ? `<h3>这份岗位是否值得继续</h3><p class="message-opportunity"><strong>${escapeHtml(presented.opportunity.headline)}</strong>${presented.opportunity.reason ? `<span>${escapeHtml(presented.opportunity.reason)}</span>` : ""}</p>` : ""}
-        ${matchRows ? `<h3>为什么匹配</h3><ul class="message-decision-list message-match-list">${matchRows}</ul>` : ""}
-        ${questionRows ? `<h3>需要确认</h3><ul class="message-decision-list message-question-list">${questionRows}</ul>` : ""}
-        ${presented.continueCondition ? `<h3>什么情况下值得继续</h3><p class="message-continue-condition">${escapeHtml(presented.continueCondition)}</p>` : ""}
-        ${factRows ? `<h3>已确认信息</h3><dl class="message-known-facts">${factRows}</dl>` : ""}
-        ${detailRows ? `<h3>岗位职责与公司</h3><div class="message-job-details">${detailRows}</div>` : ""}
+        ${presented.roleSummary || presented.businessContext ? `<h3>这个岗位主要做什么</h3>${presented.roleSummary ? `<p class="message-role-summary">${escapeHtml(presented.roleSummary)}</p>` : ""}${presented.businessContext ? `<p class="message-business-context">${escapeHtml(presented.businessContext)}</p>` : ""}` : ""}
+        ${connectionRows ? `<h3>你的经历为什么相关</h3><ul class="message-decision-list message-resume-connections">${connectionRows}</ul>` : ""}
+        ${presented.attentionPoint ? `<h3>需要留意</h3><p class="message-attention-point">${escapeHtml(presented.attentionPoint)}</p>` : ""}
+        ${presented.recommendationNote ? `<h3>是否值得继续聊</h3><p class="message-recommendation-note">${escapeHtml(presented.recommendationNote)}</p>` : ""}
+        ${factRows ? `<p class="message-job-facts"><strong>岗位信息</strong>${factRows}</p>` : ""}
       </section>`
       : "";
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";

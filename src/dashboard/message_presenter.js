@@ -5,20 +5,43 @@ function presentMessageResult(result = {}) {
   const job = result.job || {};
   return {
     recruiterRequest: recruiterRequest(result),
-    opportunity: opportunity(job),
-    matchHighlights: safeList(job.matchHighlights, 3),
-    questionsToConfirm: safeList(job.questionsToConfirm, 3),
-    continueCondition: safeText(job.continueCondition),
-    knownFacts: compact([
+    roleSummary: plainRoleSummary(job.roleSummary),
+    businessContext: businessContext(job.companyBusiness),
+    resumeConnections: safeList(job.resumeConnections, 3),
+    attentionPoint: safeText(job.attentionPoint),
+    recommendationNote: safeText(job.recommendationNote),
+    jobFacts: compact([
       fact("薪资", job.salary),
       fact("地点", job.location),
       fact("工作安排", job.workSchedule)
-    ]),
-    details: compact([
-      fact("主要工作", job.roleSummary),
-      fact("公司业务", job.companyBusiness)
     ])
   };
+}
+
+function plainRoleSummary(value) {
+  const text = safeText(value);
+  if (!text) return "";
+  const match = text.match(/^负责(.+?)产品的竞品分析、需求分析与场景梳理，输出需求文档与验收标准，并协调跨团队推进功能从需求到验收的闭环交付[。.]?$/);
+  if (match) {
+    return `这个岗位主要围绕${readableSpacing(match[1])}做产品工作：先研究竞品和业务场景，把客户或内部需求整理成具体功能和验收标准，再跟进研发、测试等团队把功能真正落地。`;
+  }
+  return readableSpacing(text.replace(/闭环交付/g, "完整落地"));
+}
+
+function businessContext(value) {
+  const text = safeText(value);
+  if (!text || /暂未说明|待确认|未知/.test(text)) return "";
+  let match = text.match(/^JD 显示该岗位(?:服务于|属于)(.+?)(?:相关业务场景)?[。.]?$/);
+  if (match) return `业务方向：${readableSpacing(match[1].replace(/相关业务场景$/, ""))}。`;
+  return `业务方向：${readableSpacing(text.replace(/[。.]$/, ""))}。`;
+}
+
+function readableSpacing(value) {
+  return String(value || "")
+    .replace(/([\p{Script=Han}])([A-Za-z])/gu, "$1 $2")
+    .replace(/([A-Za-z0-9.])([\p{Script=Han}])/gu, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function recruiterRequest(result) {
@@ -38,36 +61,6 @@ function recruiterRequest(result) {
     general_communication: "HR 发来了新的沟通消息。",
     manual_review: "这条消息需要确认后再处理。"
   }[result.messageIntent] || "HR 发来了新的消息。";
-}
-
-function opportunity(job) {
-  if (job.availability === "offline") {
-    return { headline: "职位已下线", reason: "保留岗位资料，便于理解这段历史沟通。" };
-  }
-  const headline = safeText(job.opportunityVerdict);
-  const rawReason = safeText(job.opportunitySummary) || safeText(job.fitSummary);
-  const reason = rawReason || fitReason(job.fitLabel);
-  if (!headline && !reason) return null;
-  return {
-    headline: headline || fitHeadline(job.fitLabel),
-    reason
-  };
-}
-
-function fitHeadline(value) {
-  const label = String(value || "").trim();
-  if (/高|强/.test(label)) return "匹配度较高";
-  if (/中/.test(label)) return "可以继续了解";
-  if (/低|弱/.test(label)) return "建议谨慎判断";
-  return "可以继续了解";
-}
-
-function fitReason(value) {
-  const label = String(value || "").trim();
-  if (/高|强/.test(label)) return "现有经历与岗位要求较匹配。";
-  if (/中/.test(label)) return "有一定匹配，建议在沟通中确认关键条件。";
-  if (/低|弱/.test(label)) return "现有经历与岗位要求的匹配有限。";
-  return "";
 }
 
 function fact(label, value) {
