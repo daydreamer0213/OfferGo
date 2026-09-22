@@ -17,7 +17,10 @@ const view = presentMessageResult({
     fitLabel: "中",
     fitSummary: "核心硬性要求只有可迁移证据，最高归入可投。",
     opportunityVerdict: "值得继续聊",
-    opportunitySummary: "核心硬性要求只有可迁移证据，最高归入可投。"
+    opportunitySummary: "核心硬性要求只有可迁移证据，最高归入可投。",
+    matchHighlights: ["简历已明确体现：本科及以上学历", "已有相近经历：企业知识库产品开发"],
+    questionsToConfirm: ["请确认：生产环境运维经验是否为必须条件。"],
+    continueCondition: "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位不强制要求“生产环境运维经验”，或你能够接受这项要求。"
   }
 });
 
@@ -32,6 +35,13 @@ assert.deepStrictEqual(view.details, [
   { label: "主要工作", value: "负责企业知识库产品开发" },
   { label: "公司业务", value: "为企业提供知识管理服务" }
 ]);
+assert.deepStrictEqual(view.matchHighlights, [
+  "简历已明确体现：本科及以上学历",
+  "已有相近经历：企业知识库产品开发"
+]);
+assert.deepStrictEqual(view.questionsToConfirm, ["请确认：生产环境运维经验是否为必须条件。"]);
+assert.equal(view.continueCondition,
+  "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位不强制要求“生产环境运维经验”，或你能够接受这项要求。");
 assert(!JSON.stringify(view).includes("可迁移证据"));
 assert(!JSON.stringify(view).includes("最高归入可投"));
 assert(!JSON.stringify(view).includes("工作安排未确认"));

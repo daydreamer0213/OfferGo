@@ -1324,6 +1324,10 @@ function projectMessageDecisionCard(job = {}) {
     ? safeProjectionText(hardBoundaryReason(job) || savedBoundaryReason(analysis), 180)
     : decisionOpportunitySummary(analysis, fitSummary);
   const availability = job.availability === "offline" || analysis.sourceAvailability === "offline" ? "offline" : "unknown";
+  const salary = safeProjectionText(job.salary, 80);
+  const workSchedule = decisionWorkSchedule(analysis);
+  const matchHighlights = decisionMatchHighlights(analysis);
+  const questionsToConfirm = decisionQuestionsToConfirm(analysis);
   return {
     title: safeProjectionText(job.title, 160),
     company: safeProjectionText(job.company, 160),
@@ -1331,8 +1335,16 @@ function projectMessageDecisionCard(job = {}) {
     ...companyDecisionSummary(analysis),
     fitLabel,
     fitSummary,
-    workSchedule: decisionWorkSchedule(analysis),
-    salary: safeProjectionText(job.salary, 80),
+    matchHighlights,
+    questionsToConfirm,
+    continueCondition: decisionContinueCondition({
+      recommendation: analysis.recommendation,
+      salary,
+      workSchedule,
+      questionsToConfirm
+    }),
+    workSchedule,
+    salary,
     opportunityVerdict: availability === "offline"
       ? "职位已下线，以下资料用于理解这段沟通"
       : opportunityVerdict(analysis.recommendation),
@@ -1410,6 +1422,89 @@ function decisionOpportunitySummary(analysis, fitSummary) {
     (item) => item?.evidence ?? item
   )[0] || "";
   return ruleReason || qualityRisk || fitSummary;
+}
+
+function decisionMatchHighlights(analysis) {
+  const highlights = [];
+  for (const value of Array.isArray(analysis.fitReasons) ? analysis.fitReasons : []) {
+    const text = safeProjectionText(value, 180);
+    if (!text || /(?:核心硬性要求只有可迁移证据|最高归入|硬性要求缺口|决策桶|证据不足|等待补充|尚无足够|无法判断)/.test(text)) continue;
+    const direct = text.match(/^(.+?)[:：]有直接简历证据[。.]?$/);
+    const related = text.match(/^(.+?)[:：]有可迁移简历证据[。.]?$/);
+    const readable = direct
+      ? `简历中已有明确经历：${direct[1]}`
+      : related ? `已有相近经历：${related[1]}` : text;
+    if (!highlights.includes(readable)) highlights.push(readable);
+    if (highlights.length >= 3) break;
+  }
+  return highlights;
+}
+
+function decisionQuestionsToConfirm(analysis) {
+  const questions = [];
+  const add = (value) => {
+    const text = decisionQuestionText(value);
+    if (text && !questions.includes(text)) questions.push(text);
+  };
+  for (const value of Array.isArray(analysis.questionsToVerify) ? analysis.questionsToVerify : []) add(value);
+  for (const value of Array.isArray(analysis.roleGaps) ? analysis.roleGaps : []) add(value);
+  for (const value of Array.isArray(analysis.softGaps) ? analysis.softGaps : []) add(value);
+  for (const concern of Array.isArray(analysis.jobQuality?.concerns) ? analysis.jobQuality.concerns : []) {
+    const evidence = safeProjectionText(concern?.evidence ?? concern, 160).replace(/^JD[:：]\s*/, "");
+    if (evidence) add(`实际职责是否确实包括：${evidence}`);
+  }
+  return questions.slice(0, 3);
+}
+
+function decisionQuestionText(value) {
+  let text = safeProjectionText(value, 160).replace(/^JD[:：]\s*/, "");
+  if (!text || /^D\d+\|/.test(text)) return "";
+  let match = text.match(/^(.+?)(?:的资格|的)?信息待确认[。.]?$/);
+  if (match) {
+    const preferred = match[1].match(/^(.+?)优先$/);
+    return preferred
+      ? `请确认：${preferred[1]}是否只是加分项，而不是必须条件。`
+      : `请确认：${match[1]}是否为必须条件。`;
+  }
+  match = text.match(/^(.+?)(?:仍需|需要|有待|待)确认[。.]?$/);
+  if (match) return `请确认：${match[1]}是否为必须条件。`;
+  match = text.match(/^(.+?)目前只有可迁移证据[。.]?$/);
+  if (match) return `请确认岗位是否接受相近经历替代：${match[1]}。`;
+  match = text.match(/^(.+?)缺少直接简历证据[。.]?$/);
+  if (match) return `请确认：${match[1]}是否为必须条件，以及是否接受相近经历。`;
+  match = text.match(/^(.+?)尚未证明指定范围[。.]?$/);
+  if (match) return `请确认：${match[1]}的实际要求和使用深度。`;
+  if (/^确认/.test(text)) return `请${text.replace(/[。.]$/, "")}。`;
+  return `请确认：${text.replace(/[。.]$/, "")}。`;
+}
+
+function decisionContinueCondition({ recommendation, salary, workSchedule, questionsToConfirm }) {
+  const conditions = [];
+  if (salary) conditions.push(`薪资 ${salary} 在你的接受范围内`);
+  if (workSchedule && workSchedule !== "工作安排未确认") conditions.push(`工作安排“${workSchedule}”可以接受`);
+  for (const question of Array.isArray(questionsToConfirm) ? questionsToConfirm : []) {
+    const condition = decisionAcceptedCondition(question);
+    if (condition && !conditions.includes(condition)) conditions.push(condition);
+    if (conditions.length >= 3) break;
+  }
+  if (!conditions.length) conditions.push("岗位条件符合你的预期", "实际职责与上述描述一致");
+  const prefix = recommendation === "not_recommended"
+    ? "只有以下条件都满足时，才建议继续交流："
+    : "以下条件都满足时，建议继续交流：";
+  return `${prefix}${conditions.join("；")}。`;
+}
+
+function decisionAcceptedCondition(value) {
+  const text = safeProjectionText(value, 180);
+  let match = text.match(/^请确认：(.+?)是否只是加分项，而不是必须条件[。.]?$/);
+  if (match) return `岗位将“${match[1]}”作为加分项，而不是必须条件`;
+  match = text.match(/^请确认：(.+?)是否为必须条件[。.]?$/);
+  if (match) return `岗位不强制要求“${match[1]}”，或你能够接受这项要求`;
+  match = text.match(/^请确认岗位是否接受相近经历替代：(.+?)[。.]?$/);
+  if (match) return `岗位接受以相近经历替代“${match[1]}”`;
+  match = text.match(/^请确认：(.+?)是否为必须条件，以及是否接受相近经历[。.]?$/);
+  if (match) return `岗位不强制要求“${match[1]}”，或接受相近经历替代`;
+  return text ? `“${text.replace(/^请确认[:：]?/, "").replace(/[。.]$/, "")}”得到你可以接受的答复` : "";
 }
 
 function opportunityVerdict(value) {

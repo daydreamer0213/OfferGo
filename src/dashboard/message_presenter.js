@@ -6,6 +6,9 @@ function presentMessageResult(result = {}) {
   return {
     recruiterRequest: recruiterRequest(result),
     opportunity: opportunity(job),
+    matchHighlights: safeList(job.matchHighlights, 3),
+    questionsToConfirm: safeList(job.questionsToConfirm, 3),
+    continueCondition: safeText(job.continueCondition),
     knownFacts: compact([
       fact("薪资", job.salary),
       fact("地点", job.location),
@@ -80,6 +83,10 @@ function safeText(value) {
 
 function compact(values) {
   return values.filter(Boolean);
+}
+
+function safeList(value, limit) {
+  return compact((Array.isArray(value) ? value : []).map(safeText)).slice(0, limit);
 }
 
 module.exports = { presentMessageResult };

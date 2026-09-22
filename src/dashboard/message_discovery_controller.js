@@ -1121,12 +1121,22 @@ function sanitizeJobUnderstanding(value) {
     companyBusiness: safeInlineText(job.companyBusiness, 300),
     fitLabel: safeInlineText(job.fitLabel, 20),
     fitSummary: safeInlineText(job.fitSummary, 180),
+    matchHighlights: safeInlineList(job.matchHighlights, 3, 180),
+    questionsToConfirm: safeInlineList(job.questionsToConfirm, 3, 180),
+    continueCondition: safeInlineText(job.continueCondition, 300),
     workSchedule: safeInlineText(job.workSchedule, 180),
     salary: safeInlineText(job.salary, 80),
     opportunityVerdict: safeInlineText(job.opportunityVerdict, 80),
     opportunitySummary: safeInlineText(job.opportunitySummary, 180),
     availability: job.availability === "offline" ? "offline" : "unknown"
   };
+}
+
+function safeInlineList(value, itemLimit, textLimit) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => safeInlineText(item, textLimit))
+    .filter(Boolean)
+    .slice(0, itemLimit);
 }
 
 function safeDigest(value) {

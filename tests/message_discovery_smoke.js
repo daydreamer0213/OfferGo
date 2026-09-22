@@ -125,6 +125,9 @@ function decisionCardProjectionSmoke() {
     companyBusiness: "JD 显示该岗位服务于企业知识管理。",
     fitLabel: "高",
     fitSummary: "岗位方向与候选人的 RAG 项目经历一致",
+    matchHighlights: ["岗位方向与候选人的 RAG 项目经历一致"],
+    questionsToConfirm: ["请确认：生产环境运维经验是否为必须条件。"],
+    continueCondition: "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位不强制要求“生产环境运维经验”，或你能够接受这项要求。",
     workSchedule: "工作安排未确认",
     salary: "15-25K·13薪",
     opportunityVerdict: "值得继续聊",
@@ -163,6 +166,27 @@ function decisionCardProjectionSmoke() {
     }
   });
   assert.strictEqual(scheduled.workSchedule, "双休（周末双休）");
+
+  const readableGuidance = projectMessageDecisionCard({
+    ...base,
+    analysis: {
+      ...base.analysis,
+      fitReasons: [
+        "岗位方向证据不足，等待补充后重新判定。",
+        "本科及以上学历：有直接简历证据"
+      ],
+      roleGaps: [],
+      questionsToVerify: ["车企车云或智能网联AI中台落地经验优先的信息待确认"],
+      fitLevel: "C",
+      recommendation: "caution"
+    }
+  });
+  assert.deepStrictEqual(readableGuidance.matchHighlights, ["简历中已有明确经历：本科及以上学历"]);
+  assert.deepStrictEqual(readableGuidance.questionsToConfirm, [
+    "请确认：车企车云或智能网联AI中台落地经验是否只是加分项，而不是必须条件。"
+  ]);
+  assert.strictEqual(readableGuidance.continueCondition,
+    "以下条件都满足时，建议继续交流：薪资 15-25K·13薪 在你的接受范围内；岗位将“车企车云或智能网联AI中台落地经验”作为加分项，而不是必须条件。");
 
   const guarded = projectMessageDecisionCard({
     ...base,
@@ -389,6 +413,13 @@ async function uniqueCandidateAndPrivacySmoke() {
     companyBusiness: "JD 显示该岗位服务于企业交易系统交付。",
     fitLabel: "中",
     fitSummary: "Spring 项目证据匹配；生产值班经验待确认",
+    matchHighlights: ["Spring 项目证据匹配"],
+    questionsToConfirm: [
+      "请确认团队技术栈。",
+      "请确认：生产值班经验是否为必须条件。",
+      "请确认：行业经验是否为必须条件。"
+    ],
+    continueCondition: "以下条件都满足时，建议继续交流：薪资 20-30K 在你的接受范围内；“团队技术栈”得到你可以接受的答复；岗位不强制要求“生产值班经验”，或你能够接受这项要求。",
     workSchedule: "工作安排未确认",
     salary: "20-30K",
     opportunityVerdict: "可以了解，但要先确认关键问题",

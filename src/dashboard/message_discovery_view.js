@@ -135,27 +135,27 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       : "");
     const factRows = presented.knownFacts.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`).join("");
     const detailRows = presented.details.map((item) => `<p class="line"><strong>${escapeHtml(item.label)}：</strong>${escapeHtml(item.value)}</p>`).join("");
-    const decisionCard = presented.opportunity || factRows || detailRows
+    const matchRows = presented.matchHighlights.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+    const questionRows = presented.questionsToConfirm.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+    const decisionCard = presented.opportunity || matchRows || questionRows || presented.continueCondition || factRows || detailRows
       ? `<section class="message-job-understanding">
         ${presented.opportunity ? `<h3>这份岗位是否值得继续</h3><p class="message-opportunity"><strong>${escapeHtml(presented.opportunity.headline)}</strong>${presented.opportunity.reason ? `<span>${escapeHtml(presented.opportunity.reason)}</span>` : ""}</p>` : ""}
+        ${matchRows ? `<h3>为什么匹配</h3><ul class="message-decision-list message-match-list">${matchRows}</ul>` : ""}
+        ${questionRows ? `<h3>需要确认</h3><ul class="message-decision-list message-question-list">${questionRows}</ul>` : ""}
+        ${presented.continueCondition ? `<h3>什么情况下值得继续</h3><p class="message-continue-condition">${escapeHtml(presented.continueCondition)}</p>` : ""}
         ${factRows ? `<h3>已确认信息</h3><dl class="message-known-facts">${factRows}</dl>` : ""}
-        ${detailRows ? `<details class="message-job-details"><summary>岗位与资料详情</summary>${detailRows}</details>` : ""}
+        ${detailRows ? `<h3>岗位职责与公司</h3><div class="message-job-details">${detailRows}</div>` : ""}
       </section>`
       : "";
-    const hasVerifiedActionCard = ["boss", "zhaopin"].includes(result.platform) && (inboxItem?.timeline || [])
-      .some((event) => event.kind === "resume_request" && event.direction === "friend");
-    const manualSection = manualActions.map(() => `<div class="message-manual-action"><h4>发送简历</h4><p class="line">${hasVerifiedActionCard ? "OfferGo 已识别这项请求，可在本页确认处理。请在上方会话卡片中直接选择处理结果。" : "OfferGo 已识别这项请求；当前页面没有经过验证的平台操作按钮，本次不会自动执行。"}</p></div>`).join("");
     const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const missingFactSection = result.missingFactKey ? renderMissingFactForm(result, {
       profileId,
       escapeHtml,
       escapeAttr
     }) : "";
-    const nextSection = expired
+    const responseSection = expired
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
-      : `${manualSection}${missingFactSection}${replySection}`
-      || '<p class="line">这条消息暂时没有需要你处理的操作。</p>';
-    const actionCard = `<section class="message-next-step"><h3>HR 想让你做什么</h3><p class="message-request-summary">${escapeHtml(presented.recruiterRequest)}</p><h3>下一步</h3>${nextSection}</section>`;
+      : `${missingFactSection}${replySection}`;
     const sentForm = !expired && sendable && drafts && !durableDrafts.length
       ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">我已在 BOSS 手动发送</button></form>`
       : "";
@@ -169,7 +169,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
       list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
-      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${actionCard}${sentForm}${decisionCard}</section>`
+      detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${decisionCard}${responseSection}${sentForm}</section>`
     };
   });
   const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)).reduce((count, result) => count
