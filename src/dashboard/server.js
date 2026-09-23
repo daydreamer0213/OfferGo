@@ -218,6 +218,14 @@ const DASHBOARD_ASSETS = Object.freeze({
     contentType: "text/css; charset=utf-8",
     file: path.join(__dirname, "assets", "roleflow.css")
   },
+  "/assets/theme.css": {
+    contentType: "text/css; charset=utf-8",
+    file: path.join(__dirname, "assets", "theme.css")
+  },
+  "/assets/theme.js": {
+    contentType: "application/javascript; charset=utf-8",
+    file: path.join(__dirname, "assets", "theme.js")
+  },
   "/assets/workflow.js": {
     contentType: "application/javascript; charset=utf-8",
     file: path.join(__dirname, "assets", "workflow.js")
@@ -1276,7 +1284,7 @@ function createDashboardServer({
       if (req.method === "GET" && url.pathname === "/profile") return sendHtml(res, renderProfilePage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/resumes") return sendHtml(res, renderResumeVersionsPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/resume-file") return handleResumeFile(req, res, { db, root: dataRoot, searchParams: url.searchParams });
-      if (req.method === "GET" && url.pathname === "/plan") return sendHtml(res, renderPlanPage({ db, searchParams: url.searchParams, scanRuns, browserAuthority: frozenBrowserAuthority, messageFollowUpService: followUpService }));
+      if (req.method === "GET" && url.pathname === "/plan") return sendHtml(res, renderPlanPage({ db, searchParams: url.searchParams, scanRuns, browserAuthority: frozenBrowserAuthority }));
       if (req.method === "GET" && url.pathname === "/match-card") return sendHtml(res, renderMatchCardPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/workflow") return sendHtml(res, renderWorkflowDashboardPage({ db, searchParams: url.searchParams, logger, workflowHealth: resolvedWorkflowHealth }));
       if (req.method === "GET" && url.pathname === "/queue") return sendHtml(res, renderQueuePage({ db, searchParams: url.searchParams, logger, outcomeAnalyticsReader }));
@@ -5414,7 +5422,7 @@ const PLAN_EXPERIENCE_OPTIONS = PRODUCT_POLICY.searchPlan.experienceOptions;
 const PLAN_JOB_TYPE_OPTIONS = PRODUCT_POLICY.searchPlan.jobTypeOptions;
 const PLAN_DEGREE_OPTIONS = PRODUCT_POLICY.searchPlan.degreeOptions;
 
-function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { browserMode: "edge", cdpPort: null }, messageFollowUpService = null }) {
+function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { browserMode: "edge", cdpPort: null } }) {
   const workspacePreference = getWorkspacePlatformPreference(db);
   const site = searchParams.has('site')
     ? requestedSite(searchParams.get('site'))
@@ -5430,8 +5438,6 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
   const planRecord = requestedPlan?.profileId === profile.id ? requestedPlan : getActiveSearchPlan(db, profile.id);
   if (!planRecord) return renderErrorPage("当前候选人没有可编辑的本地筛选方案。", "/onboarding");
   const plan = normalizeSearchPlan(planRecord.plan || {}, profile.profile);
-  const dailyScan = resolveScanPolicy(plan, "daily");
-  const broadScan = resolveScanPolicy(plan, "broad");
   const scanDefaults = PRODUCT_POLICY.searchPlan.broadScanDefaults;
   const scanBounds = PRODUCT_POLICY.searchPlan.scanBounds;
   const bossCatalog = getPlatformFilterCatalog(db, "boss")?.catalog;
@@ -5442,9 +5448,6 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
     ? "筛选方案已保存。当前任务继续使用启动时的条件；新条件会在下一次创建任务时生效。"
     : searchParams.get("saved") ? "本地筛选方案已保存。" : searchParams.get("created") ? "已根据简历生成画像和本地筛选方案。开始前，请先在固定 BOSS 搜索页补充城市、地铁或商圈等条件，再回来开始一轮岗位发现。" : searchParams.get("matchCardConfirmed") ? "匹配偏好卡已确认。开始前，请先在固定 BOSS 搜索页补充城市、地铁或商圈等条件，再回来开始一轮岗位发现。" : "";
   const matchingContext = getCandidateMatchingContext(db, profile.id);
-  const followUpCount = messageFollowUpService
-    ? messageFollowUpService.listCandidates({ profileId: profile.id, planId: planRecord.id }).length
-    : 0;
   const viewModel = buildTodayViewModel({
     site,
     enabledPlatforms: workspacePreference?.platforms || [site],
@@ -5452,11 +5455,8 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
     profile,
     planRecord,
     plan,
-    dailyScan,
-    broadScan,
     scanDefaults,
     scanBounds,
-    dailyBCardLimit: boss.weightedCardLimit("B", dailyScan.maxCards),
     run: scanStatus(scanRuns, planRecord.id, db, site),
     resumableBatch: getLatestResumableBatch(db, { planId: planRecord.id, site }),
     validation: validateSearchPlan(plan, profile.profile),
@@ -5470,10 +5470,6 @@ function renderPlanPage({ db, searchParams, scanRuns, browserAuthority = { brows
     bossSalaryOptions: bossCatalog?.fields?.salary?.options?.map((option) => option.label) || [],
     selectedBossSalaryLanes,
     matchingContext,
-    followUp: followUpCount > 0 ? {
-      count: followUpCount,
-      href: `/follow-ups?profileId=${profile.id}&planId=${planRecord.id}`
-    } : null,
     confirmation: searchParams.get("dual") === "started"
       ? "BOSS 与智联已经同时开始；可切换平台查看各自进度。"
       : searchParams.get("dual") === "partial"

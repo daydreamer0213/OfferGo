@@ -48,7 +48,7 @@ async function main() {
     label: options.label,
     targetRevision: gitRevision(options.targetRoot),
     fixture: FIXTURE,
-    browser: { engine: "chromium", channel: options.browserChannel, headless: true },
+    browser: { engine: "chromium", channel: options.browserChannel, headless: true, theme: options.theme },
     viewports: VIEWPORTS,
     pages: [],
     errors: []
@@ -94,9 +94,20 @@ async function main() {
           state,
           planId,
           viewport,
+          theme: options.theme,
           label: options.label,
           outputDir: options.outputDir
         }));
+      }
+    }
+    if (options.theme === "dark") {
+      for (const [state, path] of [
+        ["settings", `/settings?planId=${ready.planId}`],
+        ["messages", `/messages?planId=${ready.planId}`],
+        ["interview", `/interview?planId=${ready.planId}`]
+      ]) {
+        result.pages.push(await auditPage({ browser, baseUrl, state, path,
+          viewport: VIEWPORTS[0], theme: options.theme, label: options.label, outputDir: options.outputDir }));
       }
     }
   } catch (error) {
@@ -111,7 +122,7 @@ async function main() {
   }
 }
 
-async function auditPage({ browser, baseUrl, state, planId, viewport, label, outputDir }) {
+async function auditPage({ browser, baseUrl, state, planId, path: pagePath = `/plan?planId=${planId}`, viewport, theme, label, outputDir }) {
   const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
   const page = await context.newPage();
   const consoleErrors = [];
@@ -132,7 +143,15 @@ async function auditPage({ browser, baseUrl, state, planId, viewport, label, out
   });
 
   try {
-    await page.goto(`${baseUrl}/plan?planId=${planId}`, { waitUntil: "networkidle" });
+    await page.goto(`${baseUrl}${pagePath}`, { waitUntil: "networkidle" });
+    if (theme === "dark") {
+      await page.locator("[data-theme-toggle]").click();
+      await page.reload({ waitUntil: "networkidle" });
+      if (await page.locator("html").getAttribute("data-theme") !== "dark") {
+        throw new Error("Dark theme did not persist after reload");
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+    }
     if (state === "ready") {
       await page.waitForFunction(() => {
         const button = document.querySelector("[data-browser-readiness-button]");
@@ -206,6 +225,8 @@ async function auditPage({ browser, baseUrl, state, planId, viewport, label, out
       }));
       return {
         viewport: { width: innerWidth, height: innerHeight },
+        acquisitionPreview: document.querySelector('[data-inherited-preview]')?.textContent || null,
+        discoveryScope: document.querySelector('[data-discovery-scope]')?.textContent || null,
         documentWidth: document.documentElement.scrollWidth,
         bodyWidth: document.body.scrollWidth,
         horizontalOverflow: document.documentElement.scrollWidth > innerWidth || document.body.scrollWidth > innerWidth,
@@ -236,7 +257,7 @@ async function auditPage({ browser, baseUrl, state, planId, viewport, label, out
     await page.screenshot({ path: path.join(outputDir, screenshot), fullPage: false });
     return {
       state,
-      path: `/plan?planId=${planId}`,
+      path: pagePath,
       screenshot,
       audit,
       consoleErrors,
@@ -302,7 +323,7 @@ function parseArgs(args, env) {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--help" || argument === "-h") return { help: true };
-    if (!["--target-root", "--label", "--output-dir", "--browser-channel"].includes(argument)) {
+    if (!["--target-root", "--label", "--output-dir", "--browser-channel", "--theme"].includes(argument)) {
       throw new Error(`Unknown argument: ${argument}`);
     }
     const value = args[index + 1];
@@ -315,11 +336,13 @@ function parseArgs(args, env) {
     targetRoot: path.resolve(values.get("--target-root") || env.ROLEFLOW_EVAL_TARGET_ROOT || process.cwd()),
     label: values.get("--label") || env.ROLEFLOW_EVAL_LABEL || "current",
     outputDir: path.resolve(values.get("--output-dir") || env.ROLEFLOW_EVAL_OUTPUT_DIR || path.join(process.cwd(), ".runtime", "today-dashboard-evidence")),
-    browserChannel: values.get("--browser-channel") || env.ROLEFLOW_EVAL_BROWSER_CHANNEL || "msedge"
+    browserChannel: values.get("--browser-channel") || env.ROLEFLOW_EVAL_BROWSER_CHANNEL || "msedge",
+    theme: values.get("--theme") || "light"
   };
 }
 
 function validateOptions(options) {
+  if (!["light", "dark"].includes(options.theme)) throw new Error("Theme must be light or dark.");
   if (!/^[a-zA-Z0-9._-]+$/.test(options.label)) throw new Error("Label may contain only letters, numbers, dot, underscore, and hyphen.");
   const serverPath = path.join(options.targetRoot, "src", "dashboard", "server.js");
   if (!fs.existsSync(serverPath)) throw new Error(`Target root does not contain src/dashboard/server.js: ${options.targetRoot}`);
@@ -362,6 +385,7 @@ function usage() {
     "  --label <name>             Artifact prefix and JSON filename",
     "  --output-dir <path>        Directory for JSON and viewport PNGs",
     "  --browser-channel <name>   Playwright Chromium channel (default: msedge)",
+    "  --theme <light|dark>      Theme to capture (default: light)",
     "  -h, --help                 Show this help",
     "",
     "Environment equivalents: ROLEFLOW_EVAL_TARGET_ROOT, ROLEFLOW_EVAL_LABEL,",

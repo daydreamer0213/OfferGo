@@ -1,0 +1,117 @@
+/* The light theme is the existing workbench. Only dark mode overrides it. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --rf-ink: #edf5f0;
+  --rf-ink-soft: #adbbb4;
+  --rf-canvas: #151c1a;
+  --rf-surface: #22302b;
+  --rf-rule: #3a4a42;
+  --rf-teal: #70c9ae;
+  --rf-teal-deep: #94dfc5;
+  --rf-orange: #efa65c;
+  --rf-blue: #94bcff;
+  --rf-red: #ff9a8b;
+  --rf-amber: #f5c579;
+  --rf-mist: #293f35;
+}
+
+.theme-toggle { align-self:stretch; margin-top:12px; padding:8px 10px; min-height:40px; color:var(--rf-ink-soft); background:transparent; border:1px solid var(--rf-rule); text-align:left; font-size:12px; font-weight:600; }
+.theme-toggle:hover { color:var(--rf-ink); background:var(--rf-surface); border-color:var(--rf-rule); }
+.app-sidebar { box-sizing:border-box; max-height:100vh; overflow-y:auto; }
+.app-sidebar .primary-nav { min-height:0; }
+@media(max-width:760px) {
+  .app-sidebar { max-height:none; overflow:visible; }
+  .theme-toggle { align-self:center; margin:0 0 0 10px; white-space:nowrap; }
+}
+
+:root[data-theme="dark"] .app-sidebar { background:#1d2925; }
+:root[data-theme="dark"] .sidebar-mark,
+:root[data-theme="dark"] .app-sidebar .nav-item[aria-current=page] { background:var(--rf-surface); }
+:root[data-theme="dark"] .sidebar-context { background:#283830; }
+:root[data-theme="dark"] .app-sidebar .nav-item { color:#b7c8bf; }
+:root[data-theme="dark"] .app-sidebar .nav-item:hover { background:#2a3a32; color:var(--rf-ink); }
+:root[data-theme="dark"] .runtime-status { background:var(--rf-surface); }
+:root[data-theme="dark"] .runtime-status[data-state=local] .runtime-signal { background:var(--rf-teal); }
+:root[data-theme="dark"] :is(.button,.button-link,button):not(.secondary):not(.quiet):not(.theme-toggle) { color:#14231d; }
+:root[data-theme="dark"] :is(.button,.button-link,button):not(.secondary):not(.quiet):not(.theme-toggle):hover { color:#14231d; }
+:root[data-theme="dark"] :is(.button.secondary,button.secondary,.button.quiet) { color:var(--rf-teal); background:var(--rf-surface); border-color:var(--rf-rule); }
+:root[data-theme="dark"] .button.quiet { background:transparent; border-color:transparent; }
+:root[data-theme="dark"] :is(input,select,textarea) { color:var(--rf-ink); background:#1b2822; border-color:#52665a; }
+:root[data-theme="dark"] :is(input,select,textarea)::placeholder { color:#9aaba1; }
+:root[data-theme="dark"] .action-panel,
+:root[data-theme="dark"] .today-priority,
+:root[data-theme="dark"] .workflow-focus .workflow-primary { background:#1c342d; }
+:root[data-theme="dark"] .action-panel .button:not(.quiet) { color:#172421; }
+:root[data-theme="dark"] .action-panel .button.quiet { color:#edf5f0; border-color:#657e70; }
+:root[data-theme="dark"] .early-scan-dialog { background:var(--rf-surface); }
+:root[data-theme="dark"] :is(.status,.chip) { color:var(--rf-ink-soft); background:#2a3932; }
+:root[data-theme="dark"] .status.good { color:var(--rf-teal); background:#274337; }
+:root[data-theme="dark"] .status.waiting { color:var(--rf-amber); background:#3c321f; }
+:root[data-theme="dark"] .status.danger { color:var(--rf-red); background:#3f2827; }
+:root[data-theme="dark"] :is(.alert,.communication-resolution,.interview-retries,.resume-opt-create-note,.resume-opt-integrity) { background:#392d20; }
+:root[data-theme="dark"] .alert.good { background:#293f35; }
+:root[data-theme="dark"] :is(.scan-error,.workflow-inline-error,.workflow-stale,.workflow-alert,.communication-progress [data-communication-error],.resume-opt-integrity[data-state="error"]) { background:#3f2926; color:var(--rf-ink); }
+:root[data-theme="dark"] :is(.progress,.workflow-primary-grid) { background:#354a3e; }
+
+:root[data-theme="dark"] :is(
+  .workflow-stat,.workflow-live-card,.workflow-stop-confirmation,.workflow-stop,
+  .workflow-focus .workflow-primary-field,.workflow-track,.workflow-task-list,
+  .communication-progress,.communication-resolution .button-row button,.communication-discard,
+  .message-controls .secondary,.message-action-group>h2 span,.message-action-group>summary span,
+  .message-list-item:has(input:checked),.message-bubble,.message-attention-point,.message-recommendation-note,
+  .mode-choice,.matching-card-link,.resume-opt-binding>div,.resume-opt-suggestion,
+  .interview-binding>div,.interview-current,.interview-report-grid section,.interview-report-details section,
+  .interview-turn,.interview-retry-form,.resume-opt-full-editor textarea,.resume-opt-ledger-item,
+  .interview-mode-picker label
+) { background:var(--rf-surface); }
+:root[data-theme="dark"] :is(
+  .communication-ledger section,.message-freshness>div,.message-action-group>h2,.message-action-group>summary,
+  .message-job-details,.message-draft,.message-job-understanding,.message-timeline,
+  .plan-scope>div,.acquisition-panel,.shared-screening,.local-screening,
+  .resume-opt-job,.resume-opt-compare>div,.resume-opt-compare>div:last-child,
+  .interview-answer,.interview-turn-review,.resume-opt-selected-jobs article,
+  .resume-opt-full-editor textarea[readonly],.interview-job-panel
+) { background:#1c2c25; }
+:root[data-theme="dark"] :is(
+  .message-inbound,.message-bubble--self,.message-send-batch,.today-follow-up,
+  .follow-up-prior,.health-diagnosis,.resume-opt-suggestion-head details li,
+  .resume-opt-ledger-item details li,.interview-question-evidence
+) { background:#284438; }
+:root[data-theme="dark"] :is(.message-draft textarea,.message-list-item:hover,.message-bubble--platform) { background:#293730; }
+:root[data-theme="dark"] .message-bubble--self { border-color:#496958; }
+:root[data-theme="dark"] .message-bubble--platform { color:var(--rf-ink-soft); }
+:root[data-theme="dark"] .today-follow-up:hover { background:#315044; }
+:root[data-theme="dark"] :is(.workflow-sticky,.resume-opt-savebar) { background:#18251f; }
+:root[data-theme="dark"] :is(.message-send-batch,.message-job-understanding,.message-timeline,.health-platform,.feedback-overview,.card,.panel) { border-color:var(--rf-rule); }
+:root[data-theme="dark"] .message-source { color:var(--rf-teal); }
+:root[data-theme="dark"] .health-summary>div { background:var(--rf-mist); }
+:root[data-theme="dark"] :is(.settings-current,.settings-field small,.settings-next-hint,.field-help,.hint) { color:var(--rf-ink-soft); }
+:root[data-theme="dark"] .settings-recommended { color:var(--rf-ink); background:#1c2c25; border-color:var(--rf-rule); }
+:root[data-theme="dark"] :is(.settings-status,.settings-status.verified) { color:var(--rf-ink-soft); background:#1c2c25; }
+:root[data-theme="dark"] .settings-secondary { color:var(--rf-teal); background:var(--rf-surface); border-color:var(--rf-teal); }
+:root[data-theme="dark"] .setup-warning { color:var(--rf-ink); background:#392d20; }
+
+/* Native and legacy controls share a readable surface in either theme. */
+:root[data-theme="dark"] :is(.button.secondary,button.secondary,.workflow-stop,.communication-discard) { color:var(--rf-teal); }
+:root[data-theme="dark"] :is(.workflow-control-group[data-control-group="paused"] .button-link,form[action="/api/communication-control"] button[name="action"][value="discard"]) { background:var(--rf-surface); color:var(--rf-teal); }
+
+/* A short, readable description of the current job-discovery run. */
+.today-discovery-plan { margin:0 0 18px; overflow:hidden; }
+.today-discovery-plan .card-head { align-items:baseline; }
+.today-discovery-plan .card-head h2 { margin:0; }
+.today-discovery-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 30px; padding:20px 24px; }
+.today-discovery-grid>div { min-width:0; }
+.today-discovery-grid .today-discovery-wide { grid-column:1/-1; }
+.today-discovery-label { display:block; margin-bottom:6px; color:var(--rf-ink-soft); font-size:12px; }
+.today-discovery-grid strong { display:block; color:var(--rf-ink); font-size:15px; font-weight:600; line-height:1.5; overflow-wrap:anywhere; }
+.today-discovery-keywords { display:flex; flex-wrap:wrap; gap:7px; }
+.today-discovery-keyword { display:inline-flex; padding:5px 10px; color:var(--rf-teal-deep); background:var(--rf-mist); border:1px solid var(--rf-rule); border-radius:6px; font-size:13px; font-weight:600; }
+.today-discovery-grid small { display:block; margin-top:7px; color:var(--rf-ink-soft); font-size:12px; }
+.today-discovery-empty { color:var(--rf-ink-soft); }
+.today-discovery-foot { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px; border-top:1px solid var(--rf-rule); color:var(--rf-ink-soft); font-size:12px; line-height:1.5; }
+.today-discovery-foot a { flex:none; font-weight:700; }
+@media(max-width:760px) {
+  .today-discovery-grid { grid-template-columns:1fr; padding:18px; }
+  .today-discovery-grid .today-discovery-wide { grid-column:auto; }
+  .today-discovery-foot { align-items:flex-start; flex-direction:column; padding:14px 18px; }
+}

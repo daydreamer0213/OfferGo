@@ -401,8 +401,9 @@ let server;
   assert.doesNotMatch(blockedPage.body, /data-browser-readiness-button/);
 
   const planBefore = await getText(baseUrl, `/plan?planId=${saved.planId}`);
-  assert.match(planBefore.body, /今日成功沟通<\/span><strong class="metric-value">0\s*<small>\/\s*70/);
-  assert.match(planBefore.body, /下一轮目标 35/);
+  assert.match(planBefore.body, /这轮会怎么找/);
+  assert.match(planBefore.body, /今天的进度/);
+  assert.match(planBefore.body, /最多 3 轮/);
   assert.match(planBefore.body, /<button[^>]*data-browser-readiness-button[^>]*disabled>/);
   assert.match(planBefore.body, /data-browser-readiness-button/);
   assert.match(planBefore.body, /data-browser-base-disabled="false"/);
@@ -416,7 +417,7 @@ let server;
     "inherited mode must not show generated-search city validation as a blocker"
   );
   assert.doesNotMatch(planBefore.body, /上午|下午/);
-  assert.match(planBefore.body, /高级信息与维护/);
+  assert.match(planBefore.body, /更多找岗工具/);
 
   const portableScanSaved = seedProfile(db);
   const portableScanPlan = db.prepare("SELECT plan_json FROM search_plans WHERE id = ?").get(portableScanSaved.planId);
@@ -1251,9 +1252,10 @@ let server;
   assert.match(completedPage.body, /本轮成功<\/dt><dd>30<\/dd>/);
 
   const planAfter = await getText(baseUrl, `/plan?planId=${saved.planId}`);
-  assert.match(planAfter.body, /今日成功沟通<\/span><strong class="metric-value">30\s*<small>\/\s*70/);
-  assert.match(planAfter.body, /下一轮目标 40/);
-  assert.match(planAfter.body, /详情读取预算剩余 355，搜索页面预算剩余 58/);
+  assert.match(planAfter.body, /今天的进度/);
+  assert.doesNotMatch(planAfter.body, /今日成功沟通/);
+  assert.match(planAfter.body, /最多 3 轮/);
+  assert.match(planAfter.body, /补全岗位详情/);
   assert.strictEqual((planAfter.body.match(/name="action" value="start"/g) || []).length, 1);
   assert.match(planAfter.body, /data-early-scan-dialog/);
   assert.match(planAfter.body, /name="confirmEarlyScan" value="1"/);

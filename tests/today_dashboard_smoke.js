@@ -310,7 +310,7 @@ function assertRendererIsPureAndEscapesHtml() {
     profile: { id: 7, displayName: `<img src=x onerror=alert(1)>`, profile: { candidate: { name: "候选人", city: "上海", targetTitles: ["AI 应用"] }, skills: [], projects: [] } },
     planRecord: { id: 12, profileId: 7 },
     plan: { name: `<script>bad()</script>`, cities: ["上海"], directions: ["AI 应用"], keywords: [], experience: [], jobTypes: [], degrees: [], salary: {}, scan: {} },
-    workflowState: { activeRun: null, successfulToday: 0, dailyTarget: 70, inventory: [], slotsUsed: 0, maxRuns: 3, remainingBudget: { details: 360, pages: 60 }, nextPlan: { targetSuccessCount: 35 } },
+    workflowState: { activeRun: null, successfulToday: 0, dailyTarget: 70, inventory: [], slotsUsed: 0, maxRuns: 3, remainingBudget: { details: 360, pages: 60 }, nextPlan: { targetSuccessCount: 35, selectedKeywords: [{ word: "产品经理" }, { word: "需求分析" }] } },
     validation: { valid: true, errors: [], warnings: [] },
     planDependency: { stale: false, matchingCardRequired: false },
     bossRuntimeBlock: null,
@@ -335,13 +335,22 @@ function assertRendererIsPureAndEscapesHtml() {
   assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
   assert.strictEqual((html.match(/data-today-primary="true"/g) || []).length, 1, "a standalone renderer must emit one primary CTA without a DB or browser");
   assert.match(html, /class="[^"]*today-priority/);
-  assert.match(html, /class="[^"]*today-cycle/);
-  assert.match(html, /class="[^"]*today-feedback-summary/);
+  assert.match(html, /class="[^"]*today-discovery-plan/);
   assert.match(html, /id="today-discovery"/);
-  assert.match(html, /有 2 个岗位可以考虑跟进/);
-  assert.match(html, /href="\/follow-ups\?profileId=7&amp;planId=12"/);
+  assert.match(html, /这轮会怎么找/);
+  assert.match(html, /这轮实际搜索的关键词/);
+  assert.match(html, /产品经理/);
+  assert.match(html, /需求分析/);
+  assert.match(html, /最多 3 轮/);
+  assert.match(html, /至少间隔 2 小时/);
+  assert.match(html, /调整找岗范围/);
+  assert.match(html, /更多找岗工具/);
+  assert.doesNotMatch(html, /有 2 个岗位可以考虑跟进/);
+  assert.doesNotMatch(html, /href="\/follow-ups\?profileId=7&amp;planId=12"/);
+  const main = html.match(/<main id="main-content" class="today-main">([\s\S]*?)<\/main>/)?.[1] || "";
+  assert.doesNotMatch(main, /沟通|打招呼/, "today task content must stay focused on finding jobs");
   assert.doesNotMatch(html, /不阻塞继续投递/);
-  assert.strictEqual((html.match(/class="metric"/g) || []).length, 3, "first screen must keep only three result metrics");
+  assert.doesNotMatch(html, /今日成功沟通|today-feedback-summary/, "today must show only job-discovery work");
   assert.doesNotMatch(html, /class="action-meta"/, "primary action must not repeat the same metrics");
   assert.doesNotMatch(html, /当前数据安全/, "no-blocker state must not render a reassurance card");
   assert.doesNotMatch(html, /现在卡在哪里/, "no-blocker state must not render an empty blocker section");
@@ -421,7 +430,7 @@ function assertScanStatusLabels() {
     run: { state: "running", kind: "daily", error: "" }
   });
   assert.strictEqual(viewModel.run.label, "正在执行日常扫描");
-  assert.match(renderTodayPage(viewModel), /扫描状态：<\/strong>正在执行日常扫描/);
+  assert.match(renderTodayPage(viewModel), /当前状态：<\/strong>正在执行日常扫描/);
 }
 
 async function assertBrowserReadsAreSerialized() {
@@ -499,11 +508,10 @@ async function assertReadyTodayPage(baseUrl, saved, privateFileNameContacts) {
     assert(!page.body.includes(secret), `today plan page must not expose filename contact: ${secret}`);
   }
   assert.match(page.body, /简历文件\.txt/);
-  assert.match(page.body, /<h1[^>]*>今天先把高质量机会推进到人工确认。<\/h1>/);
+  assert.match(page.body, /<h1[^>]*>今日任务<\/h1>/);
   assert.match(page.body, />今日工作台<\/p>/);
   assert.match(page.body, /class="[^"]*today-priority/);
-  assert.match(page.body, /class="[^"]*today-cycle/);
-  assert.match(page.body, /class="[^"]*today-feedback-summary/);
+  assert.match(page.body, /class="[^"]*today-discovery-plan/);
   assert.match(page.body, /aria-current="page">今日任务<\/a>/);
   assert.match(page.body, /data-today-primary="true"[^>]*name="action"[^>]*value="start"/);
   assert.match(page.body, /name="planId" value="\d+"/);
@@ -519,7 +527,8 @@ async function assertReadyTodayPage(baseUrl, saved, privateFileNameContacts) {
   assert.match(page.body, /本地筛选方案/);
   assert.match(page.body, /平台采集方式/);
   assert.match(page.body, /OfferGo 本地精筛/);
-  assert.strictEqual((page.body.match(/class="metric"/g) || []).length, 3);
+  assert.match(page.body, /今天的进度/);
+  assert.doesNotMatch(page.body, /今日成功沟通/);
   assert.doesNotMatch(page.body, /当前数据安全/);
   assert.doesNotMatch(page.body, /现在卡在哪里/);
   assert.doesNotMatch(page.body, /class="action-meta"/);
@@ -578,8 +587,8 @@ async function assertInheritedPreview(baseUrl, db, saved, { resolutionCount, set
 async function assertPersistedScanStatusPage(baseUrl, saved) {
   const page = await getText(baseUrl, `/plan?planId=${saved.planId}`);
   assert.strictEqual(page.status, 200);
-  assert.match(page.body, /扫描状态：<\/strong>日常扫描已完成/);
-  assert.doesNotMatch(page.body, /扫描状态：<\/strong>尚未运行/);
+  assert.match(page.body, /当前状态：<\/strong>日常扫描已完成/);
+  assert.doesNotMatch(page.body, /当前状态：<\/strong>尚未运行/);
 }
 
 async function assertBlockedTodayPage(baseUrl, saved) {
@@ -607,7 +616,7 @@ function assertPlanAndAdvancedContracts(html) {
   for (const name of ["profileId", "planId", "name", "acquisitionMode", "cities", "experience", "jobTypes", "degrees", "salaryMinK", "salaryMaxK", "salaryMode", "workSchedulePreference", "directions", "keywords", "excludeWords", "hardExcludes", "maxCards", "maxDetailTotal", "browserPageBudget"]) {
     assert.match(html, new RegExp(`name="${name}"`), `plan form must retain ${name}`);
   }
-  assert.match(html, /高级信息与维护/);
+  assert.match(html, /更多找岗工具/);
   assert.match(html, /<form[^>]*action="\/api\/scan"/);
   for (const kind of ["daily", "broad", "refresh", "activity"]) assert.match(html, new RegExp(`name="scanKind" value="${kind}"`));
   assert.match(html, /href="\/queue\?planId=\d+"/);

@@ -60,6 +60,8 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
   const page = renderPage({ title: `<title>`, body: "<main>body</main>", scripts: ["<script>window.roleflowShellTest=true</script>"] });
   assert.match(page, /<title>&lt;title&gt;<\/title>/);
   assert.match(page, /<link rel="stylesheet" href="\/assets\/roleflow\.css">/);
+  assert.match(page, /<link rel="stylesheet" href="\/assets\/theme\.css">/);
+  assert.match(page, /data-offergo-theme-bootstrap/);
   assert.match(page, /<script>window\.roleflowShellTest=true<\/script>/);
 
   fs.mkdirSync(smokeDir, { recursive: true });
@@ -74,6 +76,16 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
     assert.match(stylesheet.body, /:root/);
     assert.match(stylesheet.body, /\.app-sidebar\{/,
       "the emitted stylesheet must include the desktop sidebar");
+
+    const themeCss = await getText(baseUrl, "/assets/theme.css");
+    assert.strictEqual(themeCss.status, 200);
+    assert.match(themeCss.contentType, /^text\/css(?:;|$)/);
+    assert.match(themeCss.body, /data-theme="dark"/);
+
+    const themeClient = await getText(baseUrl, "/assets/theme.js");
+    assert.strictEqual(themeClient.status, 200);
+    assert.match(themeClient.contentType, /^application\/javascript(?:;|$)/);
+    assertThemeClient(themeClient.body);
 
     const runtimeAsset = await getText(baseUrl, "/assets/runtime.js");
     assert.strictEqual(runtimeAsset.status, 200, "the shared runtime client must be served");
@@ -252,6 +264,40 @@ function assertSharedFrame(markup, href, name, current = true) {
   assert.match(markup, /data-runtime-message/);
   assert.match(markup, /data-runtime-recover[^>]*hidden/);
   assert.strictEqual((markup.match(/src="\/assets\/runtime\.js"/g) || []).length, 1, `${name} must load one runtime client`);
+  assert.strictEqual((markup.match(/data-theme-toggle/g) || []).length, 1, `${name} must offer one theme switch`);
+  assert.strictEqual((markup.match(/src="\/assets\/theme\.js"/g) || []).length, 1, `${name} must load one theme client`);
+}
+
+function assertThemeClient(source) {
+  const stored = new Map();
+  function loadPage() {
+    const button = {
+      textContent: "",
+      attributes: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+      addEventListener(name, callback) { this[name] = callback; }
+    };
+    const document = {
+      documentElement: { dataset: { theme: stored.get("offergo:theme") || "light" } },
+      querySelector(selector) { return selector === "[data-theme-toggle]" ? button : null; }
+    };
+    const localStorage = {
+      getItem(key) { return stored.get(key) || null; },
+      setItem(key, value) { stored.set(key, value); }
+    };
+    vm.runInNewContext(source, { document, localStorage }, { filename: "theme.js" });
+    return { button, document };
+  }
+  const first = loadPage();
+  assert.strictEqual(first.button.textContent, "深色模式");
+  first.button.click();
+  assert.strictEqual(first.document.documentElement.dataset.theme, "dark");
+  assert.strictEqual(stored.get("offergo:theme"), "dark");
+  const second = loadPage();
+  assert.strictEqual(second.button.textContent, "浅色模式");
+  second.button.click();
+  assert.strictEqual(second.document.documentElement.dataset.theme, "light");
+  assert.strictEqual(stored.get("offergo:theme"), "light");
 }
 
 async function assertRuntimeClient(source, site = "boss") {

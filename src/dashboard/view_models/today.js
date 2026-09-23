@@ -55,16 +55,22 @@ function buildTodayViewModel(input = {}) {
     },
     heading: {
       eyebrow: "今日工作台",
-      title: "今天先把高质量机会推进到人工确认。",
-      lede: "OfferGo 会保留完整 JD 与匹配证据；只有你确认清单后才会进入沟通。",
+      title: "今日任务",
+      lede: "先看清这轮会找什么，再开始。",
       meta: [`本地筛选方案 #${planId}`, plan.name || "未命名方案"],
       status: dependency.stale || dependency.matchingCardRequired ? "方案待确认" : "方案可用"
     },
     primary: buildPrimaryAction({ activeRun, nextPlan, dependency, runtimeBlock, profileId, planId, startBlocked, site }),
-    followUp: Number(input.followUp?.count) > 0 ? {
-      count: Math.floor(Number(input.followUp.count)),
-      href: String(input.followUp.href || `/follow-ups?profileId=${profileId}&planId=${planId}`)
-    } : null,
+    discovery: {
+      keywords: (activeRun?.keywords?.length ? activeRun.keywords : nextPlan?.selectedKeywords || [])
+        .map((item) => String(item?.word || item || "").trim()).filter(Boolean),
+      savedKeywords: (plan.keywords || []).map((item) => String(item?.word || item || "").trim()).filter(Boolean),
+      slotsUsed: Number(workflow.slotsUsed || 0),
+      maxRuns: Number(workflow.maxRuns || PRODUCT_POLICY.operations.workflow.maxRunsPerDay),
+      active: Boolean(activeRun),
+      nextRunAt: String(nextPlan?.nextRunAt || ""),
+      inventoryCount: Array.isArray(workflow.inventory) ? workflow.inventory.length : Number(workflow.inventoryCount || 0)
+    },
     metrics: {
       successfulToday: Number(workflow.successfulToday || 0),
       dailyTarget: Number(workflow.dailyTarget || 0),
@@ -90,10 +96,7 @@ function buildTodayViewModel(input = {}) {
     },
     scan: {
       disabled: Boolean(scanBlocked),
-      resumableBatchId: input.resumableBatch?.id || null,
-      daily: input.dailyScan || {},
-      broad: input.broadScan || {},
-      dailyBCardLimit: Number(input.dailyBCardLimit || 0)
+      resumableBatchId: input.resumableBatch?.id || null
     },
     form: {
       plan,
@@ -132,10 +135,9 @@ function buildTodayViewModel(input = {}) {
   vm.runtime.site = vm.page.site;
   if (vm.page.site === 'zhaopin') {
     vm.page.todayPath += '&site=zhaopin';
-    vm.heading.title = '发现并分析岗位，再选择合适的岗位打招呼。';
-    vm.heading.lede = '智联找岗阶段保持只读：保留完整 JD 与匹配分析，供你查看、比较，再由你选择岗位。';
+    vm.heading.title = '今日任务';
+    vm.heading.lede = '先确认智联的搜索范围，再开始找岗。';
     vm.heading.meta[0] += ' · 智联';
-    vm.followUp = null;
     vm.form.acquisition.mode = 'inherited';
     vm.form.acquisition.inheritedPreview.summary = input.platformContext
       ? (input.platformContext.filterSummary || []).join('；') || '已保存：当前页面未额外限制条件'
@@ -163,7 +165,7 @@ function buildPrimaryAction({ activeRun, nextPlan, dependency, runtimeBlock, pro
     detail: "如果本轮结果不足，可以提前开始。"
   };
   if (nextPlan?.errorCode) return { type: "notice", label: "今日任务暂不能继续", status: workflowBlockedMessage(nextPlan.errorCode, nextPlan), detail: workflowShortfallLabel(nextPlan.shortfallReason || nextPlan.errorCode) };
-  return { type: "form", label: "开始一轮岗位发现", status: startBlocked ? "等待前置条件恢复" : "可以开始新一轮", detail: "使用已保存条件发现一批岗位。", disabled: Boolean(startBlocked) };
+  return { type: "form", label: "开始一轮岗位发现", status: startBlocked ? "等待前置条件恢复" : "准备开始一轮找岗", detail: "按下方范围搜索岗位；开始后可查看进度。", disabled: Boolean(startBlocked) };
 }
 
 function buildBlockers({ dependency, runtimeBlock, validation, nextPlan, profileId, site = "boss" }) {

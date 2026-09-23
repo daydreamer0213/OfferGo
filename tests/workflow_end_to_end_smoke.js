@@ -122,10 +122,9 @@ let server;
   );
 
   const planPage = await getText(baseUrl, `/plan?planId=${saved.planId}`);
-  assert.match(
-    planPage.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
-    /70\s*\/\s*70/
-  );
+  assert.match(planPage.body, /这轮会怎么找/);
+  assert.match(planPage.body, /今天的进度/);
+  assert.doesNotMatch(planPage.body, /今日成功沟通/);
   const third = await postForm(baseUrl, "/api/workflow-run", {
     planId: saved.planId,
     browserMode: "edge",

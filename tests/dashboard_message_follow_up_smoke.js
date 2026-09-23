@@ -87,8 +87,7 @@ async function main() {
 
     const today = await request(base, `/plan?profileId=${fixture.profileId}&planId=${fixture.planId}`);
     assert.equal(today.status, 200);
-    assert.match(today.body, /有 1 个岗位可以考虑跟进/);
-    assert.match(today.body, new RegExp(`/follow-ups\\?profileId=${fixture.profileId}&amp;planId=${fixture.planId}`));
+    assert.doesNotMatch(today.body, /有 1 个岗位可以考虑跟进/);
 
     let page = await request(base, `/follow-ups?profileId=${fixture.profileId}&planId=${fixture.planId}`);
     assert.equal(page.status, 200);
@@ -135,6 +134,7 @@ async function main() {
 
     const messages = await request(base, `/messages?profileId=${fixture.profileId}`);
     assert.equal(messages.status, 200);
+    assert.match(messages.body, new RegExp(`/follow-ups\\?profileId=${fixture.profileId}&amp;planId=${fixture.planId}`));
     assert.doesNotMatch(messages.body, /跟进草稿测试文本/, "follow-up drafts must not appear as an HR inbound reply");
 
     followUpService.listCandidates = () => [];
