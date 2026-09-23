@@ -62,6 +62,8 @@ async function main() {
   factPolicySmoke();
   decisionCardProjectionSmoke();
   await uniqueCandidateAndPrivacySmoke();
+  await unmatchedGreetingSmoke();
+  await unavailableGreetingNeedsAnalysisSmoke();
   await visibleCountersSmoke();
   await answerMemoryRefreshSmoke();
   await messageDraftQualitySmoke();
@@ -1501,6 +1503,101 @@ async function messageSelectionSmoke() {
   assert.strictEqual(summary.status, "completed");
   assert.strictEqual(summary.processed, 1);
   assert.strictEqual(modelCalls, 1);
+}
+
+async function unmatchedGreetingSmoke() {
+  const rejected = createFixture({
+    suffix: "unmatched-greeting",
+    title: "Senior Advertising Optimizer",
+    analysis: { semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2, fitLevel: "no_fit" }
+  });
+  const conversationKey = safeDigest(["conversation", "0"]);
+  const oldDraft = recordMessageReplyDrafts(db, {
+    profileId: rejected.profileId, cardId: rejected.card.id, jobId: rejected.jobId,
+    messageGroupKey: safeDigest(["old-unmatched-greeting"]),
+    questionSummary: "旧回复草稿", messageIntent: "interest_check", messageCategory: "other",
+    messages: ["不应再发送的草稿"], createdAt: NOW
+  })[0];
+  let modelCalls = 0;
+  const summary = await runBossMessageDiscovery({
+    db, profileId: rejected.profileId,
+    reader: fakeReader([selectedConversation({ title: rejected.title, messageId: "123456789012991" })]),
+    classifyMessageGroup: async () => { modelCalls += 1; return classification(); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.status, "completed");
+  assert.strictEqual(modelCalls, 0, "an unsuitable greeted job must not generate a reply");
+  assert.deepStrictEqual(summary.results, []);
+  assert.strictEqual(getMessageInboxItem(db, { profileId: rejected.profileId, platform: "boss", conversationKey }), null);
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: rejected.profileId }).length, 0);
+  assert.strictEqual(getMessageReplyDraft(db, { profileId: rejected.profileId, draftId: oldDraft.id }).closedAt !== null, true);
+  assert.strictEqual(listMessageEvents(db, { profileId: rejected.profileId, platform: "boss", conversationKey }).length > 0, true,
+    "silently filtered conversations must retain their local message history");
+
+  const caution = createFixture({
+    suffix: "caution-greeting", title: "Stretch Role",
+    analysis: { semanticStatus: "complete", recommendation: "caution", recommendationSchemaVersion: 2 }
+  });
+  let cautionCalls = 0;
+  const cautionResult = await runBossMessageDiscovery({
+    db, profileId: caution.profileId,
+    reader: fakeReader([selectedConversation({ title: caution.title, messageId: "123456789012992" })]),
+    classifyMessageGroup: async () => { cautionCalls += 1; return classification(); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(cautionCalls, 1, "caution jobs still need normal message handling");
+  assert.strictEqual(cautionResult.results.length, 1);
+
+  const historical = createFixture({
+    suffix: "historical-unmatched-greeting", title: "Historic Advertising Optimizer",
+    analysis: { semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }
+  });
+  const historicalKey = safeDigest(["historical-unmatched-greeting"]);
+  recordMessageReplyDrafts(db, {
+    profileId: historical.profileId, cardId: historical.card.id, jobId: historical.jobId,
+    messageGroupKey: safeDigest(["historical-unmatched-draft"]),
+    questionSummary: "旧回复草稿", messageIntent: "interest_check", messageCategory: "other",
+    messages: ["旧草稿"], createdAt: NOW
+  });
+  upsertMessageInboxItem(db, {
+    profileId: historical.profileId, platform: "boss", conversationKey: historicalKey,
+    jobId: historical.jobId, cardId: historical.card.id, lastActivityAt: NOW,
+    lastDirection: "friend", positionTitle: historical.title, company: historical.company,
+    actionGroup: "needs_action", actionCode: "reply", observedAt: NOW
+  });
+  await runBossMessageDiscovery({
+    db, profileId: historical.profileId, reader: fakeReader([]),
+    classifyMessageGroup: async () => { throw new Error("old unsuitable job must not be classified again"); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  const oldItem = getMessageInboxItem(db, { profileId: historical.profileId, platform: "boss", conversationKey: historicalKey });
+  assert.strictEqual(oldItem.actionGroup, "done");
+  assert.strictEqual(oldItem.reasonCode, "MESSAGE_JOB_NOT_RECOMMENDED");
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: historical.profileId }).length, 0);
+}
+
+async function unavailableGreetingNeedsAnalysisSmoke() {
+  const fixture = createFixture({ suffix: "unavailable-greeting", title: "Unknown Greeting Role" });
+  const conversationKey = safeDigest(["conversation", "0"]);
+  let modelCalls = 0;
+  const summary = await runBossMessageDiscovery({
+    db, profileId: fixture.profileId,
+    reader: fakeReader([selectedConversation({ title: fixture.title, messageId: "123456789012993" })]),
+    resolveJobContext: async ({ target }) => ({
+      cardId: fixture.card.id, card: fixture.card, threadKey: target.conversationKey,
+      job: { source: "boss", description: "", analysis: {
+        provider: "message-discovery-unavailable", semanticStatus: "unavailable", sourceAvailability: "offline"
+      } }
+    }),
+    classifyMessageGroup: async () => { modelCalls += 1; return classification(); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.status, "completed");
+  assert.strictEqual(modelCalls, 0, "a greeting without a job-fit conclusion must not generate a reply");
+  assert.deepStrictEqual(summary.results, []);
+  assert.strictEqual(getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey }), null);
+  assert.strictEqual(listUnresolvedMessageDiscoveryItems(db, { profileId: fixture.profileId })
+    .some((item) => item.reasonCode === "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE"), true);
 }
 
 async function semanticRejectionSmoke() {

@@ -52,7 +52,7 @@ function createMessageDiscoveryJobContextResolver({
         planId: plan.id,
         sourceId: localSourceId
       });
-    if (known?.contextComplete) {
+    if (known?.contextComplete && known.analysis?.semanticStatus === "complete") {
       const analyzed = await ensureAnalyzedContext(plan, known, signal);
       return bindContext(analyzed, target?.conversationKey, "local_cache", now());
     }

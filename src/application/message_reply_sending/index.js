@@ -11,6 +11,7 @@ const {
 const { recordReplyConfirmedSent, recordFollowUpSent } = require("../../core/candidate_progress");
 const { replyDraftWasEdited } = require("../../core/message_reply_learning");
 const { assessMessageDraftQuality } = require("../../core/message_draft_quality");
+const { isClearlyUnmatchedMessageCard } = require("../message_discovery/run");
 const { buildMessageDraftQualityContext } = require("../message_draft_quality");
 
 const TERMINAL_BATCH_STATUSES = new Set(["completed", "stopped", "interrupted"]);
@@ -38,6 +39,12 @@ function createMessageReplySendingService({
   function confirmBatch(input = {}) {
     const profileId = positiveInteger(input.profileId, "profileId");
     const items = confirmItems(input.items);
+    for (const item of items) {
+      const draft = getMessageReplyDraft(db, { profileId, draftId: item.draftId });
+      if (draft && isClearlyUnmatchedMessageCard(db, { profileId, cardId: draft.cardId, jobId: draft.jobId })) {
+        throw sendingError("MESSAGE_REPLY_SEND_JOB_NOT_RECOMMENDED", "这份岗位当前不建议继续沟通，旧草稿已不能发送。");
+      }
+    }
     assertCurrentModelDraftFacts(profileId, items);
     const snapshot = createMessageReplySendBatch(db, {
       profileId,

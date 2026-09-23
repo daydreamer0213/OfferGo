@@ -3,7 +3,9 @@ const {
   getProgressCardById,
   findMessageDiscoveryJobContext,
   recordDiscoveredMessageGroupClassification,
-  recordRecruiterRejection
+  recordRecruiterRejection,
+  recordProgressEvent,
+  derivedProgressIdempotencyKey
 } = require("./candidate_progress");
 const {
   getCandidateProfile,
@@ -19,7 +21,7 @@ const {
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
 const { MANUAL_ONLY_CATEGORIES } = require("./message_reply_contract");
-const { isExplicitRecruiterRejection } = require("./message_routing_policy");
+const { isExplicitRecruiterRejection, isClearlyUnmatchedMessageJob } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
@@ -126,7 +128,8 @@ async function runBossMessageDiscovery({
   randomFn = Math.random,
   onStatus = () => {},
   messageInbox,
-  messageTimeline
+  messageTimeline,
+  isUnmatchedCard = () => false
 }) {
   const {
     upsertMessageInboxItem,
@@ -151,6 +154,10 @@ async function runBossMessageDiscovery({
     now,
     messageInbox: { listMessageInboxItems, markMessageInboxItemDone },
     timeline
+  });
+  reconcileUnmatchedMessageHistory({
+    db, profileId, platform: source, now,
+    isUnmatchedCard, messageInbox: { listMessageInboxItems, markMessageInboxItemDone }
   });
   const runStartedAt = now();
   const actionCutoffAt = new Date(Date.parse(runStartedAt) - MESSAGE_ACTION_WINDOW_MS).toISOString();
@@ -527,6 +534,49 @@ async function runBossMessageDiscovery({
         randomFn,
         signal
       });
+      continue;
+    }
+    if (resolved.job.analysis?.semanticStatus !== "complete") {
+      const reasonCode = "MESSAGE_DISCOVERY_JOB_ANALYSIS_INCOMPLETE";
+      const identity = selectedIdentity(selectedSnapshot);
+      const inboundMessages = unresolvedInboundMessages(source, selectedSnapshot);
+      clearSelectedSnapshot(selectedSnapshot);
+      recordUnresolvedMessageDiscoveryItem(db, {
+        profileId, platform: source, conversationKey: target.conversationKey,
+        previewDigest: target.previewDigest, previewKind: target.previewKind,
+        reasonCode, observedAt: now(), identity,
+        ...(inboundMessages.length && validInboundIdentity(source, selectedTarget) ? {
+          inboundMessages, sourceJobId: selectedTarget.sourceJobId, lastMessageId: selectedTarget.lastMessageId
+        } : {})
+      });
+      recordLocalInboxFailure(db, {
+        profileId, platform: source, target, reasonCode, observedAt: now(), deleteMessageInboxItem
+      });
+      continuedFailures.push({ conversationKey: target.conversationKey, reasonCode });
+      retained = unresolvedSummary(db, profileId, source);
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+      continue;
+    }
+    if (isClearlyUnmatchedMessageJob(resolved.job)) {
+      const occurredAt = now();
+      immediateTransaction(db, () => {
+        recordUnmatchedMessageJob(db, {
+          profileId, platform: source, conversationKey: target.conversationKey,
+          cardId: resolved.cardId, occurredAt
+        });
+        commitBaseline(db, profileId, target, source, occurredAt);
+        clearUnresolvedMessageDiscoveryItem(db, {
+          profileId, platform: source, conversationKey: target.conversationKey
+        });
+        deleteMessageInboxItem(db, {
+          profileId, platform: source, conversationKey: target.conversationKey
+        });
+      });
+      clearSelectedSnapshot(selectedSnapshot);
+      results = results.filter((item) => item.cardId !== resolved.cardId);
+      processed += 1;
+      retained = unresolvedSummary(db, profileId, source);
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
       continue;
     }
     let incoming;
@@ -1886,6 +1936,38 @@ function normalizedCoverage(value, rows, cutoffAt) {
 function newestActivityAt(rows) {
   const timestamps = (rows || []).map((row) => Date.parse(String(row?.lastActivityAt || ""))).filter(Number.isFinite);
   return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+}
+
+function recordUnmatchedMessageJob(db, { profileId, platform, conversationKey, cardId, occurredAt }) {
+  recordProgressEvent(db, {
+    cardId,
+    idempotencyKey: derivedProgressIdempotencyKey(["message-job-unmatched", platform, conversationKey]),
+    type: "message_job_unmatched",
+    actor: "system",
+    summary: "岗位匹配结果为不建议，消息不进入待办",
+    metadata: { platform, threadKey: conversationKey, reasonCode: "MESSAGE_JOB_NOT_RECOMMENDED" },
+    occurredAt
+  });
+  closeMessageReplyDrafts(db, { profileId, cardId, closedAt: occurredAt });
+}
+
+function reconcileUnmatchedMessageHistory({ db, profileId, platform, now, isUnmatchedCard, messageInbox }) {
+  const items = messageInbox.listMessageInboxItems(db, { profileId })
+    .filter((item) => item.platform === platform && item.actionGroup !== "done" && Number(item.cardId) > 0);
+  for (const item of items) {
+    if (!isUnmatchedCard(db, { profileId, cardId: item.cardId, jobId: item.jobId })) continue;
+    const occurredAt = now();
+    immediateTransaction(db, () => {
+      recordUnmatchedMessageJob(db, {
+        profileId, platform, conversationKey: item.conversationKey,
+        cardId: item.cardId, occurredAt
+      });
+      messageInbox.markMessageInboxItemDone(db, {
+        profileId, platform, conversationKey: item.conversationKey,
+        reasonCode: "MESSAGE_JOB_NOT_RECOMMENDED", resolvedAt: occurredAt
+      });
+    });
+  }
 }
 
 function reconcileTerminalMessageHistory({

@@ -23,7 +23,8 @@ function createZhaopinMessageJobContextResolver({
     const sourceId = zhaopinSourceId(target?.sourceJobId);
     let jobTarget = liveReaders ? await verifySelectedTarget(sourceId, selected, signal) : null;
     let context = findContext(plan.id, sourceId);
-    if (context?.contextComplete && context.source === "zhaopin") {
+    if (context?.contextComplete && context.source === "zhaopin"
+      && context.analysis?.semanticStatus === "complete") {
       if (liveReaders) {
         assertSameActivePlan(plan.id);
         jobTarget = await verifySelectedTarget(sourceId, selected, signal);

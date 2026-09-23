@@ -36,6 +36,20 @@ const db = storage.openDb(":memory:");
       onExecutionError(error) { executionErrors.push(error); }
     });
 
+    const unsuitable = seedDraft(db, owner, "unsuitable", "不应发送", now);
+    saveContext(db, owner, unsuitable, "378917037748769", now);
+    const unsuitableBatchId = storage.createBatch(db, "boss", "unsuitable", "message reply test", {
+      profileId: owner.profileId, searchPlanId: owner.planId
+    });
+    db.prepare("UPDATE jobs SET batch_id = ?, analysis_json = ? WHERE id = ?")
+      .run(unsuitableBatchId, JSON.stringify({ semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }), unsuitable.jobId);
+    assert.throws(
+      () => service.confirmBatch({ profileId: owner.profileId,
+        items: [{ draftId: unsuitable.draft.id, revision: unsuitable.draft.revision }] }),
+      (error) => error.code === "MESSAGE_REPLY_SEND_JOB_NOT_RECOMMENDED"
+    );
+    assert.equal(executed.length, 0, "an unsuitable historical draft must never start a send batch");
+
     const first = seedDraft(db, owner, "first", "模型初稿", now);
     saveContext(db, owner, first, "378917037748770", now);
     const edited = storage.saveMessageReplyDraftEdit(db, {

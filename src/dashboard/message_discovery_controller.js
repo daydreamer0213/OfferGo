@@ -42,6 +42,7 @@ const {
 } = require("../application/message_inbox");
 const { getCandidateProfile } = require("../application/candidate_queries");
 const { getJob } = require("../application/job_queries");
+const { isClearlyUnmatchedMessageCard } = require("../application/message_discovery/run");
 const {
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
@@ -563,7 +564,10 @@ function createMessageDiscoveryController(deps = {}) {
 
   function sanitizeResults(results) {
     if (!Array.isArray(results)) return [];
-    return results.map((item) => {
+    return results.filter((item) => !isClearlyUnmatchedMessageCard(db, {
+      cardId: item?.cardId, jobId: item?.jobId
+    }))
+      .map((item) => {
       const currentJob = getJob(db, Number(item?.jobId) || 0);
       const currentDecision = currentJob?.analysis?.semanticStatus === "complete"
         ? projectMessageDecisionCard(currentJob)
@@ -827,7 +831,9 @@ function createMessageDiscoveryController(deps = {}) {
       cardId,
       cardDrafts,
       contextsByCard.get(cardId) || []
-    ));
+    )).filter((item) => !isClearlyUnmatchedMessageCard(db, {
+      profileId, cardId: item.cardId, jobId: item.jobId
+    }));
     return {
       ...emptyStatus(profileId),
       status: "completed",
@@ -1298,7 +1304,11 @@ function clearResolvedMessageDiscoveryRuntimeBlock(db, {
 function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = new Date() } = {}) {
   const current = now instanceof Date ? now : new Date(now);
   const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
-  const items = listMessageInboxItems(db, { profileId }).map((item) => presentInboxItem({
+  const items = listMessageInboxItems(db, { profileId })
+    .filter((item) => !isClearlyUnmatchedMessageCard(db, {
+      profileId, cardId: item.cardId, jobId: item.jobId
+    }))
+    .map((item) => presentInboxItem({
     ...item,
     timeline: projectActionableTimeline(item.platform, listMessageEvents(db, {
       profileId,

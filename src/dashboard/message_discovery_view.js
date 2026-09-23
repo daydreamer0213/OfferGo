@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const { listIncomingContacts } = require("../application/funnel_analysis");
 const { getSearchPlan, getLatestSearchPlan } = require("../application/candidate_queries");
 const { isCompetitionPromotion } = require("../core/message_routing_policy");
+const { isClearlyUnmatchedMessageCard } = require("../application/message_discovery/run");
 const { presentMessageResult } = require("./message_presenter");
 
 function renderMessageDiscoveryPage({ db, searchParams, controller, replySendController = null, messageActionController = null, messageReplyActionToken = "", helpers }) {
@@ -72,7 +73,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const showPageReason = Boolean(reason);
   const phaseNotice = messageDiscoveryPhaseText(status);
   const contactKey = String(searchParams.get("contact") || "").trim();
-  const incomingContacts = listIncomingContacts(db, { profileId });
+  const incomingContacts = listIncomingContacts(db, { profileId })
+    .filter((item) => !isClearlyUnmatchedMessageCard(db, {
+      profileId, cardId: item.cardId, jobId: item.jobId
+    }));
   const requestedContact = contactKey ? incomingContacts.find((item) => item.key === contactKey) : null;
   const contactMatchesScope = Boolean(requestedContact);
   const resultPending = (result) => Boolean((result.drafts || []).some((draft) => Number(draft?.id) > 0)

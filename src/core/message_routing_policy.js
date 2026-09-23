@@ -1,5 +1,9 @@
 "use strict";
 
+const { decisionState } = require("./scoring");
+const { decisionHardBlockers } = require("./model_contract");
+const { normalizeRecommendationTier } = require("./decision_policy");
+
 function isCompetitionPromotion(message = {}) {
   if (message?.metadata?.noticeKind === "competition_promotion") return true;
   if (String(message?.kind || message?.contentKind || "") !== "platform_notice") return false;
@@ -24,4 +28,13 @@ function isExplicitRecruiterRejection(messages = []) {
   });
 }
 
-module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection };
+function isClearlyUnmatchedMessageJob(job = {}) {
+  const analysis = job?.analysis || {};
+  if (analysis.semanticStatus !== "complete") return false;
+  return decisionState(job) === "blocked"
+    || decisionHardBlockers(analysis).length > 0
+    || analysis.jobQuality?.level === "risk"
+    || normalizeRecommendationTier(analysis.recommendation, Number(analysis.recommendationSchemaVersion || 1)) === "not_recommended";
+}
+
+module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection, isClearlyUnmatchedMessageJob };

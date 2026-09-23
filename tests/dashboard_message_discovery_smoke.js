@@ -87,6 +87,7 @@ main().catch((error) => {
 async function main() {
   liveBossRuntimeRecoverySmoke();
   durableDraftRecoverySmoke();
+  unmatchedStoredMessageViewSmoke();
   await durableMissingFactRecoverySmoke();
   await pendingDurableAnalysisRepairSmoke();
   await controllerBrowserAuthoritySmoke();
@@ -1730,8 +1731,8 @@ async function leaseConstraintSmoke(database, root, dbPath, logger, profileId) {
   }
 }
 
-function createFixture() {
-  const saved = saveProfileAnalysis(db, {
+function createFixture(sourceId = "dashboard-message-job", database = db) {
+  const saved = saveProfileAnalysis(database, {
     profile: {
       candidate: {
         name: "测试候选人",
@@ -1764,14 +1765,14 @@ function createFixture() {
       bossActiveDays: 3
     }
   });
-  const batchId = createBatch(db, "boss", "AI应用开发", "dashboard messages", {
+  const batchId = createBatch(database, "boss", "AI应用开发", "dashboard messages", {
     profileId: saved.profileId,
     searchPlanId: saved.planId,
     filterSnapshot: { execution: { scanKind: "daily" } }
   });
-  const jobId = upsertJob(db, {
+  const jobId = upsertJob(database, {
     source: "boss",
-    sourceId: "dashboard-message-job",
+    sourceId,
     keyword: "AI应用开发",
     title: "AI应用开发工程师",
     company: "测试公司",
@@ -1814,7 +1815,7 @@ function createFixture() {
       }
     }
   }, batchId);
-  const card = ensureProgressCard(db, {
+  const card = ensureProgressCard(database, {
     profileId: saved.profileId,
     planId: saved.planId,
     jobId,
@@ -2474,6 +2475,58 @@ async function messageDiscoveryPollingSmoke(markup) {
   assert.strictEqual(terminalPoll.reloads(), 1);
   assert.strictEqual(terminalPoll.storedSelection(), null,
     "a completed sync must reset stale selection so the refreshed list and detail start on the same first item");
+}
+
+function unmatchedStoredMessageViewSmoke() {
+  const localDb = openDb(":memory:");
+  try {
+  const fixture = createFixture("dashboard-unmatched-message-job", localDb);
+  const now = "2026-09-18T08:00:00.000Z";
+  const conversationKey = `sha256:${"f".repeat(64)}`;
+  const messageGroupKey = `sha256:${"e".repeat(64)}`;
+  const draft = recordMessageReplyDrafts(localDb, {
+    profileId: fixture.profileId, cardId: fixture.card.id, jobId: fixture.jobId,
+    messageGroupKey, questionSummary: "测试旧消息", messageIntent: "interest_check",
+    messageCategory: "other", messages: ["旧草稿不应显示"], createdAt: now
+  })[0];
+  saveMessageInboundContext(localDb, {
+    profileId: fixture.profileId, cardId: fixture.card.id, platform: "boss", messageGroupKey,
+    conversationKey, sourceJobId: "boss:dashboard-unmatched-message-job", lastMessageId: "378917037748798",
+    messageIntent: "interest_check", messageCategory: "other",
+    inboundMessages: [{ kind: "text", text: "继续聊吗" }], manualActions: [], createdAt: now, updatedAt: now
+  });
+  upsertMessageInboxItem(localDb, {
+    profileId: fixture.profileId, platform: "boss", conversationKey,
+    jobId: fixture.jobId, cardId: fixture.card.id, lastActivityAt: now,
+    lastDirection: "friend", positionTitle: "AI应用开发工程师", company: "测试公司",
+    actionGroup: "needs_action", actionCode: "reply", observedAt: now
+  });
+  localDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?")
+    .run(JSON.stringify({ semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }), fixture.jobId);
+  const controller = createMessageDiscoveryController({ db: localDb });
+  const state = controller.pageState(fixture.profileId);
+  assert.strictEqual(state.results.length, 0, "historical unsuitable drafts must not appear in results");
+  assert.strictEqual(state.inbox.counts.total, 0, "historical unsuitable jobs must not appear in the action inbox");
+  const html = renderMessageDiscoveryPage({
+    db: localDb, searchParams: new URLSearchParams({ profileId: fixture.profileId }), controller,
+    helpers: { getCandidateProfile: () => ({}), renderFramedPage: ({ content }) => content,
+      escapeHtml: String, escapeAttr: String, newProgressRequestKey: () => "unmatched-fixture" }
+  });
+  assert(!html.includes("旧草稿不应显示"));
+  assert(!html.includes(`message-draft-${draft.id}`));
+  assert(!html.includes('class="message-list-item"'), "classified historical contact must also stay hidden");
+  const otherPlanId = Number(localDb.prepare(`INSERT INTO search_plans(
+    profile_id, name, plan_json, is_active, created_at, updated_at
+  ) VALUES (?, 'other plan', '{}', 0, ?, ?)`).run(fixture.profileId, now, now).lastInsertRowid);
+  const otherBatchId = createBatch(localDb, "boss", "other", "other plan", {
+    profileId: fixture.profileId, searchPlanId: otherPlanId
+  });
+  localDb.prepare("UPDATE jobs SET batch_id = ? WHERE id = ?").run(otherBatchId, fixture.jobId);
+  assert.strictEqual(controller.pageState(fixture.profileId).inbox.counts.total, 1,
+    "a decision from another search plan must not silently hide this plan's message");
+  } finally {
+    localDb.close();
+  }
 }
 
 async function durableMissingFactRecoverySmoke() {
