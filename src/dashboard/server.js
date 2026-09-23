@@ -1474,8 +1474,12 @@ function createDashboardServer({
               const context = await resolveLiveZhaopinContext({ db, plan, logger, ...frozenBrowserAuthority, browserFactory, requireSaved: false });
               if (context.site !== site || context.searchScope?.site !== site) throw appError('ZHAOPIN_SEARCH_SCOPE_CHANGED', '来源不一致，请重新打开智联搜索页。', { statusCode: 409 });
               const template = canonicalizeZhaopinSearchTemplate(context.searchTemplate.url);
-              savePlatformSearchContext(db, { planId: plan.id, site, searchTemplate: template, filterSummary: context.platformPolicy.filterSummary || [] });
-              return { site, summary: (context.platformPolicy.filterSummary || []).join('；') || '当前页面未额外限制条件', message: '智联条件已保存，可开始本轮。' };
+              const filterSummary = context.platformPolicy.filterSummary || [];
+              const stored = getPlatformSearchContext(db, { planId: plan.id, site });
+              const changed = !stored || stored.searchTemplate?.url !== template.url
+                || JSON.stringify(stored.filterSummary) !== JSON.stringify(filterSummary);
+              if (changed) savePlatformSearchContext(db, { planId: plan.id, site, searchTemplate: template, filterSummary });
+              return { site, changed, summary: filterSummary.join('；') || '当前页面未额外限制条件', message: changed ? '搜索条件已更新，下一轮将使用新条件。' : '搜索条件没有变化。' };
             });
             return sendJson(res, 200, result);
           } catch (error) {
@@ -3037,7 +3041,7 @@ async function prepareZhaopinSearch({ db, plan, browser, signal = null }) {
       throwIfZhaopinOpenAborted(signal);
     } else canonicalizeZhaopinSearchTemplate(search.url);
     throwIfZhaopinOpenAborted(signal);
-    return { site: 'zhaopin', message: '已找到智联搜索页。设置原生条件后，点击“保存智联条件”。' };
+    return { site: 'zhaopin', message: '已找到智联搜索页。设置好条件后回到 OfferGo，系统会自动更新。' };
   }
   if (dashboards.length !== 1) throw appError('ZHAOPIN_OPENER_REQUIRED', '请在当前浏览器保留一个 OfferGo 今日任务页，再准备智联搜索页。', { statusCode: 409 });
   const opener = dashboards[0];
@@ -3072,7 +3076,7 @@ async function prepareZhaopinSearch({ db, plan, browser, signal = null }) {
     if (['ZHAOPIN_SEARCH_NAVIGATION_TIMEOUT', 'ZHAOPIN_SEARCH_PREPARE_CANCELLED'].includes(error?.code)) throw error;
     throw appError('ZHAOPIN_BACKGROUND_OPEN_FAILED', '未能确认后台同窗打开，已停止。请检查浏览器工作区后重试。', { statusCode: 409, cause: error });
   }
-  return { site: 'zhaopin', message: '智联搜索页已在同窗后台准备。设置条件后，点击“保存智联条件”。' };
+  return { site: 'zhaopin', message: '智联搜索页已在同窗后台准备。设置好条件后回到 OfferGo，系统会自动更新。' };
 
   async function waitForPreparedTab({ findTarget, previousUrl, expectedUrl, windowId, allowInitialMissing }) {
     const deadline = nowFn() + deadlineMs;
@@ -3179,7 +3183,7 @@ async function prepareZhaopinSearch({ db, plan, browser, signal = null }) {
 
 async function resolveLiveZhaopinContext({ db, plan, matchingContext, logger, browserMode = 'edge', cdpPort = null, browserFactory = createDashboardBrowser, requireSaved = true }) {
   const stored = getPlatformSearchContext(db, { planId: plan.id, site: 'zhaopin' });
-  if (requireSaved && !stored) throw appError('ZHAOPIN_SEARCH_CONTEXT_REQUIRED', '请先打开智联搜索页、设置条件，再点击“保存智联条件”后开始。', { statusCode: 409 });
+  if (requireSaved && !stored) throw appError('ZHAOPIN_SEARCH_CONTEXT_REQUIRED', '请先准备智联搜索页并设置条件，回到 OfferGo 更新后开始。', { statusCode: 409 });
   if (requireSaved) assertBossRuntimeAvailable(db, { site: 'zhaopin' });
   const browser = browserFactory({ browserMode, cdpPort });
   const tabId = await resolveZhaopinSearchTab(browser);

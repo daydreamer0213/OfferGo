@@ -13,7 +13,7 @@ function renderTodayPage(vm) {
   <details class="today-context"><summary>求职方向与资料</summary><div class="today-context-grid"><div>${renderPlanSummary(vm)}</div><aside aria-label="候选人摘要">${renderCandidateSummary(vm.profile || {})}</aside></div></details>
   ${renderPlanSettings(vm)}
   ${page.site === 'zhaopin' ? '' : renderAdvancedScan(vm)}
-</main><p class="footer-note">本页展示已保存的找岗范围和进度。平台访问节奏由 OfferGo 自动控制；如需等待或暂停，会显示当前状态。</p>` }) + renderClientScripts(vm.run?.state, ["form", "cooldown_override"].includes(vm.primary?.type), vm.runtime || {});
+</main><p class="footer-note">本页展示找岗范围和进度。平台访问节奏由 OfferGo 自动控制；如需等待或暂停，会显示当前状态。</p>` }) + renderClientScripts(vm.run?.state, ["form", "cooldown_override"].includes(vm.primary?.type), vm.runtime || {}) + renderConditionSyncScript(vm);
 }
 
 function renderPlatformSelector(vm) {
@@ -23,9 +23,12 @@ function renderPlatformSelector(vm) {
     ? page.enabledPlatforms
     : [page.site || 'boss'];
   const platformControl = enabled.length > 1
-    ? `<form method="get" action="/plan"><input type="hidden" name="planId" value="${escapeAttr(page.planId)}"><label>本次找岗平台 <select name="site" aria-label="本次找岗平台" data-platform-selector onchange="if(this.value==='both'){document.querySelectorAll('form.workflow-start input[name=site]').forEach(input=>input.value='both');const label=document.querySelector('[data-discovery-platform]');if(label)label.textContent='BOSS + 智联';const scope=document.querySelector('[data-discovery-scope]');if(scope)scope.textContent='分别使用两边已保存的搜索范围';const words=document.querySelector('[data-discovery-keywords]');if(words)words.textContent='两边会分别选择关键词，开始后可查看各自进度';return;}this.form.submit()">${enabled.includes('boss') ? `<option value="boss"${zl ? '' : ' selected'}>BOSS</option>` : ''}${enabled.includes('zhaopin') ? `<option value="zhaopin"${zl ? ' selected' : ''}>智联</option>` : ''}<option value="both">BOSS + 智联（同时）</option></select></label><noscript><button>切换平台</button></noscript></form>`
+    ? `<form method="get" action="/plan"><input type="hidden" name="planId" value="${escapeAttr(page.planId)}"><label>本次找岗平台 <select name="site" aria-label="本次找岗平台" data-platform-selector onchange="if(this.value==='both'){document.querySelectorAll('form.workflow-start input[name=site]').forEach(input=>input.value='both');const label=document.querySelector('[data-discovery-platform]');if(label)label.textContent='BOSS + 智联';const scope=document.querySelector('[data-discovery-scope]');if(scope)scope.textContent='正在读取两边的搜索范围…';const words=document.querySelector('[data-discovery-keywords]');if(words)words.textContent='两边会分别选择关键词，开始后可查看各自进度';window.dispatchEvent(new Event('offergo:conditions'));return;}this.form.submit()">${enabled.includes('boss') ? `<option value="boss"${zl ? '' : ' selected'}>BOSS</option>` : ''}${enabled.includes('zhaopin') ? `<option value="zhaopin"${zl ? ' selected' : ''}>智联</option>` : ''}<option value="both">BOSS + 智联（同时）</option></select></label><noscript><button>切换平台</button></noscript></form>`
     : `<span class="workflow-budget">本次找岗平台：${zl ? '智联' : 'BOSS'}</span><a class="button quiet" href="/settings/platforms">管理平台</a>`;
-  return `<div id="platform-search-actions" class="button-row">${platformControl}${zl ? `<button class="secondary" type="button" data-platform-action="open">准备智联搜索页</button><button class="secondary" type="button" data-platform-action="save">保存智联条件</button><p role="status" aria-live="polite" data-platform-feedback>${escapeHtml(vm.form?.acquisition?.inheritedPreview?.summary || '')}</p><script>(()=>{const buttons=[...document.querySelectorAll('[data-platform-action]')];const note=document.querySelector('[data-platform-feedback]');buttons.forEach(button=>button.addEventListener('click',async()=>{buttons.forEach(b=>b.disabled=true);note.textContent=button.dataset.platformAction==='save'?'正在读取并保存智联条件…':'正在准备智联搜索页…';try{const response=await fetch('/api/platform-search/'+button.dataset.platformAction,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({site:'zhaopin',planId:${Number(page.planId)||0}})});const result=await response.json();if(!response.ok)throw new Error(result.error||'操作未完成，请重试。');note.textContent=result.message;if(button.dataset.platformAction==='save')location.assign('/plan?planId=${Number(page.planId)||0}&site=zhaopin&platformSaved=1');}catch(error){note.textContent=error.message;}finally{buttons.forEach(b=>b.disabled=false);}}));})();</script>` : ''}</div>`;
+  const active = Boolean(vm.form?.acquisition?.activeSnapshot);
+  const generated = !zl && vm.form?.acquisition?.mode === 'generated';
+  const generatedScope = acquisitionDisplaySummary({ mode: 'generated', generated: vm.form?.acquisition?.generated }, vm.profile);
+  return `<div id="platform-search-actions" class="button-row" data-generated-scope="${escapeAttr(generatedScope)}">${platformControl}${zl ? `<button class="secondary" type="button" data-platform-action="open">准备智联搜索页</button>` : ''}<span data-condition-controls${generated ? ' hidden' : ''}><button class="secondary" type="button" data-condition-refresh${active ? ' disabled' : ''}>重新读取搜索条件</button></span><p role="status" aria-live="polite" data-condition-status${generated ? ' hidden' : ''}>${active ? '当前任务使用启动时的条件；下一轮开始前再读取。' : '正在读取搜索页条件…'}</p></div>`;
 }
 
 function renderDiscoveryPlan(vm) {
@@ -74,7 +77,7 @@ function renderPlanSummary(vm) {
   const profile = vm.profile || {};
   const acquisition = vm.form?.acquisition || {};
   const modeLabel = acquisition.mode === "generated" ? "通用模式" : "继承模式";
-  return `<section class="card" aria-labelledby="plan-summary-title"><div class="card-head"><div><p class="section-label">筛选方案</p><h2 id="plan-summary-title">${escapeHtml(plan.name || "未命名方案")}</h2></div><a class="button secondary" href="#plan-settings">调整方案</a></div><div class="card-body"><div class="plan-scope"><div><strong>${escapeHtml(modeLabel)}平台范围</strong><p>${escapeHtml(acquisitionDisplaySummary(acquisition, profile))}</p></div><div><strong>OfferGo 本地精筛</strong><p>${escapeHtml(localFilterSummary(plan))}</p></div></div>${acquisition.activeSnapshot ? `<div class="alert acquisition-lock"><strong>当前任务条件已锁定</strong><p>${escapeHtml(acquisition.activeSnapshot.summary || "当前任务继续使用启动时的条件")}；本页修改会从下一次创建任务开始生效。</p></div>` : ""}<dl class="definition-grid"><div><dt>关键词</dt><dd>${escapeHtml((plan.keywords || []).map((item) => item.word || item).filter(Boolean).join("、") || "待确认")}</dd></div><div><dt>采集方式</dt><dd>${escapeHtml(modeLabel)}</dd></div><div><dt>薪资策略</dt><dd>${escapeHtml(salaryPreferenceSummary(plan))}</dd></div><div><dt>工作节奏</dt><dd>${escapeHtml(plan.workSchedulePreference === "no_preference" ? "不作为排序依据" : "优先双休，其他仍保留")}</dd></div></dl><details class="today-secondary"><summary>查看版本与反馈</summary>${renderVersionDiff(profile.versionDiff)}${renderFeedback(profile.feedback)}</details><div class="button-row"><a class="button quiet" href="/profile?profileId=${escapeAttr(profile.id)}">查看候选人画像</a><a class="button quiet" href="/resumes?profileId=${escapeAttr(profile.id)}">管理简历版本</a></div></div></section>`;
+  return `<section class="card" aria-labelledby="plan-summary-title"><div class="card-head"><div><p class="section-label">筛选方案</p><h2 id="plan-summary-title">${escapeHtml(plan.name || "未命名方案")}</h2></div><a class="button secondary" href="#plan-settings">调整方案</a></div><div class="card-body"><div class="plan-scope"><div><strong>${escapeHtml(modeLabel)}平台范围</strong><p data-plan-platform-scope>${escapeHtml(acquisitionDisplaySummary(acquisition, profile))}</p></div><div><strong>OfferGo 本地精筛</strong><p>${escapeHtml(localFilterSummary(plan))}</p></div></div>${acquisition.activeSnapshot ? `<div class="alert acquisition-lock"><strong>当前任务条件已锁定</strong><p>${escapeHtml(acquisition.activeSnapshot.summary || "当前任务继续使用启动时的条件")}；本页修改会从下一次创建任务开始生效。</p></div>` : ""}<dl class="definition-grid"><div><dt>关键词</dt><dd>${escapeHtml((plan.keywords || []).map((item) => item.word || item).filter(Boolean).join("、") || "待确认")}</dd></div><div><dt>采集方式</dt><dd>${escapeHtml(modeLabel)}</dd></div><div><dt>薪资策略</dt><dd>${escapeHtml(salaryPreferenceSummary(plan))}</dd></div><div><dt>工作节奏</dt><dd>${escapeHtml(plan.workSchedulePreference === "no_preference" ? "不作为排序依据" : "优先双休，其他仍保留")}</dd></div></dl><details class="today-secondary"><summary>查看版本与反馈</summary>${renderVersionDiff(profile.versionDiff)}${renderFeedback(profile.feedback)}</details><div class="button-row"><a class="button quiet" href="/profile?profileId=${escapeAttr(profile.id)}">查看候选人画像</a><a class="button quiet" href="/resumes?profileId=${escapeAttr(profile.id)}">管理简历版本</a></div></div></section>`;
 }
 
 function renderCandidateSummary(profile) {
@@ -90,8 +93,8 @@ function renderPlanSettings(vm) {
   const acquisition = form.acquisition || {};
   const generated = acquisition.generated || {};
   const inherited = acquisition.inheritedPreview || {};
-  if (vm.page?.site === 'zhaopin') return `<details id="plan-settings" class="card today-details"><summary class="card-head"><strong>调整筛选条件</strong><span class="tiny">智联原生条件 · 本地精筛</span></summary><form id="plan-form" class="plan-form card-body" method="post" action="/api/plan"><input type="hidden" name="site" value="zhaopin"><input type="hidden" name="profileId" value="${escapeAttr(vm.profile?.id)}"><input type="hidden" name="planId" value="${escapeAttr(vm.page?.planId)}"><label class="wide">方案名称<input name="name" value="${escapeAttr(plan.name || '')}" required></label><p class="wide">${escapeHtml(inherited.summary || '')}</p><label class="wide">搜索关键词<textarea name="keywords" required>${escapeHtml(keywordLines(plan.keywords))}</textarea></label>${['maxCards', 'maxDetailTotal', 'browserPageBudget'].map(name => `<input type="hidden" name="${name}" value="${escapeAttr(plan.scan?.[name] || '')}">`).join('')}${renderLocalScreeningFields({ plan, profile: vm.profile || {}, site: 'zhaopin' })}<div class="wide plan-save"><button class="button secondary">保存筛选方案</button><span id="plan-dirty-note" class="hint" hidden>条件有修改，请先保存再扫描。</span></div></form></details>`;
-  return `<details id="plan-settings" class="card today-details"><summary class="card-head"><strong>调整筛选条件</strong><span class="tiny">先选平台范围，再设本地精筛</span></summary><form id="plan-form" class="plan-form card-body" method="post" action="/api/plan"><input type="hidden" name="profileId" value="${escapeAttr(vm.profile?.id)}"><input type="hidden" name="planId" value="${escapeAttr(vm.page?.planId)}"><p class="wide plan-note"><strong>两种模式只改变平台岗位从哪里来。</strong>关键词、完整 JD 分析、匹配证据和推荐质量标准保持一致。</p><label class="wide">方案名称<input name="name" value="${escapeAttr(plan.name || "")}" required></label><fieldset class="mode-picker wide"><legend>平台采集方式</legend><label class="mode-choice"><input type="radio" name="acquisitionMode" value="inherited"${acquisition.mode === "generated" ? "" : " checked"}><span><strong>继承模式</strong><small>沿用当前 BOSS 搜索页范围，只替换关键词</small></span></label><label class="mode-choice"><input type="radio" name="acquisitionMode" value="generated"${acquisition.mode === "generated" ? " checked" : ""}><span><strong>通用模式</strong><small>按下面保存的城市和 BOSS 条件生成搜索</small></span></label></fieldset><section class="acquisition-panel wide" data-acquisition-panel="inherited"${acquisition.mode === "generated" ? " hidden aria-hidden=\"true\"" : " aria-hidden=\"false\""}><strong>当前 BOSS 搜索页范围</strong><p data-inherited-preview data-preview-url="${escapeAttr(inherited.endpoint || "")}">${escapeHtml(inherited.summary || "读取当前 BOSS 搜索页后显示")}</p></section><section class="acquisition-panel wide" data-acquisition-panel="generated"${acquisition.mode === "generated" ? " aria-hidden=\"false\"" : " hidden aria-hidden=\"true\""}>${renderChoices("城市", "cities", options.cities, generated.cities)}${renderChoices("BOSS 薪资档", "platformSalaryLanes", options.platformSalaryLanes, generated.salaryLanes)}${renderChoices("工作经验", "experience", options.experience, generated.experience)}${renderChoices("职位类型", "jobTypes", options.jobTypes, generated.jobTypes)}${renderChoices("学历", "degrees", options.degrees, generated.degrees)}</section><section class="shared-screening wide"><h3>关键词与扫描规模</h3><p>关键词既用于 BOSS 查询，也会作为本地匹配信号。</p><label class="wide">搜索关键词<textarea name="keywords" required>${escapeHtml(keywordLines(plan.keywords))}</textarea></label><details class="plan-advanced wide"><summary>扩大范围时的搜索规模</summary><div class="plan-advanced-body"><label>每个主要关键词最多看多少个岗位<input type="number" min="${escapeAttr(bounds.maxCards?.[0])}" max="${escapeAttr(bounds.maxCards?.[1])}" name="maxCards" value="${escapeAttr(plan.scan?.maxCards ?? defaults.maxCards ?? "")}"></label><label>最多读取多少份岗位详情<input type="number" min="${escapeAttr(bounds.maxDetailTotal?.[0])}" max="${escapeAttr(bounds.maxDetailTotal?.[1])}" name="maxDetailTotal" value="${escapeAttr(plan.scan?.maxDetailTotal ?? defaults.maxDetailTotal ?? "")}"></label><label>最多浏览多少页搜索结果<input type="number" min="${escapeAttr(bounds.browserPageBudget?.[0])}" max="${escapeAttr(bounds.browserPageBudget?.[1])}" name="browserPageBudget" value="${escapeAttr(plan.scan?.browserPageBudget ?? defaults.browserPageBudget ?? "")}"></label></div></details></section>${renderLocalScreeningFields({ plan, profile: vm.profile || {} })}<div class="wide plan-save"><button class="button secondary">保存筛选方案</button><span id="plan-dirty-note" class="hint" hidden>条件有修改，请先保存再扫描。</span></div></form></details>`;
+  if (vm.page?.site === 'zhaopin') return `<details id="plan-settings" class="card today-details"><summary class="card-head"><strong>调整筛选条件</strong><span class="tiny">智联原生条件 · 本地精筛</span></summary><form id="plan-form" class="plan-form card-body" method="post" action="/api/plan"><input type="hidden" name="site" value="zhaopin"><input type="hidden" name="profileId" value="${escapeAttr(vm.profile?.id)}"><input type="hidden" name="planId" value="${escapeAttr(vm.page?.planId)}"><label class="wide">方案名称<input name="name" value="${escapeAttr(plan.name || '')}" required></label><p class="wide" data-platform-preview>${escapeHtml(inherited.summary || '')}</p><label class="wide">搜索关键词<textarea name="keywords" required>${escapeHtml(keywordLines(plan.keywords))}</textarea></label>${['maxCards', 'maxDetailTotal', 'browserPageBudget'].map(name => `<input type="hidden" name="${name}" value="${escapeAttr(plan.scan?.[name] || '')}">`).join('')}${renderLocalScreeningFields({ plan, profile: vm.profile || {}, site: 'zhaopin' })}<div class="wide plan-save"><button class="button secondary">保存筛选方案</button><span id="plan-dirty-note" class="hint" hidden>条件有修改，请先保存再扫描。</span></div></form></details>`;
+  return `<details id="plan-settings" class="card today-details"><summary class="card-head"><strong>调整筛选条件</strong><span class="tiny">先选平台范围，再设本地精筛</span></summary><form id="plan-form" class="plan-form card-body" method="post" action="/api/plan"><input type="hidden" name="profileId" value="${escapeAttr(vm.profile?.id)}"><input type="hidden" name="planId" value="${escapeAttr(vm.page?.planId)}"><p class="wide plan-note"><strong>两种模式只改变平台岗位从哪里来。</strong>关键词、完整 JD 分析、匹配证据和推荐质量标准保持一致。</p><label class="wide">方案名称<input name="name" value="${escapeAttr(plan.name || "")}" required></label><fieldset class="mode-picker wide"><legend>平台采集方式</legend><label class="mode-choice"><input type="radio" name="acquisitionMode" value="inherited"${acquisition.mode === "generated" ? "" : " checked"}><span><strong>继承模式</strong><small>沿用当前 BOSS 搜索页范围，只替换关键词</small></span></label><label class="mode-choice"><input type="radio" name="acquisitionMode" value="generated"${acquisition.mode === "generated" ? " checked" : ""}><span><strong>通用模式</strong><small>按下面保存的城市和 BOSS 条件生成搜索</small></span></label></fieldset><section class="acquisition-panel wide" data-acquisition-panel="inherited"${acquisition.mode === "generated" ? " hidden aria-hidden=\"true\"" : " aria-hidden=\"false\""}><strong>当前 BOSS 搜索页范围</strong><p data-platform-preview data-preview-url="${escapeAttr(inherited.endpoint || "")}">${escapeHtml(inherited.summary || "读取当前 BOSS 搜索页后显示")}</p></section><section class="acquisition-panel wide" data-acquisition-panel="generated"${acquisition.mode === "generated" ? " aria-hidden=\"false\"" : " hidden aria-hidden=\"true\""}>${renderChoices("城市", "cities", options.cities, generated.cities)}${renderChoices("BOSS 薪资档", "platformSalaryLanes", options.platformSalaryLanes, generated.salaryLanes)}${renderChoices("工作经验", "experience", options.experience, generated.experience)}${renderChoices("职位类型", "jobTypes", options.jobTypes, generated.jobTypes)}${renderChoices("学历", "degrees", options.degrees, generated.degrees)}</section><section class="shared-screening wide"><h3>关键词与扫描规模</h3><p>关键词既用于 BOSS 查询，也会作为本地匹配信号。</p><label class="wide">搜索关键词<textarea name="keywords" required>${escapeHtml(keywordLines(plan.keywords))}</textarea></label><details class="plan-advanced wide"><summary>扩大范围时的搜索规模</summary><div class="plan-advanced-body"><label>每个主要关键词最多看多少个岗位<input type="number" min="${escapeAttr(bounds.maxCards?.[0])}" max="${escapeAttr(bounds.maxCards?.[1])}" name="maxCards" value="${escapeAttr(plan.scan?.maxCards ?? defaults.maxCards ?? "")}"></label><label>最多读取多少份岗位详情<input type="number" min="${escapeAttr(bounds.maxDetailTotal?.[0])}" max="${escapeAttr(bounds.maxDetailTotal?.[1])}" name="maxDetailTotal" value="${escapeAttr(plan.scan?.maxDetailTotal ?? defaults.maxDetailTotal ?? "")}"></label><label>最多浏览多少页搜索结果<input type="number" min="${escapeAttr(bounds.browserPageBudget?.[0])}" max="${escapeAttr(bounds.browserPageBudget?.[1])}" name="browserPageBudget" value="${escapeAttr(plan.scan?.browserPageBudget ?? defaults.browserPageBudget ?? "")}"></label></div></details></section>${renderLocalScreeningFields({ plan, profile: vm.profile || {} })}<div class="wide plan-save"><button class="button secondary">保存筛选方案</button><span id="plan-dirty-note" class="hint" hidden>条件有修改，请先保存再扫描。</span></div></form></details>`;
 }
 
 function renderLocalScreeningFields({ plan, profile, site = 'boss' }) {
@@ -268,7 +271,116 @@ function renderClientScripts(runState, includeBrowserReadiness, runtime = {}) {
       });
     })();
     </script>` : "";
-  return `${readiness}<script>(function(){const form=document.getElementById('plan-form');const note=document.getElementById('plan-dirty-note');if(!form)return;let previewInFlight=false;async function refreshInheritedPreview(){const node=form.querySelector('[data-inherited-preview]');const mode=form.querySelector('input[name=acquisitionMode]:checked')?.value||'inherited';if(!node||mode!=='inherited'||!node.dataset.previewUrl||previewInFlight)return;previewInFlight=true;node.textContent='正在只读检查当前 BOSS 搜索页…';try{const response=await fetch(node.dataset.previewUrl,{cache:'no-store'});const value=await response.json();node.textContent=response.ok?(value.summary||'当前 BOSS 搜索页未识别到额外筛选条件'):(value.error||'暂时无法读取当前 BOSS 搜索范围。');const scope=document.querySelector('[data-discovery-scope]');if(scope&&document.querySelector('[data-platform-selector]')?.value!=='both')scope.textContent=node.textContent}catch{node.textContent='暂时无法读取当前 BOSS 搜索范围。'}finally{previewInFlight=false}}function syncAcquisitionPanels(refreshPreview){const mode=form.querySelector('input[name=acquisitionMode]:checked')?.value||'inherited';form.querySelectorAll('[data-acquisition-panel]').forEach(function(panel){const visible=panel.dataset.acquisitionPanel===mode;panel.hidden=!visible;panel.setAttribute('aria-hidden',visible?'false':'true')});if(refreshPreview&&mode==='inherited')void refreshInheritedPreview()}syncAcquisitionPanels(true);form.querySelectorAll('input[name=acquisitionMode]').forEach(function(input){input.addEventListener('change',function(){syncAcquisitionPanels(true)})});form.addEventListener('input',function(){document.querySelectorAll('[data-scan-button]').forEach(function(button){button.disabled=true});if(note)note.hidden=false});}());</script>${runState === "running" ? `<script>setTimeout(()=>location.reload(),2500)</script>` : ""}`;
+  return `${readiness}<script>(function(){
+    const form=document.getElementById('plan-form');
+    const note=document.getElementById('plan-dirty-note');
+    if(!form)return;
+    function syncAcquisitionPanels(){
+      const mode=form.querySelector('input[name=acquisitionMode]:checked')?.value||'inherited';
+      form.querySelectorAll('[data-acquisition-panel]').forEach(function(panel){
+        const visible=panel.dataset.acquisitionPanel===mode;
+        panel.hidden=!visible;
+        panel.setAttribute('aria-hidden',visible?'false':'true');
+      });
+    }
+    syncAcquisitionPanels();
+    form.querySelectorAll('input[name=acquisitionMode]').forEach(input=>input.addEventListener('change',syncAcquisitionPanels));
+    form.addEventListener('input',function(){
+      document.querySelectorAll('[data-scan-button]').forEach(button=>button.disabled=true);
+      if(note)note.hidden=false;
+    });
+  })();</script>${runState === 'running' ? `<script>setTimeout(()=>location.reload(),2500)</script>` : ''}`;
+}
+
+function renderConditionSyncScript(vm) {
+  const site = vm.page?.site === 'zhaopin' ? 'zhaopin' : 'boss';
+  const planId = Number(vm.page?.planId) || 0;
+  const active = Boolean(vm.form?.acquisition?.activeSnapshot);
+  const hadStoredZhaopinContext = Boolean(vm.platformContext);
+  return `<script>(function(){
+    const site=${JSON.stringify(site)}, planId=${planId}, active=${active}, hadStoredZhaopinContext=${hadStoredZhaopinContext};
+    const container=document.getElementById('platform-search-actions');
+    const selector=container?.querySelector('[data-platform-selector]');
+    const controls=container?.querySelector('[data-condition-controls]');
+    const button=container?.querySelector('[data-condition-refresh]');
+    const status=container?.querySelector('[data-condition-status]');
+    const scope=document.querySelector('[data-discovery-scope]');
+    const planScope=document.querySelector('[data-plan-platform-scope]');
+    const preview=document.querySelector('[data-platform-preview]');
+    const openButton=container?.querySelector('[data-platform-action="open"]');
+    if(!container||!button||!status||!scope)return;
+    let inFlight=false,pendingRefresh=false;
+    function target(){return selector?.value||site}
+    function bossMode(){return document.querySelector('input[name=acquisitionMode]:checked')?.value||'inherited'}
+    function showControls(){
+      const visible=target()!=='boss'||bossMode()==='inherited';
+      controls.hidden=!visible;status.hidden=!visible;
+      if(!visible){scope.textContent=container.dataset.generatedScope||scope.textContent;if(planScope)planScope.textContent=scope.textContent;}
+      return visible;
+    }
+    async function readBoss(){
+      const url=preview?.dataset.previewUrl||'/api/acquisition-preview?planId='+planId;
+      const response=await fetch(url,{cache:'no-store'});
+      const value=await response.json();
+      if(!response.ok)throw new Error(value.error||'BOSS 搜索页暂时无法读取。');
+      if(value.status!=='ready')throw new Error('BOSS 有些搜索条件尚未读清，请检查搜索页后重试。');
+      return value.summary||'当前 BOSS 搜索页未额外限制条件';
+    }
+    async function readZhaopin(){
+      const response=await fetch('/api/platform-search/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({site:'zhaopin',planId})});
+      const value=await response.json();
+      if(!response.ok)throw new Error(value.error||'智联搜索页暂时无法读取。');
+      return value.summary||'当前智联搜索页未额外限制条件';
+    }
+    async function refresh(manual=false){
+      if(active)return;
+      const visible=showControls();
+      if(inFlight){pendingRefresh=true;return;}
+      if(!visible||(!manual&&document.hidden))return;
+      const selected=target(),modeAtStart=bossMode();
+      inFlight=true;button.disabled=true;status.textContent=selected==='both'?'正在读取两边的搜索条件…':'正在读取搜索页条件…';
+      const summaries=[];
+      try{
+        if(selected==='boss'||selected==='both'){
+          const value=modeAtStart==='generated'?(container.dataset.generatedScope||'已保存的 BOSS 条件'):await readBoss();
+          summaries.push(['BOSS',value]);
+          if(site==='boss'&&preview&&modeAtStart==='inherited')preview.textContent=value;
+        }
+        if(selected==='zhaopin'||selected==='both'){
+          const value=await readZhaopin();
+          summaries.push(['智联',value]);
+          if(site==='zhaopin'&&preview)preview.textContent=value;
+        }
+        if(selected!==target()||modeAtStart!==bossMode()){pendingRefresh=true;return;}
+        const summary=selected==='both'?summaries.map(item=>item[0]+'：'+item[1]).join('；'):summaries[0][1];
+        scope.textContent=summary;
+        if(planScope)planScope.textContent=summary;
+        status.textContent=selected==='both'?'两边条件已更新，下一轮会使用这些条件。':'已更新，下一轮会使用这些条件。';
+        if(site==='zhaopin'&&!hadStoredZhaopinContext)location.assign('/plan?planId='+planId+'&site=zhaopin&platformSaved=1');
+      }catch(error){
+        if(selected!==target()||modeAtStart!==bossMode()){pendingRefresh=true;return;}
+        if(summaries.length&&selected==='both')scope.textContent=summaries[0][0]+'：'+summaries[0][1]+'；另一平台暂时无法读取';
+        status.textContent=error.message||'暂时无法读取搜索条件，请点“重新读取搜索条件”重试。';
+      }finally{inFlight=false;button.disabled=false;if(pendingRefresh){pendingRefresh=false;void refresh(true);}}
+    }
+    button.addEventListener('click',()=>void refresh(true));
+    openButton?.addEventListener('click',async()=>{
+      if(inFlight)return;
+      openButton.disabled=true;status.textContent='正在准备智联搜索页…';
+      try{
+        const response=await fetch('/api/platform-search/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({site:'zhaopin',planId})});
+        const value=await response.json();
+        if(!response.ok)throw new Error(value.error||'智联搜索页暂时无法准备。');
+        status.textContent='智联搜索页已准备。改完条件回到 OfferGo 后会自动更新。';
+      }catch(error){status.textContent=error.message||'智联搜索页暂时无法准备。';}
+      finally{openButton.disabled=false;}
+    });
+    window.addEventListener('focus',()=>void refresh());
+    window.addEventListener('offergo:conditions',()=>void refresh(true));
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refresh()});
+    document.querySelectorAll('input[name=acquisitionMode]').forEach(input=>input.addEventListener('change',()=>void refresh(true)));
+    void refresh();
+  })();</script>`;
 }
 
 module.exports = { renderTodayPage };

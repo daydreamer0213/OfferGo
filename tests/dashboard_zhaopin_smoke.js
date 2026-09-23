@@ -72,7 +72,7 @@ async function main() {
     const post = (url, body) => fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), redirect: 'manual' });
     const page = await (await fetch(`${base}/plan?planId=${saved.planId}&site=zhaopin`)).text();
     assert.match(page, /name="site"/);
-    assert.match(page, /保存智联条件/);
+    assert.match(page, /重新读取搜索条件/);
     let response = await post('/api/platform-search/open', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200, await response.text());
     assert.equal(new URL(bridge.tabs[1].url).searchParams.get('kw'), 'AI工程师');
@@ -96,6 +96,11 @@ async function main() {
     response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200, await response.text());
     assert.equal(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }).filterSummary[0], '广东');
+    const firstSavedContext = getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).changed, false, 'rereading unchanged conditions should not write another revision');
+    assert.deepEqual(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }), firstSavedContext);
     assert.deepEqual(storage.getSearchPlan(db, saved.planId).plan, bossBefore);
     bridge.tabs[1].windowId = 'another-window';
     response = await post('/api/workflow-run', { planId: saved.planId, site: 'zhaopin', confirmEarlyScan: '1' });
@@ -390,7 +395,7 @@ async function journey() {
     if (expression.includes('__zhaopinActivateCard(')) { selected = Number(expression.match(/ActivateCard\((\d+)/)[1]); return { ready: true }; }
     if (expression.includes('__zhaopinScrollResults')) return true;
     const cards = [0, 1, 2].map(index => ({ index, signature: `synthetic-${index}`, title: `AI工程师 合成岗位${index}`, company: '合成招聘发布方', salary: '10-20K', location: '广州', experience: '经验不限', education: '本科' }));
-    return { ...base, cards, selectedIndex: selected, keyword: new URL(base.url).searchParams.get('kw'), confirmedEnd: true, detail: { ...cards[selected], clientCompany: '合成产品研发公司', description: '岗位职责：负责 Python AI 服务开发和接口设计，维护应用系统。任职要求：掌握 Python，具备项目开发经验。团队重视文档与测试。'.repeat(8), url: `https://www.zhaopin.com/jobdetail/UI${selected}.htm` } };
+    return { ...base, filterSummary: new URL(base.url).searchParams.get('jl') === '613' ? ['城市：深圳'] : base.filterSummary, cards, selectedIndex: selected, keyword: new URL(base.url).searchParams.get('kw'), confirmedEnd: true, detail: { ...cards[selected], clientCompany: '合成产品研发公司', description: '岗位职责：负责 Python AI 服务开发和接口设计，维护应用系统。任职要求：掌握 Python，具备项目开发经验。团队重视文档与测试。'.repeat(8), url: `https://www.zhaopin.com/jobdetail/UI${selected}.htm` } };
   };
   const siteFactory = require('../src/adapters/sites');
   const originalSiteFactory = siteFactory.createSiteAdapter;
@@ -468,7 +473,7 @@ async function journey() {
     browser = await chromium.launch({ channel: 'msedge', headless: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on('pageerror', error => failures.push(error.message));
-    page.on('console', message => { if (message.type() === 'error') failures.push(message.text()); });
+    page.on('console', message => { if (message.type() === 'error' && !/Failed to load resource: (?:the server responded with a status of 409|net::ERR_CONNECTION_REFUSED)/.test(message.text())) failures.push(message.text()); });
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.hostname !== '127.0.0.1') { externalRequests.push(url.origin); return route.abort(); }
@@ -486,16 +491,26 @@ async function journey() {
     assert.equal(await page.getByLabel('本次找岗平台').inputValue(), 'boss');
     await page.getByLabel('本次找岗平台').selectOption('zhaopin');
     await page.waitForURL(/site=zhaopin/);
-    assert.equal(await page.locator('h1').innerText(), '发现并分析岗位，再选择合适的岗位打招呼。');
+    assert.equal(await page.locator('h1').innerText(), '今日任务');
     assert.equal(await page.locator('[data-today-primary]').innerText(), '准备智联搜索页');
     await audit('first-use');
     await page.getByRole('button', { name: '准备智联搜索页', exact: true }).click();
-    await page.getByText('智联搜索页已在同窗后台准备。', { exact: false }).waitFor();
-    await page.getByRole('button', { name: '保存智联条件', exact: true }).click();
+    await page.getByText('智联搜索页已准备。改完条件回到 OfferGo 后会自动更新。', { exact: false }).waitFor();
+    await page.getByRole('button', { name: '重新读取搜索条件', exact: true }).click();
     await page.waitForURL(/platformSaved=1/);
     await page.reload();
     assert.equal(await page.getByLabel('本次找岗平台').inputValue(), 'zhaopin');
     assert.deepEqual(storage.getSearchPlan(db, saved.planId).plan, bossBefore);
+    const beforeSearchChange = bridge.tabs[1].url;
+    const changedSearchUrl = new URL(beforeSearchChange);
+    changedSearchUrl.searchParams.set('jl', '613');
+    bridge.tabs[1].url = changedSearchUrl.toString();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.locator('[data-discovery-scope]').getByText('城市：深圳').waitFor();
+    assert.equal(new URL(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }).searchTemplate.url).searchParams.get('jl'), '613', 'returning to Dashboard updates the next-run conditions');
+    bridge.tabs[1].url = beforeSearchChange;
+    await page.getByRole('button', { name: '重新读取搜索条件', exact: true }).click();
+    await page.locator('[data-discovery-scope]').getByText('广东').waitFor();
     db.prepare('UPDATE search_plans SET profile_version_id = NULL WHERE id = ?').run(saved.planId);
     await page.reload();
     await page.getByRole('link', { name: '重新确认筛选条件', exact: true }).click();
