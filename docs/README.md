@@ -13,6 +13,8 @@
 
 以下文档需要与当前代码持续保持一致：
 
+- [`offergo-project-map.md`](offergo-project-map.md)：从用户全程、两种入口、找岗、消息、恢复和数据去向理解当前源码；初次了解项目建议先看这一页。
+- [`offergo-product-module-flows.md`](offergo-product-module-flows.md)：各页面和消息分支的详细流程图，供查看某一模块时使用。
 - [`../README.md`](../README.md)：项目定位、安装方式、主要能力和快速开始。
 - [`releases/v1.3.2.md`](releases/v1.3.2.md)：本次 v1.3.2 发布的用户变化、验证边界和下载文件说明；公开状态以 GitHub Release 为准。
 - [`superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md`](superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md)：v1.3.2 精确版本发布、目录问题诊断和两轮人工验收环境准备回执。

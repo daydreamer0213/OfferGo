@@ -8,6 +8,8 @@ OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台
 
 OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动，同一套采集、分析、去重和排序流程可以用于不同求职方向。
 
+想先看懂整个项目，可以从[OfferGo 项目地图](docs/offergo-project-map.md)开始，再按需查看各模块的详细流程。
+
 [查看作品集中的流程与成果展示](https://daydreamer0213.github.io/ai-application-portfolio/#roleflow)
 
 ## 发布状态
