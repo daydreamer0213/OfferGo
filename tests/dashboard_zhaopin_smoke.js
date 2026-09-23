@@ -32,6 +32,7 @@ function fakeBrowser() {
   const tabs = [{ id: 'dashboard', windowId: 'window', active: true, url: 'http://127.0.0.1/plan' }];
   const browser = {
     tabs,
+    filterSummary: ['广东'],
     prepareSearchClock: 0,
     prepareSearchNow: () => browser.prepareSearchClock,
     prepareSearchSleep: async ms => { browser.prepareSearchClock += ms; },
@@ -40,7 +41,7 @@ function fakeBrowser() {
     async evalValue(id, expression) {
       assert.equal(id, 'zl-search');
       if (expression.includes('const clean =')) return true;
-      return { url: tabs.find(tab => tab.id === id).url, filterSummary: ['广东'], cards: [], loading: false, risk: false, loginRequired: false, isSearchPage: true };
+      return { url: tabs.find(tab => tab.id === id).url, filterSummary: browser.filterSummary, cards: [], loading: false, risk: false, loginRequired: false, isSearchPage: true };
     },
     async bringToFront() { throw new Error('prepare must not recover by foregrounding a tab'); }
   };
@@ -101,6 +102,15 @@ async function main() {
     assert.equal(response.status, 200);
     assert.equal((await response.json()).changed, false, 'rereading unchanged conditions should not write another revision');
     assert.deepEqual(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }), firstSavedContext);
+    bridge.filterSummary = ['地区', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'];
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).summary, '当前页面未额外限制条件', 'default filter headings are not selected conditions');
+    const defaultPage = await (await fetch(`${base}/plan?planId=${saved.planId}&site=zhaopin`)).text();
+    assert.match(defaultPage, /已保存：当前页面未额外限制条件/);
+    bridge.filterSummary = ['广东'];
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200);
     assert.deepEqual(storage.getSearchPlan(db, saved.planId).plan, bossBefore);
     bridge.tabs[1].windowId = 'another-window';
     response = await post('/api/workflow-run', { planId: saved.planId, site: 'zhaopin', confirmEarlyScan: '1' });

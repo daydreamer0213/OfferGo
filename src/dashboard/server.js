@@ -346,7 +346,7 @@ const boss = require("../adapters/sites/boss");
 const { createSiteAdapter } = require("../adapters/sites");
 const { ZhaopinSiteAdapter, resolveZhaopinSearchTab, isZhaopinWorkspaceTab, assertZhaopinWorkspaceWindow } = require('../adapters/sites/zhaopin');
 const { inspectZhaopinCommunicationTabs } = require('../adapters/sites/zhaopin_communication');
-const { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl } = require('../core/zhaopin_search_scope');
+const { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, selectedZhaopinFilters } = require('../core/zhaopin_search_scope');
 const { compileZhaopinPlatformRuntimePolicy } = require('../core/platform_runtime_policy');
 const { getPlatformSearchContext, savePlatformSearchContext } = require('../storage/platform_search_context_store');
 const { inspectBossBrowserReadiness, readinessAction } = require("../core/browser_readiness");
@@ -1479,7 +1479,7 @@ function createDashboardServer({
               const changed = !stored || stored.searchTemplate?.url !== template.url
                 || JSON.stringify(stored.filterSummary) !== JSON.stringify(filterSummary);
               if (changed) savePlatformSearchContext(db, { planId: plan.id, site, searchTemplate: template, filterSummary });
-              return { site, changed, summary: filterSummary.join('；') || '当前页面未额外限制条件', message: changed ? '搜索条件已更新，下一轮将使用新条件。' : '搜索条件没有变化。' };
+              return { site, changed, summary: selectedZhaopinFilters(filterSummary).join('；') || '当前页面未额外限制条件', message: changed ? '搜索条件已更新，下一轮将使用新条件。' : '搜索条件没有变化。' };
             });
             return sendJson(res, 200, result);
           } catch (error) {

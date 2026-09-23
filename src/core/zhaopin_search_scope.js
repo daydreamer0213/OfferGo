@@ -3,6 +3,15 @@ const ZHAOPIN_SEARCH_PATH = "/jobs/";
 const TRACKING_PARAMS = new Set(["from", "source", "src", "trackId", "lid", "ref", "refer", "_", "timestamp"]);
 const PAGING_PARAMS = new Set(["page", "pageNum"]);
 const SEARCH_PARAMS = new Set(["pageMode", "jl", "sl", "el", "we", "ct", "cs", "et", "kw", ...TRACKING_PARAMS, ...PAGING_PARAMS]);
+const DEFAULT_FILTER_LABELS = new Set([
+  "地区", "薪资", "学历", "经验", "公司性质", "融资阶段", "公司人数", "工作性质", "职位类别", "公司行业"
+]);
+
+function selectedZhaopinFilters(values) {
+  return (Array.isArray(values) ? values : [])
+    .map(value => String(value || "").replace(/\s+/g, " ").trim())
+    .filter(value => value && !DEFAULT_FILTER_LABELS.has(value));
+}
 
 function canonicalizeZhaopinSearchTemplate(rawUrl) {
   const url = parseZhaopinUrl(rawUrl, "ZHAOPIN_SEARCH_PAGE_INVALID", "当前标签页不是可用的智联搜索页。");
@@ -66,4 +75,4 @@ function scopeError(code, message, cause) {
   return error;
 }
 
-module.exports = { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, zhaopinJobIdentity };
+module.exports = { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, zhaopinJobIdentity, selectedZhaopinFilters };

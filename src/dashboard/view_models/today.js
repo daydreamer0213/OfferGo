@@ -2,6 +2,7 @@ const { formatNativeFilterSummary } = require("../../core/platform_filters");
 const { feedbackReasonLabel } = require("../../core/feedback");
 const { PRODUCT_POLICY } = require("../../core/product_policy");
 const { acquisitionModeOf, generatedPlatformOf } = require("../../core/search_plan_schema");
+const { selectedZhaopinFilters } = require("../../core/zhaopin_search_scope");
 
 function buildTodayViewModel(input = {}) {
   const site = input.site || "boss";
@@ -140,7 +141,7 @@ function buildTodayViewModel(input = {}) {
     vm.heading.meta[0] += ' · 智联';
     vm.form.acquisition.mode = 'inherited';
     vm.form.acquisition.inheritedPreview.summary = input.platformContext
-      ? (input.platformContext.filterSummary || []).join('；') || '已保存：当前页面未额外限制条件'
+      ? selectedZhaopinFilters(input.platformContext.filterSummary).join('；') || '已保存：当前页面未额外限制条件'
       : '尚未读取智联条件。先准备搜索页，设置好后回到 OfferGo，系统会自动更新。';
     vm.form.acquisition.inheritedPreview.endpoint += '&site=zhaopin';
     vm.platformContext = input.platformContext || null;

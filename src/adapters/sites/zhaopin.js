@@ -1,16 +1,13 @@
 const {
   canonicalizeZhaopinSearchTemplate,
   buildZhaopinSearchUrl,
-  zhaopinJobIdentity
+  zhaopinJobIdentity,
+  selectedZhaopinFilters
 } = require("../../core/zhaopin_search_scope");
 const { BossSiteAdapter } = require('./boss');
 const { buildScanExecutionSnapshot } = require('../../core/scan_snapshot');
 const { sourceContentHash } = require('../../storage/job_store');
 const { hasCompleteJobDescription } = require('../../core/job_description_readiness');
-
-const ZHAOPIN_DEFAULT_FILTER_LABELS = new Set([
-  '地区', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'
-]);
 
 const ZHAOPIN_COMPONENT_ACCESSORS_SOURCE = String.raw`
   const component = (node, name) => {
@@ -671,10 +668,7 @@ function searchStateMatches(state, template, keyword, filterSummary) {
 }
 
 function sameFilterSummary(current, saved) {
-  const selected = values => (Array.isArray(values) ? values : [])
-    .map(value => String(value || '').replace(/\s+/g, ' ').trim())
-    .filter(value => value && !ZHAOPIN_DEFAULT_FILTER_LABELS.has(value));
-  return JSON.stringify(selected(current)) === JSON.stringify(selected(saved));
+  return JSON.stringify(selectedZhaopinFilters(current)) === JSON.stringify(selectedZhaopinFilters(saved));
 }
 
 function isTransientLifecycleAttachmentError(error) {
