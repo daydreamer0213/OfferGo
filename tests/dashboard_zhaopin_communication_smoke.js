@@ -101,10 +101,11 @@ async function main() {
 
     const builder = await getText(`${base}/communication/new?planId=${owner.planId}&site=zhaopin`);
     assert.match(builder, /合成智联岗位/);
+    assert.match(builder, /智联 · 合成招聘方 · 主投<\/small>/);
     assert.doesNotMatch(builder, /合成 BOSS 岗位|今日额度|补扫|凑满/);
     assert.match(builder, /name="site" value="zhaopin"/);
     assert.match(builder, /当前可选 2 个岗位/);
-    assert.match(builder, new RegExp(`href="/communication\\?planId=${owner.planId}&amp;site=zhaopin"[^>]*>发送记录</a>`),
+    assert.match(builder, new RegExp(`href="/communication\\?planId=${owner.planId}&amp;site=zhaopin"[^>]*>沟通清单与记录</a>`),
       "the builder navigation returns to the communication center instead of linking to itself");
 
     let response = await postJson(`${base}/api/communication-batch`, {
@@ -158,6 +159,7 @@ async function main() {
     assert.equal((restored.match(new RegExp(`批次 #${linked.id}`, "g")) || []).length, 1);
     assert.doesNotMatch(restored, /合成 BOSS 岗位/);
     assert.match(restored, /智联/);
+    assert.match(restored, /智联 · 合成招聘方/);
     assert.match(restored, /页面已核对，正在进行单岗位验收/);
     assert.match(restored, /href="https:\/\/www\.zhaopin\.com\/jobdetail\/ZLMAIN1\.htm"/);
     const jobs = await getText(`${base}/jobs?planId=${owner.planId}&site=zhaopin&status=all&batch=all`);

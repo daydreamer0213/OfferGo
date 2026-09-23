@@ -27,6 +27,17 @@ function communicationStatusLabel(value) {
   return COMMUNICATION_STATUS_LABELS[String(value || "")] || "状态待确认";
 }
 
+function communicationSiteLabel(site) {
+  return { boss: "BOSS", zhaopin: "智联" }[String(site || "")] || "平台待确认";
+}
+
+function communicationJobDecisionLabel(value) {
+  return {
+    primary: "主投", apply: "可投", caution: "慎投", refresh: "待复核",
+    analysis_pending: "待分析", detail_pending: "待补岗位信息", not_recommended: "不建议"
+  }[String(value || "")] || "待确认";
+}
+
 function communicationErrorLabel(code) {
   return {
     COMMUNICATION_ACTION_NOT_TRIGGERED: "未能确认本次沟通结果，不代表发送失败；OfferGo 已停止且不会自动重试。",
@@ -43,4 +54,4 @@ function communicationErrorLabel(code) {
   }[String(code || "")] || "沟通执行已安全停止，请查看处理信息。";
 }
 
-module.exports = { communicationStatusLabel, communicationErrorLabel };
+module.exports = { communicationStatusLabel, communicationErrorLabel, communicationSiteLabel, communicationJobDecisionLabel };

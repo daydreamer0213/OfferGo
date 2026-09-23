@@ -200,6 +200,7 @@ const { buildWorkflowViewModel } = require("./view_models/workflow");
 const { renderWorkflowPage: renderWorkflowDocument } = require("./pages/workflow");
 const { buildCommunicationViewModel } = require("./view_models/communication");
 const { renderCommunicationPage: renderCommunicationDocument } = require("./pages/communication");
+const { communicationSiteLabel, communicationJobDecisionLabel } = require("./status_labels");
 const { createFunnelAnalysisService } = require("../application/funnel_analysis");
 const { renderFunnelPage, FUNNEL_STRATEGY_SCRIPT } = require("./pages/funnel");
 const { createResumeOptimizationService } = require("../application/resume_optimization");
@@ -6147,7 +6148,7 @@ function renderCommunicationBuilderPage({ db, searchParams, browserAuthority }) 
     : `当前可沟通候选不足 ${selection.acceptableMin} 个，可在风险额度允许时补扫一轮。`;
   const rows = eligible.map((job) => {
     const checked = defaultIds.has(job.id) ? " checked" : "";
-    return `<label class="communication-job"><input type="checkbox" name="jobIds" value="${escapeAttr(job.id)}"${checked}><span><strong>${escapeHtml(job.title)}</strong><br><small>${escapeHtml(job.company || "")} · ${escapeHtml(job.decisionBucket)}</small></span></label>`;
+    return `<label class="communication-job"><input type="checkbox" name="jobIds" value="${escapeAttr(job.id)}"${checked}><span><strong>${escapeHtml(job.title)}</strong><br><small>${escapeHtml(communicationSiteLabel(site))} · ${escapeHtml(job.company || "未保存公司")} · ${escapeHtml(communicationJobDecisionLabel(job.decisionBucket))}</small></span></label>`;
   }).join("") || "<p>当前没有可加入的岗位。</p>";
   const blockNotice = runtimeBlock ? `<p class="communication-warning">${escapeHtml(runtimeBlock.reasonCode)}${runtimeBlock.blockedUntil ? ` · ${escapeHtml(runtimeBlock.blockedUntil)}` : ""}</p>` : "";
   const authority = normalizeDashboardBrowserAuthority(browserAuthority);
@@ -6186,7 +6187,7 @@ function renderCommunicationCenterPage({ db, searchParams }) {
         : batch.site === "zhaopin" ? communicationDetailsByPlan(db, { planId: batch.planId, site: batch.site })
           : new Map()
       : new Map();
-    return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({
+    return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({
       scope: { profile, plan, site: batch.site }, current: result.body, directBatch: !workflow, exactBatch: true, integrityIssue, detailsByJobId
     })));
   }
@@ -6197,12 +6198,12 @@ function renderCommunicationCenterPage({ db, searchParams }) {
   const integrityIssue = requestedPlanPresent && !requestedPlan ? "requested_plan_not_found"
     : requestedProfilePresent && !requestedProfile ? "requested_profile_not_found"
       : requestedPlan && requestedProfile && requestedPlan.profileId !== requestedProfile.id ? "requested_scope_mismatch" : "";
-  if (integrityIssue) return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({
+  if (integrityIssue) return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({
     scope: { profile: requestedProfile, plan: requestedPlan }, integrityIssue
   })));
   const profile = requestedProfile || (requestedPlan ? getCandidateProfile(db, requestedPlan.profileId) : listCandidateProfiles(db)[0]) || null;
   const plan = requestedPlan || (profile ? getActiveSearchPlan(db, profile.id) : null);
-  if (!plan || !profile) return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan } })));
+  if (!plan || !profile) return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan } })));
   const runs = site === "zhaopin"
     ? listWorkflowRuns(db, { profileId: profile.id, planId: plan.id, site, limit: 20 })
     : listWorkflowRuns(db, { profileId: profile.id, planId: plan.id, limit: 20 });
@@ -6210,14 +6211,14 @@ function renderCommunicationCenterPage({ db, searchParams }) {
     const runByBatchId = new Map(runs.filter((run) => run.communicationBatchId).map((run) => [Number(run.communicationBatchId), run]));
     const batchIds = listCommunicationBatchIds(db, { planId: plan.id, profileId: profile.id, site, limit: 20 });
     const batches = batchIds.map((id) => communicationApiResult(() => communicationStatus(db, id)));
-    if (batches.some((result) => !result.ok)) return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan, site }, integrityIssue: "communication_batch_unreadable", discoveredWorkflowRuns: runs })));
+    if (batches.some((result) => !result.ok)) return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan, site }, integrityIssue: "communication_batch_unreadable", discoveredWorkflowRuns: runs })));
     const scoped = batches.map((result) => result.body);
     if (scoped.some(({ batch }) => batch.planId !== plan.id || batch.profileId !== profile.id || batch.site !== site)) {
-      return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan, site }, integrityIssue: "communication_batch_owner_mismatch", discoveredWorkflowRuns: runs })));
+      return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan, site }, integrityIssue: "communication_batch_owner_mismatch", discoveredWorkflowRuns: runs })));
     }
     const current = scoped[0] || null;
     const currentRun = current ? runByBatchId.get(Number(current.batch.id)) : null;
-    return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({
+    return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({
       scope: { profile, plan, site }, current, history: scoped.slice(1, 6), discoveredWorkflowRuns: runs,
       detailsByJobId: current ? communicationDetailsByPlan(db, { planId: plan.id, site, workflow: currentRun }) : new Map()
     })));
@@ -6226,15 +6227,15 @@ function renderCommunicationCenterPage({ db, searchParams }) {
   for (const run of runs) {
     if (!run.communicationBatchId) continue;
     const result = communicationApiResult(() => communicationStatus(db, run.communicationBatchId));
-    if (!result.ok) return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan }, integrityIssue: "workflow_batch_unreadable", discoveredWorkflowRuns: runs })));
+    if (!result.ok) return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan }, integrityIssue: "workflow_batch_unreadable", discoveredWorkflowRuns: runs })));
     if (result.body.batch.planId !== plan.id || result.body.batch.profileId !== profile.id) {
-      return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan }, integrityIssue: "workflow_batch_owner_mismatch", discoveredWorkflowRuns: runs })));
+      return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({ scope: { profile, plan }, integrityIssue: "workflow_batch_owner_mismatch", discoveredWorkflowRuns: runs })));
     }
     linked.push({ run, status: result.body });
   }
   const selected = linked.find(({ status }) => !["completed", "stopped", "failed"].includes(status.batch.status)) || linked[0] || null;
   const history = linked.filter((entry) => entry !== selected).slice(0, 5).map((entry) => entry.status);
-  return renderPage("自动沟通", renderCommunicationDocument(buildCommunicationViewModel({
+  return renderPage("沟通清单与记录", renderCommunicationDocument(buildCommunicationViewModel({
     scope: { profile, plan }, current: selected?.status || null, history, discoveredWorkflowRuns: runs,
     detailsByJobId: selected ? communicationDetailsByJobId(db, selected.run) : new Map()
   })));

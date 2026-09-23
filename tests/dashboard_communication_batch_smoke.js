@@ -454,7 +454,8 @@ async function assertCommunicationClient() {
   const builder = await getText(baseUrl, `/communication/new?planId=${fixture.planId}`);
   assert.match(builder.body, new RegExp(`name="jobIds" value="${fixture.primaryId}" checked`));
   assert.match(builder.body, new RegExp(`name="jobIds" value="${fixture.talkId}"`));
-  assert.match(builder.body, /· apply<\/small>/);
+  assert.match(builder.body, /BOSS · Company [^<]+ · 可投<\/small>/);
+  assert.doesNotMatch(builder.body, /· (?:primary|apply|caution)<\/small>/);
   assert.match(builder.body, new RegExp(`name="jobIds" value="${fixture.backupId}"`));
   assert.doesNotMatch(builder.body, new RegExp(`name="jobIds" value="${fixture.backupId}" checked`));
   assert.doesNotMatch(builder.body, new RegExp(`value="${fixture.notRecommendedId}"`));
@@ -557,7 +558,7 @@ async function assertCommunicationClient() {
   const eligibilityQueue = await getText(baseUrl, `/queue?planId=${fixture.planId}&pool=primary`);
   assert.match(eligibilityQueue.body, /资格条件待确认/);
   assert.doesNotMatch(eligibilityQueue.body, />eligibility_review</);
-  assert.match(plan.body, /发送记录/);
+  assert.match(plan.body, /沟通清单与记录/);
   assert.doesNotMatch(plan.body, />Resume</);
 
   await expectApiError(baseUrl, "/api/communication-batch", { planId: fixture.planId, jobIds: fixture.notRecommendedId, browserMode: "edge", title: "forged" }, "COMMUNICATION_JOB_INELIGIBLE");
@@ -601,10 +602,11 @@ async function assertCommunicationClient() {
   const currentBatch = await postJson(baseUrl, "/api/communication-batch", { planId: fixture.planId, jobIds: fixture.safeId, browserMode: "edge" });
   attachWorkflowCommunication(db, { workflowRunId: currentWorkflow.id, communicationBatchId: currentBatch.body.batch.id });
   const automaticCenter = await getText(baseUrl, `/communication?planId=${fixture.planId}`);
-  assert.match(automaticCenter.body, new RegExp(`当前批次</p><h2>批次 #${currentBatch.body.batch.id}</h2>`));
+  assert.match(automaticCenter.body, new RegExp(`当前批次 · BOSS</p><h2>批次 #${currentBatch.body.batch.id}</h2>`));
   assert.match(automaticCenter.body, new RegExp(`href="/communication\\?batchId=${historyBatch.body.batch.id}"`));
   assert.match(automaticCenter.body, /<dt>薪资<\/dt><dd>10-15K<\/dd>/);
   assert.match(automaticCenter.body, /<dt>地点<\/dt><dd>Guangzhou<\/dd>/);
+  assert.match(automaticCenter.body, /BOSS · Company/);
   assert.doesNotMatch(automaticCenter.body, new RegExp(`批次 #${batchId}</h2>`), "unlinked legacy batches must not enter automatic history");
   for (const pathname of [
     "/communication?planId=999999",
@@ -730,13 +732,19 @@ async function assertCommunicationClient() {
   assert.strictEqual((review.body.match(/class="app-shell"/g) || []).length, 1, "communication review must use one shared app shell");
   assert.strictEqual((review.body.match(/class="primary-nav"/g) || []).length, 1, "communication review must use one primary navigation");
   assert.doesNotMatch(review.body, /<main[^>]*>\s*<nav(?:\s|>)/, "communication review must not retain an inner navigation");
-  assert.match(review.body, /实施：已实现/);
-  assert.match(review.body, /校准：已完成/);
-  assert.match(review.body, /端到端验收：accepted/);
-  assert.match(review.body, /技术执行门：已启用/);
+  assert.match(review.body, /平台操作核验：已通过/);
+  assert.doesNotMatch(review.body, /(?:accepted|e2e_pending|implementation|calibration)/);
   const reviewItem = listCommunicationBatchItems(db, batchId)[0];
   assert.match(review.body, /Primary role/);
   assert.match(review.body, /Company primary/);
+  assert.match(review.body, /<dt>岗位判断<\/dt><dd>待确认<\/dd>/);
+  assert.doesNotMatch(review.body, /<dt>岗位判断<\/dt><dd>primary<\/dd>/);
+  const refreshPreview = renderCommunicationPage(buildCommunicationViewModel({
+    scope: { plan: { id: fixture.planId, profileId: fixture.profileId }, site: "boss" },
+    current: communicationStatus({ site: "boss" }, {}, [{ id: 901, batchId: 41, jobId: fixture.primaryId, position: 1, status: "pending", titleSnapshot: "待复核岗位", companySnapshot: "示例公司", tierSnapshot: "refresh" }])
+  }));
+  assert.match(refreshPreview, /<dt>岗位判断<\/dt><dd>待复核<\/dd>/);
+  assert.doesNotMatch(refreshPreview, /<dt>岗位判断<\/dt><dd>refresh<\/dd>/);
   assert.match(review.body, /name="action" value="start"/);
   assert.doesNotMatch(review.body, /验收这个岗位并自动暂停/);
   assert.match(review.body, /class="communication-discard" name="action" value="discard"/);
@@ -848,7 +856,7 @@ async function assertCommunicationClient() {
   assert.doesNotMatch(ambiguousReview.body, /name="action" value="resume"/);
   assert.match(ambiguousReview.body, /等待人工确认沟通结果/);
   assert.match(ambiguousReview.body, /未能确认本次沟通结果，不代表发送失败；OfferGo 已停止且不会自动重试。/);
-  assert.match(ambiguousReview.body, /COMMUNICATION_ACTION_NOT_TRIGGERED/);
+  assert.doesNotMatch(ambiguousReview.body, /COMMUNICATION_ACTION_NOT_TRIGGERED/);
   assert.doesNotMatch(ambiguousReview.body, /重新检查浏览器页面/);
   assert.match(ambiguousReview.body, new RegExp(`href="/communication\\?batchId=${batchId}#communication-item-${ambiguousItem.id}"`));
   assert.match(ambiguousReview.body, new RegExp(`id="communication-item-${ambiguousItem.id}"`));

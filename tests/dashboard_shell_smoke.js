@@ -38,7 +38,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
     { currentPath: "/workflow?runId=workflow-17", todayPath: "/plan?planId=17", label: "发现岗位" },
     { currentPath: "/queue?planId=17&pool=primary", href: "/queue?planId=17&amp;pool=primary", todayPath: "/plan?planId=17", label: "岗位记录" },
     { currentPath: "/jobs?planId=17&batch=latest", href: "/jobs?planId=17&amp;batch=latest", todayPath: "/plan?planId=17", label: "岗位记录" },
-    { currentPath: "/communication?planId=17", href: "/communication?planId=17", todayPath: "/plan?planId=17", label: "发送记录" },
+    { currentPath: "/communication?planId=17", href: "/communication?planId=17", todayPath: "/plan?planId=17", label: "沟通清单与记录" },
     { currentPath: "/messages?planId=17", href: "/messages?planId=17", todayPath: "/plan?planId=17", label: "消息与回复" },
     { currentPath: "/funnel?planId=17", href: "/funnel?planId=17", todayPath: "/plan?planId=17", label: "求职体检" },
     { currentPath: "/resume-optimization?planId=17", href: "/resume-optimization?planId=17", todayPath: "/plan?planId=17", label: "简历工作室" },
@@ -51,8 +51,8 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
     assertCurrentLink(markup, navigationCase.href || navigationCase.currentPath, navigationCase.label);
   }
   const builderNavigation = renderNavigation({ currentPath: "/communication/new?planId=17", todayPath: "/plan?planId=17", planId: 17 });
-  assert.match(builderNavigation, /<a[^>]*href="\/communication\?planId=17"[^>]*>发送记录<\/a>/);
-  assert.doesNotMatch(builderNavigation, /<a[^>]*aria-current="page"[^>]*>发送记录<\/a>/);
+  assert.match(builderNavigation, /<a[^>]*href="\/communication\?planId=17"[^>]*>沟通清单与记录<\/a>/);
+  assert.doesNotMatch(builderNavigation, /<a[^>]*aria-current="page"[^>]*>沟通清单与记录<\/a>/);
   const encodedPlanNavigation = renderNavigation({ currentPath: "/queue?planId=plan%20id%2F17", todayPath: "/plan?planId=plan%20id%2F17", planId: "plan id/17" });
   assert.match(encodedPlanNavigation, /href="\/queue\?planId=plan%20id%2F17" aria-current="page">岗位记录<\/a>/);
 
@@ -124,7 +124,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
 
     const communication = await getText(baseUrl, `/communication?planId=${queueFixture.planId}`);
     assertSharedFrame(communication.body, `/communication\?planId=${queueFixture.planId}`, "communication center");
-    assert.match(communication.body, /<h1>自动沟通<\/h1>/);
+    assert.match(communication.body, /<h1>沟通清单与记录<\/h1>/);
     assert.match(communication.body, /进入清单页不会创建、确认或启动任何沟通/);
     assert.strictEqual((communication.body.match(/data-page-primary="true"/g) || []).length, 1, "communication center must have one primary action");
 
@@ -242,7 +242,7 @@ function assertSharedFrame(markup, href, name, current = true) {
   if (current) {
     assert.match(markup, new RegExp(`<a[^>]*href="${escapeRegExp(href)}"[^>]*aria-current="page"`), `${name} must preserve its active navigation`);
   } else {
-    const link = markup.match(new RegExp(`<a[^>]*href="${escapeRegExp(href)}"[^>]*>发送记录</a>`));
+    const link = markup.match(new RegExp(`<a[^>]*href="${escapeRegExp(href)}"[^>]*>沟通清单与记录</a>`));
     assert(link, `${name} must link to the communication center`);
     assert.doesNotMatch(link[0], /aria-current="page"/, `${name} is not the records page`);
   }

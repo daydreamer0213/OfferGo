@@ -14,11 +14,11 @@ const jobs = renderNavigation({ ...plan, currentPath: "/jobs?planId=7&batch=late
 assertCurrent(jobs, "/jobs?planId=7&amp;batch=latest", "岗位记录");
 
 const builder = renderNavigation({ ...plan, currentPath: "/communication/new?planId=7" });
-assert.match(builder, /<a[^>]*href="\/communication\?planId=7"[^>]*>发送记录<\/a>/);
-assert.doesNotMatch(builder, /<a[^>]*aria-current="page"[^>]*>发送记录<\/a>/);
+assert.match(builder, /<a[^>]*href="\/communication\?planId=7"[^>]*>沟通清单与记录<\/a>/);
+assert.doesNotMatch(builder, /<a[^>]*aria-current="page"[^>]*>沟通清单与记录<\/a>/);
 
 const center = renderNavigation({ ...plan, currentPath: "/communication?planId=7&batchId=19&site=zhaopin", todayPath: "/plan?planId=7&site=zhaopin" });
-assertCurrent(center, "/communication?planId=7&amp;batchId=19&amp;site=zhaopin", "发送记录");
+assertCurrent(center, "/communication?planId=7&amp;batchId=19&amp;site=zhaopin", "沟通清单与记录");
 
 const messages = renderNavigation({ ...plan, currentPath: "/messages?planId=7" });
 assertCurrent(messages, "/messages?planId=7", "消息与回复");

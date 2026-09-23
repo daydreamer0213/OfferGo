@@ -114,7 +114,7 @@ function itemView(item = {}, detailsByJobId, site = "boss") {
   const detail = detailsByJobId instanceof Map ? detailsByJobId.get(number(item.jobId)) || {} : {};
   const analysis = detail.analysis || {};
   return {
-    id: number(item.id), batchId: number(item.batchId), jobId: number(item.jobId), position: number(item.position), status: text(item.status), clickCount: number(item.clickCount),
+    id: number(item.id), batchId: number(item.batchId), jobId: number(item.jobId), site, position: number(item.position), status: text(item.status), clickCount: number(item.clickCount),
     title: text(item.titleSnapshot || detail.title), company: text(item.companySnapshot || detail.company), jobUrl: safeJobUrl(item.jobUrl || detail.url, site),
     salary: text(detail.salary || item.salarySnapshot || "未保存"), location: text(detail.location || item.locationSnapshot || "未保存"),
     tier: text(detail.decisionBucket || item.tierSnapshot || "未保存"), evidence: stringList(analysis.fitReasons || detail.matches || item.evidenceSnapshot || item.evidence?.resume || []),

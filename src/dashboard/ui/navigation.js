@@ -28,7 +28,7 @@ function renderNavigation({ currentPath = "", todayPath = "", planId = "" } = {}
       ]),
       navigationGroup("沟通", [
         navigationLink(messagesHref, "消息与回复", currentRoute === "/messages"),
-        navigationLink(communicationHref, "发送记录", currentRoute === "/communication")
+        navigationLink(communicationHref, "沟通清单与记录", currentRoute === "/communication")
       ]),
       navigationGroup("成长", [
         navigationLink(resumeHref, "简历工作室", resumeRoutes.includes(currentRoute)),
