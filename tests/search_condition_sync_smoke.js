@@ -10,7 +10,7 @@ async function waitUntil(check) {
   throw new Error('timed out waiting for the held browser read');
 }
 
-function today(site, active = false) {
+function today(site, active = false, scanRunning = false) {
   const vm = buildTodayViewModel({
     site,
     enabledPlatforms: ['boss', 'zhaopin'],
@@ -22,6 +22,7 @@ function today(site, active = false) {
   });
   vm.primary = { type: 'link', href: '#', label: '继续' };
   if (active) vm.form.acquisition.activeSnapshot = { summary: '城市：广州' };
+  if (scanRunning) vm.run.state = 'running';
   return renderTodayPage(vm);
 }
 
@@ -89,13 +90,29 @@ async function main() {
     await activePage.route('**/*', route => {
       const pathname = new URL(route.request().url()).pathname;
       if (pathname === '/plan') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: today('zhaopin', true) });
-      if (pathname === '/api/acquisition-preview' || pathname === '/api/platform-search/save') activeReads++;
+      if (pathname === '/api/acquisition-preview' || pathname === '/api/platform-search/save') {
+        activeReads++;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ready', summary: '城市：深圳' }) });
+      }
       return route.fulfill({ status: 204 });
     });
     await activePage.goto('http://offergo.test/plan');
-    await activePage.evaluate(() => window.dispatchEvent(new Event('focus')));
-    assert.equal(activeReads, 0, 'active workflow must not auto-save new conditions');
+    await activePage.locator('[data-condition-status]').getByText(/下一轮.*城市：深圳/).waitFor({ timeout: 3000 });
+    assert.equal(await activePage.locator('[data-discovery-scope]').innerText(), '城市：广州', 'current workflow keeps its frozen conditions');
+    assert.equal(activeReads, 1, 'review-stage workflow can update next-run conditions');
     await activePage.close();
+    const runningPage = await browser.newPage();
+    let runningReads = 0;
+    await runningPage.route('**/*', route => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/plan') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: today('zhaopin', true, true) });
+      if (pathname === '/api/platform-search/save') runningReads++;
+      return route.fulfill({ status: 204 });
+    });
+    await runningPage.goto('http://offergo.test/plan');
+    await runningPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.equal(runningReads, 0, 'running scan must not trigger extra browser reads');
+    await runningPage.close();
     console.log('search_condition_sync_smoke ok');
   } finally { await browser.close(); }
 }
