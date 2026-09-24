@@ -42,8 +42,7 @@ class MockModelAdapter {
   async recommendSearchPlan({ candidateProfile = {} } = {}) {
     const candidate = candidateProfile.candidate || {};
     const targetTitles = candidate.targetTitles || [];
-    const skills = (candidateProfile.skills || []).map((item) => typeof item === "string" ? item : item.name);
-    const keywords = [...targetTitles, ...skills.filter((skill) => /RAG|Agent|Python|FastAPI|知识库|数据|后端/i.test(skill))]
+    const keywords = [...targetTitles]
       .filter(Boolean)
       .slice(0, 10)
       .map((word, index) => ({ word, priority: index < 4 ? "A" : "B", reason: "离线简历关键词提取" }));
@@ -372,7 +371,7 @@ function profileFromResumeText(resumeText) {
   const text = String(resumeText || "");
   const city = pickFirst(text, ["广州", "深圳", "北京", "上海", "杭州", "成都", "武汉", "南京", "苏州", "长沙", "佛山", "东莞"]);
   const targetTitles = ["AI应用开发工程师", "大模型应用开发", "RAG工程师", "Agent工程师", "Python后端", "Python开发工程师"]
-    .filter((term) => sameText(text, term));
+    .filter((term) => String(text).replace(/\s+/g, "").toLowerCase().includes(term.toLowerCase()));
   const skills = ["Python", "FastAPI", "RAG", "Agent", "LangChain", "LangGraph", "知识库", "向量数据库", "Docker", "MySQL", "Redis", "Java", "Spring Boot"]
     .filter((term) => sameText(text, term))
     .map((name) => ({ name, level: "resume", evidence: [] }));

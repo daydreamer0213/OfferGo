@@ -1,6 +1,7 @@
 const { createLlmAnalyzer } = require("./llm_analyzer");
 const { normalizeCandidateProfile, normalizeSearchPlan } = require("./profile_schema");
 const { prepareResumeTextForModel } = require("./resume_privacy");
+const { selectGeneratedRoleKeywords } = require("./search_keyword_quality");
 
 async function analyzeResumeToPlan({ modelConfig, resume, logger = null, identity = null, strictPrivacy = false }) {
   const profile = await analyzeResumeProfile({ modelConfig, resume, logger, identity, strictPrivacy });
@@ -43,11 +44,19 @@ async function analyzeResumeProfile({
   });
 }
 
-async function recommendPlanForProfile({ modelConfig, profile, logger = null }) {
-  const analyzer = createLlmAnalyzer({ modelConfig, logger });
+async function recommendPlanForProfile({ modelConfig, profile, logger = null, analyzerFactory = createLlmAnalyzer }) {
+  const analyzer = analyzerFactory({ modelConfig, logger });
   const rawPlan = await analyzer.recommendSearchPlan({ candidateProfile: profile });
+  const keywords = selectGeneratedRoleKeywords(profile, rawPlan);
+  if (!keywords.length) {
+    const error = new Error("简历和模型建议中没有可用于搜索的岗位名称，请先确认目标岗位。");
+    error.code = "SEARCH_PLAN_NO_ROLE_KEYWORDS";
+    throw error;
+  }
   return normalizeSearchPlan({
     ...rawPlan,
+    keywords,
+    directions: keywords.map((item) => item.word),
     salary: { minK: 0, maxK: 0 },
     salaryMinK: 0,
     salaryMaxK: 0,

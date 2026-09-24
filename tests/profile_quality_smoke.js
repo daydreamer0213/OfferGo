@@ -4,7 +4,9 @@ const { profileToRuntimeConfigs, resolveScanPolicy, applyScanPolicyToFilters } =
 const { resolveNativeFilterSnapshot } = require("../src/core/platform_filters");
 const { validateSearchPlan, assertSearchPlanReady } = require("../src/core/plan_validation");
 const { OpenAICompatibleAdapter } = require("../src/adapters/models/openai_compatible");
-const { prepareResumeTextForModel, buildCandidateMatchCard } = require("../src/core/profile_onboarding");
+const { MockModelAdapter } = require("../src/adapters/models/mock");
+const { prepareResumeTextForModel, buildCandidateMatchCard, recommendPlanForProfile } = require("../src/core/profile_onboarding");
+const { selectGeneratedRoleKeywords } = require("../src/core/search_keyword_quality");
 const { validateModelResult, ModelContractError } = require("../src/core/model_contract");
 const { PRODUCT_POLICY_VERSION, PRODUCT_POLICY } = require("../src/core/product_policy");
 
@@ -43,6 +45,48 @@ assert.deepStrictEqual(profile.strengths, ["可独立完成 Agent 项目"]);
 assert.deepStrictEqual(profile.riskMessaging, {});
 assert.deepStrictEqual(profile.evidenceGaps, []);
 
+const roleKeywordCases = [
+  {
+    targetTitles: ["AI应用开发工程师"],
+    proposed: ["Agent 工具调用", "Function Calling", "AI应用开发", "Agent开发工程师", "RAG工程师", "AI求职工具开发"],
+    directions: ["Agent 智能体开发", "AI 求职工具开发"],
+    expected: ["AI应用开发工程师", "Agent开发工程师", "RAG工程师"]
+  },
+  {
+    targetTitles: ["电商运营"],
+    proposed: ["活动复盘", "店铺运营", "投放ROI复盘"],
+    expected: ["电商运营", "店铺运营"]
+  },
+  {
+    targetTitles: ["产品经理"],
+    proposed: ["需求分析", "B端产品经理", "原型设计"],
+    expected: ["产品经理", "B端产品经理"]
+  },
+  {
+    targetTitles: ["财务会计"],
+    proposed: ["凭证录入", "成本会计", "Excel透视表"],
+    expected: ["财务会计", "成本会计"]
+  },
+  {
+    targetTitles: ["数据分析", "平面设计"],
+    proposed: ["SQL查询", "用户行为分析"],
+    expected: ["数据分析", "平面设计"]
+  }
+];
+for (const item of roleKeywordCases) {
+  const selected = selectGeneratedRoleKeywords({ candidate: { targetTitles: item.targetTitles } }, {
+    keywords: item.proposed.map((word) => ({ word, priority: "A", reason: "模型建议" })),
+    directions: item.directions || []
+  });
+  assert.deepStrictEqual(selected.map((keyword) => keyword.word), item.expected);
+}
+assert.deepStrictEqual(
+  selectGeneratedRoleKeywords({ candidate: { targetTitles: [] }, experiences: [{ role: "客户成功专员" }] }, {
+    keywords: [{ word: "CRM配置", priority: "A" }]
+  }).map((keyword) => keyword.word),
+  ["客户成功专员"]
+);
+
 const plan = normalizeSearchPlan({
   cities: ["广州"],
   experience: ["0-3年", "1-3年"],
@@ -58,6 +102,9 @@ assert.strictEqual(plan.scan.maxDetailTotal, 300);
 assert.strictEqual(plan.scan.maxCards, PRODUCT_POLICY.searchPlan.broadScanDefaults.maxCards);
 assert.strictEqual(Object.hasOwn(plan.scan, "detailLimit"), false);
 const defaultSalaryModePlan = normalizeSearchPlan({}, profile);
+assert.strictEqual(validateSearchPlan(normalizeSearchPlan({
+  directions: ["电商运营"], keywords: [{ word: "电商运营", priority: "A" }]
+}, profile), profile).valid, true, "一个真实岗位词也应允许开始找岗");
 assert.strictEqual(defaultSalaryModePlan.salaryMode, "strict");
 assert.strictEqual(normalizeSearchPlan({ salaryMode: "invalid" }, profile).salaryMode, "strict");
 assert.strictEqual(normalizeSearchPlan({ salaryMode: "wide" }, profile).salaryMode, "wide");
@@ -172,7 +219,7 @@ assert.deepStrictEqual(
 assert.strictEqual(
   validateSearchPlan({
     ...noCityPlan,
-    keywords: [{ word: "Python后端", priority: "A" }]
+    keywords: []
   }, profile, { acquisitionMode: "inherited" }).valid,
   false,
   "inherited acquisition must retain shared keyword safety checks"
@@ -235,6 +282,8 @@ adapter.chatJson = async (prompt) => {
 };
 
 (async () => {
+  const parsedResume = await new MockModelAdapter().analyzeResume({ resumeText: "求职意向：AI应用开发工程师 / Python 后端 / RAG 工程师" });
+  assert.deepStrictEqual(parsedResume.candidate.targetTitles, ["AI应用开发工程师", "RAG工程师", "Python后端"]);
   await adapter.analyzeResume({});
   await adapter.recommendSearchPlan({});
   assert(resumePrompt.includes("不要评价简历质量"));
@@ -255,6 +304,20 @@ adapter.chatJson = async (prompt) => {
     credentials: [],
     strengths: []
   };
+  const generatedEcommercePlan = await recommendPlanForProfile({ modelConfig: { provider: "mock", providers: { mock: {} } }, profile: ecommerceProfile });
+  assert.deepStrictEqual(generatedEcommercePlan.keywords.map((item) => item.word), ["电商运营"]);
+  assert.deepStrictEqual(generatedEcommercePlan.directions, ["电商运营"]);
+  const dirtyPlan = await recommendPlanForProfile({ profile, analyzerFactory: () => ({
+    recommendSearchPlan: async () => ({
+      directions: ["AI应用开发工程师", "Agent 工具调用"],
+      keywords: [
+        { word: "Agent 工具调用", priority: "A" },
+        { word: "Agent开发工程师", priority: "A" }
+      ]
+    })
+  }) });
+  assert.deepStrictEqual(dirtyPlan.keywords.map((item) => item.word), ["AI应用开发工程师", "Agent开发工程师"]);
+  assert.deepStrictEqual(dirtyPlan.directions, ["AI应用开发工程师", "Agent开发工程师"]);
   let cardInput = null;
   const cardAdapter = {
     async buildCandidateMatchCard(input) {
