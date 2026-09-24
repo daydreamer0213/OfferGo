@@ -2,7 +2,7 @@ const { formatNativeFilterSummary } = require("../../core/platform_filters");
 const { feedbackReasonLabel } = require("../../core/feedback");
 const { PRODUCT_POLICY } = require("../../core/product_policy");
 const { acquisitionModeOf, generatedPlatformOf } = require("../../core/search_plan_schema");
-const { selectedZhaopinFilters } = require("../../core/zhaopin_search_scope");
+const { zhaopinSearchDisplaySummary } = require("../../core/zhaopin_search_scope");
 
 function buildTodayViewModel(input = {}) {
   const site = input.site || "boss";
@@ -35,7 +35,7 @@ function buildTodayViewModel(input = {}) {
     generated,
     inheritedPreview: {
       status: "idle",
-      summary: "读取当前 BOSS 搜索页后显示",
+      summary: "正在读取当前搜索页条件…",
       ...(input.inheritedPreview || {}),
       endpoint: `/api/acquisition-preview?planId=${encodeURIComponent(planId)}`
     },
@@ -141,8 +141,8 @@ function buildTodayViewModel(input = {}) {
     vm.heading.meta[0] += ' · 智联';
     vm.form.acquisition.mode = 'inherited';
     vm.form.acquisition.inheritedPreview.summary = input.platformContext
-      ? selectedZhaopinFilters(input.platformContext.filterSummary).join('；') || '已保存：当前页面未额外限制条件'
-      : '尚未读取智联条件。先准备搜索页，设置好后回到 OfferGo，系统会自动更新。';
+      ? zhaopinSearchDisplaySummary(input.platformContext.filterSummary)
+      : '正在读取当前智联搜索页条件…';
     vm.form.acquisition.inheritedPreview.endpoint += '&site=zhaopin';
     vm.platformContext = input.platformContext || null;
     if (!activeRun && !input.platformContext && vm.primary.type === 'form') {
@@ -198,10 +198,10 @@ function acquisitionSummary(planner = {}) {
   if (planner.acquisitionMode === "generated") {
     const cities = (planner.cityScopes || []).map((item) => item.city || item.cityCode).filter(Boolean);
     const filters = Object.values(planner.nativeFilters?.labels || {}).flat();
-    return ["通用模式", ...cities, ...filters].join(" · ");
+    return [...cities, ...filters].join(" · ") || "按本轮保存的搜索条件";
   }
   const filters = (planner.platformPolicy?.filterSummary || []).filter(Boolean);
-  return ["继承模式", ...filters].join(" · ");
+  return filters.join(" · ") || "按本轮保存的搜索页条件";
 }
 
 function scanLabel(run = {}, bossActiveDays = PRODUCT_POLICY.searchPlan.defaultBossActiveDays) {

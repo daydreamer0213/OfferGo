@@ -13,6 +13,16 @@ function selectedZhaopinFilters(values) {
     .filter(value => value && !DEFAULT_FILTER_LABELS.has(value));
 }
 
+function zhaopinSearchDisplaySummary(values) {
+  const labels = (Array.isArray(values) ? values : []).map(value => String(value || "").replace(/\s+/g, " ").trim());
+  const location = labels[0] && labels[0] !== "地区" ? labels[0].replace(/^(?:地点|城市|区域)：/, "") : "不限";
+  const names = ["", "薪资", "学历", "经验", "公司性质", "融资阶段", "公司人数", "工作性质", "职位类别", "公司行业"];
+  const others = labels.length === names.length
+    ? labels.slice(1).flatMap((value, index) => value && !DEFAULT_FILTER_LABELS.has(value) ? [`${names[index + 1]}：${value}`] : [])
+    : selectedZhaopinFilters(labels.slice(1));
+  return [`地点：${location}`, ...others, ...(others.length ? [] : ["其余条件不限"])].join(" · ");
+}
+
 function canonicalizeZhaopinSearchTemplate(rawUrl) {
   const url = parseZhaopinUrl(rawUrl, "ZHAOPIN_SEARCH_PAGE_INVALID", "当前标签页不是可用的智联搜索页。");
   if (url.pathname !== ZHAOPIN_SEARCH_PATH || url.searchParams.get("pageMode") !== "search") {
@@ -75,4 +85,4 @@ function scopeError(code, message, cause) {
   return error;
 }
 
-module.exports = { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, zhaopinJobIdentity, selectedZhaopinFilters };
+module.exports = { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, zhaopinJobIdentity, selectedZhaopinFilters, zhaopinSearchDisplaySummary };

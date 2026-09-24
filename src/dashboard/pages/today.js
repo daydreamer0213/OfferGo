@@ -3,7 +3,7 @@ const { renderDashboardFrame } = require("../ui/shell");
 
 function renderTodayPage(vm) {
   const page = vm.page || {};
-  return renderDashboardFrame({ currentPath: page.todayPath, todayPath: page.todayPath, planId: page.planId, stage: "今日任务", brandHref: page.todayPath, content: `<main id="main-content" class="today-main">
+  return renderDashboardFrame({ currentPath: page.todayPath, todayPath: page.todayPath, planId: page.planId, stage: "今日任务", brandHref: page.todayPath, runtimeAction: `<span data-condition-controls${page.site !== 'zhaopin' && vm.form?.acquisition?.mode === 'generated' ? ' hidden' : ''}><button class="secondary" type="button" data-condition-refresh${vm.run?.state === 'running' ? ' disabled' : ''}>重新读取搜索条件</button></span>`, content: `<main id="main-content" class="today-main">
   <section class="page-heading" aria-labelledby="today-title"><p class="eyebrow">${escapeHtml(vm.heading?.eyebrow || "")}</p><h1 id="today-title">${escapeHtml(vm.heading?.title || "今日任务")}</h1><p class="lede">${escapeHtml(vm.heading?.lede || "")}</p><div class="heading-meta"><span>${escapeHtml(vm.heading?.meta?.[0] || "")}</span><span>${escapeHtml(vm.heading?.meta?.[1] || "")}</span><span class="status ${vm.heading?.status === "方案可用" ? "good" : "waiting"}">${escapeHtml(vm.heading?.status || "")}</span></div></section>
   ${renderPrimaryPanel(vm)}
   ${renderPlatformSelector(vm)}
@@ -25,11 +25,9 @@ function renderPlatformSelector(vm) {
   const platformControl = enabled.length > 1
     ? `<form method="get" action="/plan"><input type="hidden" name="planId" value="${escapeAttr(page.planId)}"><label>本次找岗平台 <select name="site" aria-label="本次找岗平台" data-platform-selector onchange="if(this.value==='both'){document.querySelectorAll('form.workflow-start input[name=site]').forEach(input=>input.value='both');const label=document.querySelector('[data-discovery-platform]');if(label)label.textContent='BOSS + 智联';const scope=document.querySelector('[data-discovery-scope]');if(scope)scope.textContent='正在读取两边的搜索范围…';const words=document.querySelector('[data-discovery-keywords]');if(words)words.textContent='两边会分别选择关键词，开始后可查看各自进度';window.dispatchEvent(new Event('offergo:conditions'));return;}this.form.submit()">${enabled.includes('boss') ? `<option value="boss"${zl ? '' : ' selected'}>BOSS</option>` : ''}${enabled.includes('zhaopin') ? `<option value="zhaopin"${zl ? ' selected' : ''}>智联</option>` : ''}<option value="both">BOSS + 智联（同时）</option></select></label><noscript><button>切换平台</button></noscript></form>`
     : `<span class="workflow-budget">本次找岗平台：${zl ? '智联' : 'BOSS'}</span><a class="button quiet" href="/settings/platforms">管理平台</a>`;
-  const active = Boolean(vm.form?.acquisition?.activeSnapshot);
   const scanRunning = vm.run?.state === 'running';
-  const generated = !zl && vm.form?.acquisition?.mode === 'generated';
   const generatedScope = acquisitionDisplaySummary({ mode: 'generated', generated: vm.form?.acquisition?.generated }, vm.profile);
-  return `<div id="platform-search-actions" class="button-row" data-generated-scope="${escapeAttr(generatedScope)}">${platformControl}${zl ? `<button class="secondary" type="button" data-platform-action="open"${scanRunning ? ' disabled' : ''}>准备智联搜索页</button>` : ''}<span data-condition-controls${generated ? ' hidden' : ''}><button class="secondary" type="button" data-condition-refresh${scanRunning ? ' disabled' : ''}>重新读取搜索条件</button></span><p role="status" aria-live="polite" data-condition-status${generated ? ' hidden' : ''}>${scanRunning ? '当前正在找岗，结束后可读取下一轮条件。' : active ? '当前任务条件不变；正在读取下一轮条件…' : '正在读取搜索页条件…'}</p></div>`;
+  return `<div id="platform-search-actions" class="button-row" data-generated-scope="${escapeAttr(generatedScope)}">${platformControl}${zl ? `<button class="secondary" type="button" data-platform-action="open"${scanRunning ? ' disabled' : ''}>准备智联搜索页</button>` : ''}</div>`;
 }
 
 function renderDiscoveryPlan(vm) {
@@ -46,14 +44,11 @@ function renderDiscoveryPlan(vm) {
   const round = discovery.active ? `正在第 ${used || 1} 轮 / 最多 ${max} 轮`
     : used >= max ? `今天已进行 ${used} 轮 / 最多 ${max} 轮`
       : `即将开始第 ${used + 1} 轮 / 最多 ${max} 轮`;
-  const nextAt = Date.parse(discovery.nextRunAt || "");
-  const interval = Number.isFinite(nextAt) && nextAt > Date.now()
-    ? `下轮建议 ${new Date(nextAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} 后开始`
-    : "两轮通常至少间隔 2 小时";
   const keywordMarkup = keywords.length
     ? keywords.map((word) => `<span class="today-discovery-keyword">${escapeHtml(word)}</span>`).join("")
     : `<span class="today-discovery-empty">尚无可用关键词，请先调整找岗范围。</span>`;
-  return `<section class="card today-discovery-plan" aria-labelledby="today-plan-title"><header class="card-head"><h2 id="today-plan-title">这轮会怎么找</h2><span class="tiny">开始前可检查</span></header><div class="today-discovery-grid"><div><span class="today-discovery-label">招聘平台</span><strong data-discovery-platform>${escapeHtml(site)}</strong></div><div><span class="today-discovery-label">工作地点与平台条件</span><strong data-discovery-scope>${escapeHtml(scope)}</strong></div><div class="today-discovery-wide"><span class="today-discovery-label">${keywordTitle}</span><div class="today-discovery-keywords" data-discovery-keywords>${keywordMarkup}</div><small>${keywordNote}</small></div><div><span class="today-discovery-label">今天的进度</span><strong>${escapeHtml(round)}</strong></div><div><span class="today-discovery-label">两轮之间</span><strong>${escapeHtml(interval)}</strong></div></div><footer class="today-discovery-foot"><span>先补全岗位详情，再结合简历判断；不会用明显不合适的岗位凑数。</span><a href="#plan-settings">调整找岗范围 →</a></footer></section>`;
+  const scopeLabel = vm.run?.state === 'running' ? '本轮工作地点与平台条件' : vm.form?.acquisition?.activeSnapshot ? '下轮工作地点与平台条件' : '工作地点与平台条件';
+  return `<section class="card today-discovery-plan" aria-labelledby="today-plan-title"><header class="card-head"><h2 id="today-plan-title">本次找岗范围</h2><span class="tiny">开始前可检查</span></header><div class="today-discovery-grid"><div><span class="today-discovery-label">招聘平台</span><strong data-discovery-platform>${escapeHtml(site)}</strong></div><div><span class="today-discovery-label" data-discovery-scope-label>${scopeLabel}</span><strong data-discovery-scope>${escapeHtml(scope)}</strong><small role="status" aria-live="polite" data-condition-status${vm.page?.site !== 'zhaopin' && vm.form?.acquisition?.mode === 'generated' ? ' hidden' : ''}>${vm.run?.state === 'running' ? '正在找岗，结束后可读取新的搜索条件。' : '正在读取搜索页条件…'}</small></div><div class="today-discovery-wide"><span class="today-discovery-label">${keywordTitle}</span><div class="today-discovery-keywords" data-discovery-keywords>${keywordMarkup}</div><small>${keywordNote}</small></div><div><span class="today-discovery-label">今天的进度</span><strong>${escapeHtml(round)}</strong></div></div><footer class="today-discovery-foot"><a href="#plan-settings">调整找岗范围 →</a></footer></section>`;
 }
 
 function renderPrimaryPanel(vm) {
@@ -166,7 +161,7 @@ function acquisitionDisplaySummary(acquisition = {}, profile = {}) {
     ];
     return values.join(" · ") || "未额外限制平台条件";
   }
-  return acquisition.inheritedPreview?.summary || profile.bossFilter?.summary || "读取当前 BOSS 搜索页后显示";
+  return acquisition.inheritedPreview?.summary || profile.bossFilter?.summary || "正在读取当前搜索页条件…";
 }
 
 function statusText(tone) { return { good: "已检查", waiting: "待处理", danger: "需恢复" }[tone] || "提示"; }
@@ -303,9 +298,9 @@ function renderConditionSyncScript(vm) {
     const site=${JSON.stringify(site)}, planId=${planId}, active=${active}, scanRunning=${scanRunning}, hadStoredZhaopinContext=${hadStoredZhaopinContext};
     const container=document.getElementById('platform-search-actions');
     const selector=container?.querySelector('[data-platform-selector]');
-    const controls=container?.querySelector('[data-condition-controls]');
-    const button=container?.querySelector('[data-condition-refresh]');
-    const status=container?.querySelector('[data-condition-status]');
+    const controls=document.querySelector('[data-condition-controls]');
+    const button=document.querySelector('[data-condition-refresh]');
+    const status=document.querySelector('[data-condition-status]');
     const scope=document.querySelector('[data-discovery-scope]');
     const planScope=document.querySelector('[data-plan-platform-scope]');
     const preview=document.querySelector('[data-platform-preview]');
@@ -326,13 +321,15 @@ function renderConditionSyncScript(vm) {
       const value=await response.json();
       if(!response.ok)throw new Error(value.error||'BOSS 搜索页暂时无法读取。');
       if(value.status!=='ready')throw new Error('BOSS 有些搜索条件尚未读清，请检查搜索页后重试。');
-      return value.summary||'当前 BOSS 搜索页未额外限制条件';
+      if(!value.summary)throw new Error('BOSS 搜索页条件尚未读清。');
+      return value.summary;
     }
     async function readZhaopin(){
       const response=await fetch('/api/platform-search/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({site:'zhaopin',planId})});
       const value=await response.json();
       if(!response.ok)throw new Error(value.error||'智联搜索页暂时无法读取。');
-      return value.summary||'当前智联搜索页未额外限制条件';
+      if(!value.summary)throw new Error('智联搜索页条件尚未读清。');
+      return value.summary;
     }
     async function refresh(manual=false){
       if(scanRunning)return;
@@ -355,8 +352,9 @@ function renderConditionSyncScript(vm) {
         }
         if(selected!==target()||modeAtStart!==bossMode()){pendingRefresh=true;return;}
         const summary=selected==='both'?summaries.map(item=>item[0]+'：'+item[1]).join('；'):summaries[0][1];
-        if(!active){scope.textContent=summary;if(planScope)planScope.textContent=summary;}
-        status.textContent=active?'下一轮：'+summary+'。当前任务仍按启动时的条件继续。':selected==='both'?'两边条件已更新，下一轮会使用这些条件。':'已更新，下一轮会使用这些条件。';
+        scope.textContent=summary;
+        if(!active&&planScope)planScope.textContent=summary;
+        status.textContent=active?'当前任务不变，新的条件将在下轮使用。':'已读取搜索页当前条件。';
         if(site==='zhaopin'&&!hadStoredZhaopinContext)location.assign('/plan?planId='+planId+'&site=zhaopin&platformSaved=1');
       }catch(error){
         if(selected!==target()||modeAtStart!==bossMode()){pendingRefresh=true;return;}

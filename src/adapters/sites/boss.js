@@ -853,6 +853,7 @@ class BossSiteAdapter {
     await this.assertSearchPage(selectedTabId);
     const state = await this.browser.evalValue(selectedTabId, `(() => ({
       url: location.href,
+      displayCity: (document.querySelector(".city-label.active .cur-city-label")?.textContent || "").replace(/\\s+/g, " ").trim(),
       rawFields: Array.from(document.querySelectorAll(".condition-filter-select")).map((node) => ({
         label: (node.querySelector(".current-select .placeholder-text")?.textContent || "").replace(/\\s+/g, " ").trim(),
         options: Array.from(node.querySelectorAll("[ka*='sel-job-rec-']")).map((option) => ({
@@ -900,6 +901,7 @@ class BossSiteAdapter {
     return {
       tabId: selectedTabId,
       url: String(state?.url || ""),
+      displayCity: String(state?.displayCity || "").trim(),
       searchTemplate,
       catalog: parseBossFilterCatalog(state?.rawFields || []),
       urlOptions: dedupeBossUrlOptions([

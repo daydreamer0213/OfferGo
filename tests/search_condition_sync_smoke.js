@@ -97,8 +97,9 @@ async function main() {
       return route.fulfill({ status: 204 });
     });
     await activePage.goto('http://offergo.test/plan');
-    await activePage.locator('[data-condition-status]').getByText(/下一轮.*城市：深圳/).waitFor({ timeout: 3000 });
-    assert.equal(await activePage.locator('[data-discovery-scope]').innerText(), '城市：广州', 'current workflow keeps its frozen conditions');
+    await activePage.locator('[data-discovery-scope]').getByText('城市：深圳').waitFor({ timeout: 3000 });
+    assert.equal(await activePage.locator('[data-discovery-scope-label]').innerText(), '下轮工作地点与平台条件');
+    assert.match(today('zhaopin', true), /data-discovery-scope>城市：广州</, 'the running workflow retains its saved scope before the live next-round preview arrives');
     assert.equal(activeReads, 1, 'review-stage workflow can update next-run conditions');
     await activePage.close();
     const runningPage = await browser.newPage();

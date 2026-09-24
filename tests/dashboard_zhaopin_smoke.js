@@ -105,9 +105,12 @@ async function main() {
     bridge.filterSummary = ['地区', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'];
     response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).summary, '当前页面未额外限制条件', 'default filter headings are not selected conditions');
+    assert.equal((await response.json()).summary, '地点：不限 · 其余条件不限', 'default filter headings mean no native filters are selected');
     const defaultPage = await (await fetch(`${base}/plan?planId=${saved.planId}&site=zhaopin`)).text();
-    assert.match(defaultPage, /已保存：当前页面未额外限制条件/);
+    assert.match(defaultPage, /地点：不限 · 其余条件不限/);
+    bridge.filterSummary = ['广东', '1-1.2万', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'];
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal((await response.json()).summary, '地点：广东 · 薪资：1-1.2万');
     bridge.filterSummary = ['广东'];
     response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200);
@@ -516,7 +519,7 @@ async function journey() {
     changedSearchUrl.searchParams.set('jl', '613');
     bridge.tabs[1].url = changedSearchUrl.toString();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await page.locator('[data-discovery-scope]').getByText('城市：深圳').waitFor();
+    await page.locator('[data-discovery-scope]').getByText('地点：深圳').waitFor();
     assert.equal(new URL(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }).searchTemplate.url).searchParams.get('jl'), '613', 'returning to Dashboard updates the next-run conditions');
     bridge.tabs[1].url = beforeSearchChange;
     await page.getByRole('button', { name: '重新读取搜索条件', exact: true }).click();

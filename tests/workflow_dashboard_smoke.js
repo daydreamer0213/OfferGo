@@ -401,7 +401,7 @@ let server;
   assert.doesNotMatch(blockedPage.body, /data-browser-readiness-button/);
 
   const planBefore = await getText(baseUrl, `/plan?planId=${saved.planId}`);
-  assert.match(planBefore.body, /这轮会怎么找/);
+  assert.match(planBefore.body, /本次找岗范围/);
   assert.match(planBefore.body, /今天的进度/);
   assert.match(planBefore.body, /最多 3 轮/);
   assert.match(planBefore.body, /<button[^>]*data-browser-readiness-button[^>]*disabled>/);

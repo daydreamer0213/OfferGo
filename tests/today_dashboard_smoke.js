@@ -68,8 +68,9 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "today-d
           cityCode: "101280100"
         },
         tabId: 123456,
+        displayCity: "广州",
         platformPolicy: {
-          filterSummary: ["城市：广州", "经验：1-3年"],
+          filterSummary: ["经验：1-3年"],
           unresolvedParams: [{ param: "private", codes: ["securityId"] }]
         }
       };
@@ -337,12 +338,15 @@ function assertRendererIsPureAndEscapesHtml() {
   assert.match(html, /class="[^"]*today-priority/);
   assert.match(html, /class="[^"]*today-discovery-plan/);
   assert.match(html, /id="today-discovery"/);
-  assert.match(html, /这轮会怎么找/);
+  assert.match(html, /本次找岗范围/);
+  assert.doesNotMatch(html, /这轮会怎么找|先补全岗位详情，再结合简历判断/);
   assert.match(html, /这轮实际搜索的关键词/);
   assert.match(html, /产品经理/);
   assert.match(html, /需求分析/);
   assert.match(html, /最多 3 轮/);
-  assert.match(html, /至少间隔 2 小时/);
+  assert.doesNotMatch(html, /两轮之间|至少间隔 2 小时/);
+  assert.match(html, /class="runtime-status"[^>]*>[\s\S]*?data-condition-refresh/);
+  assert.doesNotMatch(html.match(/id="platform-search-actions"[\s\S]*?<\/div>/)?.[0] || "", /data-condition-refresh/);
   assert.match(html, /调整找岗范围/);
   assert.match(html, /更多找岗工具/);
   assert.doesNotMatch(html, /有 2 个岗位可以考虑跟进/);
@@ -362,6 +366,17 @@ function assertRendererIsPureAndEscapesHtml() {
   assert.match(html, /name="browserMode" value="portable"/);
   assert.match(html, /name="cdpPort" value="9222"/);
   assert.match(html, /当前浏览器：OfferGo 专用 Edge（推荐）/);
+  const running = buildTodayViewModel({
+    profile: { id: 7, profile: { candidate: { name: "候选人" } } },
+    planRecord: { id: 12, profileId: 7 },
+    plan: { name: "找岗", keywords: [] },
+    workflowState: { activeRun: { planner: { acquisitionMode: "inherited", platformPolicy: { filterSummary: ["地点：广州", "经验：1-3年"] } } } },
+    validation: { valid: true, errors: [], warnings: [] },
+    run: { state: "running" }
+  });
+  const runningCard = renderTodayPage(running).match(/<section class="card today-discovery-plan"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(runningCard, /地点：广州 · 经验：1-3年/);
+  assert.doesNotMatch(runningCard, /继承模式/);
 }
 
 function assertEarlyScanConfirmationRendering() {
@@ -551,7 +566,7 @@ async function assertInheritedPreview(baseUrl, db, saved, { resolutionCount, set
   assert.strictEqual(preview.status, 200);
   assert.strictEqual(preview.body.mode, "inherited");
   assert.strictEqual(preview.body.status, "partial");
-  assert.deepStrictEqual(preview.body.filters, ["城市：广州", "经验：1-3年"]);
+  assert.deepStrictEqual(preview.body.filters, ["地点：广州", "经验：1-3年"]);
   assert.deepStrictEqual(preview.body.unresolved, ["某平台参数未能识别"]);
   assert.strictEqual(JSON.stringify(preview.body).includes("securityId"), false);
   assert.strictEqual(JSON.stringify(preview.body).includes("https://www.zhipin.com"), false);

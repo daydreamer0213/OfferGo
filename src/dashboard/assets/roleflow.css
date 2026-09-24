@@ -77,6 +77,7 @@ html,body{background:var(--rf-canvas)}
 .app-workspace>.runtime-status,.app-workspace>main,.app-workspace>.footer-note{width:min(1180px,100%);margin-inline:auto}
 .app-workspace>main{max-width:1180px;padding:18px 0}
 .app-workspace>.runtime-status{margin-top:0}
+.runtime-actions{display:flex;align-items:center;gap:8px}.runtime-actions [data-condition-controls][hidden]{display:none}@media(max-width:700px){.runtime-actions{grid-column:2;flex-wrap:wrap}.runtime-status .runtime-actions button{width:auto}}
 .page-heading{padding:22px 0 18px}
 .page-heading:before{display:none}
 .eyebrow,.section-label{margin-bottom:6px;font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:none}

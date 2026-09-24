@@ -108,7 +108,7 @@
 .today-discovery-keyword { display:inline-flex; padding:5px 10px; color:var(--rf-teal-deep); background:var(--rf-mist); border:1px solid var(--rf-rule); border-radius:6px; font-size:13px; font-weight:600; }
 .today-discovery-grid small { display:block; margin-top:7px; color:var(--rf-ink-soft); font-size:12px; }
 .today-discovery-empty { color:var(--rf-ink-soft); }
-.today-discovery-foot { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px; border-top:1px solid var(--rf-rule); color:var(--rf-ink-soft); font-size:12px; line-height:1.5; }
+.today-discovery-foot { display:flex; align-items:center; justify-content:flex-end; gap:16px; padding:14px 24px; border-top:1px solid var(--rf-rule); color:var(--rf-ink-soft); font-size:12px; line-height:1.5; }
 .today-discovery-foot a { flex:none; font-weight:700; }
 @media(max-width:760px) {
   .today-discovery-grid { grid-template-columns:1fr; padding:18px; }

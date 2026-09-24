@@ -330,6 +330,7 @@ async function inheritedPageInspectionSmoke() {
   assert.strictEqual(sessionCreations, 0);
   assert.strictEqual(inspected.tabId, "BOSS-SEARCH");
   assert.strictEqual(inspected.searchTemplate.cityCode, "101280100");
+  assert.strictEqual(inspected.displayCity, "广州", "search-page city must be read from the visible BOSS control");
   assert.strictEqual(inspected.catalog.fields.salary.options[0].label, "10-20K");
   assert.deepStrictEqual(inspected.urlOptions.filter((item) => item.label === "天河区"), [
     { param: "district", code: "101280105", label: "天河区" }
@@ -384,6 +385,10 @@ function inheritedFilterDomSandbox(fixture) {
     URL,
     location: { href: currentUrl.href, origin: currentUrl.origin },
     document: {
+      querySelector(selector) {
+        if (selector === ".city-label.active .cur-city-label") return { textContent: "广州" };
+        return null;
+      },
       querySelectorAll(selector) {
         if (selector === ".condition-filter-select") return filterNodes;
         if (selector === 'a[href*="/web/geek/jobs"]') return linkNodes;

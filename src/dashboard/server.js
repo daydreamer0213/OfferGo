@@ -346,7 +346,7 @@ const boss = require("../adapters/sites/boss");
 const { createSiteAdapter } = require("../adapters/sites");
 const { ZhaopinSiteAdapter, resolveZhaopinSearchTab, isZhaopinWorkspaceTab, assertZhaopinWorkspaceWindow } = require('../adapters/sites/zhaopin');
 const { inspectZhaopinCommunicationTabs } = require('../adapters/sites/zhaopin_communication');
-const { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, selectedZhaopinFilters } = require('../core/zhaopin_search_scope');
+const { canonicalizeZhaopinSearchTemplate, buildZhaopinSearchUrl, zhaopinSearchDisplaySummary } = require('../core/zhaopin_search_scope');
 const { compileZhaopinPlatformRuntimePolicy } = require('../core/platform_runtime_policy');
 const { getPlatformSearchContext, savePlatformSearchContext } = require('../storage/platform_search_context_store');
 const { inspectBossBrowserReadiness, readinessAction } = require("../core/browser_readiness");
@@ -1479,7 +1479,7 @@ function createDashboardServer({
               const changed = !stored || stored.searchTemplate?.url !== template.url
                 || JSON.stringify(stored.filterSummary) !== JSON.stringify(filterSummary);
               if (changed) savePlatformSearchContext(db, { planId: plan.id, site, searchTemplate: template, filterSummary });
-              return { site, changed, summary: selectedZhaopinFilters(filterSummary).join('；') || '当前页面未额外限制条件', message: changed ? '搜索条件已更新，下一轮将使用新条件。' : '搜索条件没有变化。' };
+              return { site, changed, summary: zhaopinSearchDisplaySummary(filterSummary), message: changed ? '搜索条件已更新，下一轮将使用新条件。' : '搜索条件没有变化。' };
             });
             return sendJson(res, 200, result);
           } catch (error) {
@@ -2598,6 +2598,7 @@ async function resolveLiveInheritedContext({
       searchTemplate,
       searchScope,
       currentTargetUrl: canonicalizeBossTargetUrl(inspected.url).url,
+      displayCity: inspected.displayCity,
       keywordSource,
       platformPolicy
     };
@@ -2819,11 +2820,14 @@ function publicAcquisitionPreview(context, checkedAt = new Date().toISOString())
     .map(safeAcquisitionPreviewLabel)
     .filter(Boolean)
     .slice(0, 16);
+  const city = safeAcquisitionPreviewLabel(`地点：${context.displayCity || ''}`);
+  if (city && !filters.some(label => /^(地点|城市|区域)：/.test(label))) filters.unshift(city);
   const unresolvedCount = Math.min(Array.isArray(policy.unresolvedParams) ? policy.unresolvedParams.length : 0, 20);
+  const locationKnown = filters.some(label => /^(地点|城市|区域)：/.test(label));
   return {
     mode: "inherited",
-    status: unresolvedCount ? "partial" : "ready",
-    summary: filters.join("；") || `当前 ${context.site === 'zhaopin' ? '智联' : 'BOSS'} 搜索页未识别到额外筛选条件`,
+    status: unresolvedCount || !locationKnown ? "partial" : "ready",
+    summary: filters.length ? `${filters.join(' · ')}${filters.length === 1 ? ' · 其余条件不限' : ''}` : '搜索页工作地点尚未读清',
     filters,
     unresolved: Array.from({ length: unresolvedCount }, () => "某平台参数未能识别"),
     checkedAt
