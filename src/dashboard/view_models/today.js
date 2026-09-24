@@ -146,7 +146,7 @@ function buildTodayViewModel(input = {}) {
     vm.form.acquisition.inheritedPreview.endpoint += '&site=zhaopin';
     vm.platformContext = input.platformContext || null;
     if (!activeRun && !input.platformContext && vm.primary.type === 'form') {
-      vm.primary = { type: 'link', href: '#platform-search-actions', label: '准备智联搜索页', status: '准备本轮搜索范围', detail: '打开智联搜索页设置条件，回到 OfferGo 后会自动更新。' };
+      vm.primary = { type: 'notice', label: '正在读取智联搜索条件…', status: '确认本轮搜索范围', detail: 'OfferGo 会自动整理搜索页并读取当前条件。' };
     }
   }
   return vm;

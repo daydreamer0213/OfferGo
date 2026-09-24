@@ -25,9 +25,8 @@ function renderPlatformSelector(vm) {
   const platformControl = enabled.length > 1
     ? `<form method="get" action="/plan"><input type="hidden" name="planId" value="${escapeAttr(page.planId)}"><label>本次找岗平台 <select name="site" aria-label="本次找岗平台" data-platform-selector onchange="if(this.value==='both'){document.querySelectorAll('form.workflow-start input[name=site]').forEach(input=>input.value='both');const label=document.querySelector('[data-discovery-platform]');if(label)label.textContent='BOSS + 智联';const scope=document.querySelector('[data-discovery-scope]');if(scope)scope.textContent='正在读取两边的搜索范围…';const words=document.querySelector('[data-discovery-keywords]');if(words)words.textContent='两边会分别选择关键词，开始后可查看各自进度';window.dispatchEvent(new Event('offergo:conditions'));return;}this.form.submit()">${enabled.includes('boss') ? `<option value="boss"${zl ? '' : ' selected'}>BOSS</option>` : ''}${enabled.includes('zhaopin') ? `<option value="zhaopin"${zl ? ' selected' : ''}>智联</option>` : ''}<option value="both">BOSS + 智联（同时）</option></select></label><noscript><button>切换平台</button></noscript></form>`
     : `<span class="workflow-budget">本次找岗平台：${zl ? '智联' : 'BOSS'}</span><a class="button quiet" href="/settings/platforms">管理平台</a>`;
-  const scanRunning = vm.run?.state === 'running';
   const generatedScope = acquisitionDisplaySummary({ mode: 'generated', generated: vm.form?.acquisition?.generated }, vm.profile);
-  return `<div id="platform-search-actions" class="button-row" data-generated-scope="${escapeAttr(generatedScope)}">${platformControl}${zl ? `<button class="secondary" type="button" data-platform-action="open"${scanRunning ? ' disabled' : ''}>准备智联搜索页</button>` : ''}</div>`;
+  return `<div id="platform-search-actions" class="button-row" data-generated-scope="${escapeAttr(generatedScope)}">${platformControl}</div>`;
 }
 
 function renderDiscoveryPlan(vm) {
@@ -304,7 +303,7 @@ function renderConditionSyncScript(vm) {
     const scope=document.querySelector('[data-discovery-scope]');
     const planScope=document.querySelector('[data-plan-platform-scope]');
     const preview=document.querySelector('[data-platform-preview]');
-    const openButton=container?.querySelector('[data-platform-action="open"]');
+    const primaryNotice=document.querySelector('.today-priority .primary-notice');
     if(!container||!button||!status||!scope)return;
     let inFlight=false,pendingRefresh=false;
     function target(){return selector?.value||site}
@@ -360,20 +359,10 @@ function renderConditionSyncScript(vm) {
         if(selected!==target()||modeAtStart!==bossMode()){pendingRefresh=true;return;}
         if(!active&&summaries.length&&selected==='both')scope.textContent=summaries[0][0]+'：'+summaries[0][1]+'；另一平台暂时无法读取';
         status.textContent=error.message||'暂时无法读取搜索条件，请点“重新读取搜索条件”重试。';
+        if(site==='zhaopin'&&!hadStoredZhaopinContext&&primaryNotice)primaryNotice.textContent='搜索条件尚未读到，请查看上方提示';
       }finally{inFlight=false;button.disabled=false;if(pendingRefresh){pendingRefresh=false;void refresh(true);}}
     }
     button.addEventListener('click',()=>void refresh(true));
-    openButton?.addEventListener('click',async()=>{
-      if(inFlight)return;
-      openButton.disabled=true;status.textContent='正在准备智联搜索页…';
-      try{
-        const response=await fetch('/api/platform-search/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({site:'zhaopin',planId})});
-        const value=await response.json();
-        if(!response.ok)throw new Error(value.error||'智联搜索页暂时无法准备。');
-        status.textContent='智联搜索页已准备。改完条件回到 OfferGo 后会自动更新。';
-      }catch(error){status.textContent=error.message||'智联搜索页暂时无法准备。';}
-      finally{openButton.disabled=false;}
-    });
     window.addEventListener('focus',()=>void refresh());
     window.addEventListener('offergo:conditions',()=>void refresh(true));
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refresh()});

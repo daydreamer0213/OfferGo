@@ -39,9 +39,10 @@ function fakeBrowser() {
     async listTabs() { return tabs.map(tab => ({ ...tab })); },
     async createTab(openerId, url) { assert.equal(openerId, 'dashboard'); const tab = { id: 'zl-search', windowId: 'window', active: false, url }; tabs.push(tab); return tab; },
     async evalValue(id, expression) {
-      assert.equal(id, 'zl-search');
+      assert.ok(tabs.some(tab => tab.id === id && tab.url.startsWith('https://www.zhaopin.com/jobs/')));
       if (expression.includes('const clean =')) return true;
-      return { url: tabs.find(tab => tab.id === id).url, filterSummary: browser.filterSummary, cards: [], loading: false, risk: false, loginRequired: false, isSearchPage: true };
+      const tab = tabs.find(item => item.id === id);
+      return { url: tab.url, filterSummary: tab.filterSummary || browser.filterSummary, cards: [], loading: false, risk: false, loginRequired: false, isSearchPage: true };
     },
     async bringToFront() { throw new Error('prepare must not recover by foregrounding a tab'); }
   };
@@ -74,7 +75,12 @@ async function main() {
     const page = await (await fetch(`${base}/plan?planId=${saved.planId}&site=zhaopin`)).text();
     assert.match(page, /name="site"/);
     assert.match(page, /重新读取搜索条件/);
-    let response = await post('/api/platform-search/open', { planId: saved.planId, site: 'zhaopin' });
+    assert.doesNotMatch(page, /准备智联搜索页/, 'search tabs are managed by the condition read, not a separate button');
+    let response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'reading conditions should prepare the missing search tab automatically: ' + await response.text());
+    assert.equal(bridge.tabs.length, 2);
+    assert.equal(new URL(bridge.tabs[1].url).searchParams.get('kw'), 'AI工程师');
+    response = await post('/api/platform-search/open', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200, await response.text());
     assert.equal(new URL(bridge.tabs[1].url).searchParams.get('kw'), 'AI工程师');
     assert.equal(new URL(bridge.tabs[1].url).searchParams.has('jl'), false, 'first open must not force a region');
@@ -86,7 +92,7 @@ async function main() {
     assert.equal(response.status, 409, 'do not reuse another window identity');
     response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 409, 'save must verify workspace window before persisting conditions');
-    assert.equal(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }), null);
+    assert.ok(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }));
     bridge.tabs[1].windowId = 'window';
     bridge.tabs[1].url = 'https://www.zhaopin.com/jobs/?pageMode=search&jl=548';
     bridge.navigate = async (id, url) => { assert.equal(id, 'zl-search'); bridge.tabs[1].url = url; };
@@ -102,6 +108,61 @@ async function main() {
     assert.equal(response.status, 200);
     assert.equal((await response.json()).changed, false, 'rereading unchanged conditions should not write another revision');
     assert.deepEqual(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }), firstSavedContext);
+    bridge.tabs.push({ id: 'dashboard-second', windowId: 'window', active: false, url: `${base}/plan?site=boss` });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'multiple OfferGo tabs in one window must not block search management: ' + await response.text());
+    bridge.tabs.pop();
+    const closedDuplicates = [];
+    bridge.closeTab = async id => {
+      closedDuplicates.push(id);
+      bridge.tabs.splice(bridge.tabs.findIndex(tab => tab.id === id), 1);
+    };
+    bridge.tabs.push({ id: 'zl-less', windowId: 'window', active: false, url: 'https://www.zhaopin.com/jobs/?pageMode=search&kw=AI工程师' });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'duplicate pages should be resolved during the normal condition read: ' + await response.text());
+    assert.deepEqual(closedDuplicates, ['zl-less']);
+    assert.equal(bridge.tabs[1].id, 'zl-search', 'the page with the saved city filter remains');
+    bridge.tabs.push({ id: 'zl-same', windowId: 'window', active: false, url: bridge.tabs[1].url });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'identical duplicate pages should be consolidated: ' + await response.text());
+    assert.deepEqual(closedDuplicates, ['zl-less', 'zl-same']);
+    bridge.tabs.push({ id: 'zl-more', windowId: 'window', active: false, url: bridge.tabs[1].url + '&sl=10000' });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'the page with more conditions should replace the weaker page: ' + await response.text());
+    assert.deepEqual(closedDuplicates, ['zl-less', 'zl-same', 'zl-search']);
+    assert.equal(bridge.tabs[1].id, 'zl-more');
+    assert.equal(new URL(getPlatformSearchContext(db, { planId: saved.planId, site: 'zhaopin' }).searchTemplate.url).searchParams.get('sl'), '10000');
+    bridge.tabs.push({ id: 'zl-dom', windowId: 'window', active: false, url: bridge.tabs[1].url,
+      filterSummary: ['广东', '1-1.2万', '本科', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'] });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'visible filters should break a URL tie: ' + await response.text());
+    assert.equal(bridge.tabs[1].id, 'zl-dom');
+    assert.deepEqual(closedDuplicates.at(-1), 'zl-more');
+    bridge.tabs.push({ id: 'zl-concurrent', windowId: 'window', active: false, url: bridge.tabs[1].url });
+    const concurrentReads = await Promise.all([
+      post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' }),
+      post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' })
+    ]);
+    assert.deepEqual(concurrentReads.map(item => item.status), [200, 200]);
+    assert.equal(closedDuplicates.filter(id => id === 'zl-concurrent').length, 1, 'queued reads must close a duplicate once');
+    bridge.tabs[1].id = 'zl-search';
+    bridge.tabs[1].url = 'https://www.zhaopin.com/jobs/?pageMode=search&kw=AI工程师&jl=548';
+    delete bridge.tabs[1].filterSummary;
+    bridge.tabs.push({ id: 'zl-other-window', windowId: 'other-window', active: false, url: bridge.tabs[1].url });
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200, 'a search in another window must not be treated as a duplicate: ' + await response.text());
+    assert.ok(bridge.tabs.some(tab => tab.id === 'zl-other-window'));
+    bridge.tabs.pop();
+    bridge.tabs.push({ id: 'zl-active', windowId: 'window', active: true, url: bridge.tabs[1].url });
+    bridge.tabs[0].active = false;
+    const closedBeforeActive = closedDuplicates.length;
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 409, 'the active search tab must never be closed during consolidation');
+    assert.equal(closedDuplicates.length, closedBeforeActive);
+    bridge.tabs.pop();
+    bridge.tabs[0].active = true;
+    response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
+    assert.equal(response.status, 200);
     bridge.filterSummary = ['地区', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'];
     response = await post('/api/platform-search/save', { planId: saved.planId, site: 'zhaopin' });
     assert.equal(response.status, 200);
@@ -505,12 +566,9 @@ async function journey() {
     await page.getByLabel('本次找岗平台').selectOption('zhaopin');
     await page.waitForURL(/site=zhaopin/);
     assert.equal(await page.locator('h1').innerText(), '今日任务');
-    assert.equal(await page.locator('[data-today-primary]').innerText(), '准备智联搜索页');
-    await audit('first-use');
-    await page.getByRole('button', { name: '准备智联搜索页', exact: true }).click();
-    await page.getByText('智联搜索页已准备。改完条件回到 OfferGo 后会自动更新。', { exact: false }).waitFor();
-    await page.getByRole('button', { name: '重新读取搜索条件', exact: true }).click();
     await page.waitForURL(/platformSaved=1/);
+    assert.equal(await page.getByRole('button', { name: '准备智联搜索页', exact: true }).count(), 0);
+    await audit('first-use');
     await page.reload();
     assert.equal(await page.getByLabel('本次找岗平台').inputValue(), 'zhaopin');
     assert.deepEqual(storage.getSearchPlan(db, saved.planId).plan, bossBefore);
