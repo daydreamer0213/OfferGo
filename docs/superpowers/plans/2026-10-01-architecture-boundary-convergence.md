@@ -34,7 +34,7 @@ OfferGo 保持 Node.js/CommonJS + 本地 Dashboard + CLI + SQLite 的模块化�
 - [x] 核对 `architecture-boundaries.json` 的每条例外及 `src` 中真实引用；按“兼容门面”“入口组装”“待收口的反向依赖”“其他需逐项核对”分类，并写清复查条件。
 - [x] 按当前代码重写 `docs/architecture.md` 的现状部分，保留历史评审为有日期的快照。说明 Dashboard/CLI 的组装职责、application 的用例职责、core 的规则职责、storage 的数据职责和 adapters 的平台访问职责。不将旧 SQL 数字写成当前事实。
 - [x] 运行 `node tests/architecture_boundaries_smoke.js` 和架构检查；核对没有新增违规、过期例外或循环引用。
-- [ ] 提交文档阶段；不改产品逻辑。
+- [x] 提交文档阶段；不改产品逻辑。
 
 **完成标准：**读者能区分正常组装与真正越界；文档数字与本次基线一致；架构检查通过。单独提交，可独立回退。
 
@@ -44,10 +44,10 @@ OfferGo 保持 Node.js/CommonJS + 本地 Dashboard + CLI + SQLite 的模块化�
 
 **接口：**`application/message_discovery/run.js` 继续导出 `runBossMessageDiscovery(options)`；向内部 `coreDiscovery.runBossMessageDiscovery` 传入一个 `qualityCheckDraft(input)` 函数。`input` 包含 `db`、`profileId`、`job`、`messageTexts`、`generate`、`shouldAssess`，返回现有 `generateQualityCheckedDraft` 的结果。Dashboard 不更改调用方式。
 
-- [ ] 先运行 `node tests/message_discovery_smoke.js`、`node tests/zhaopin_message_discovery_smoke.js`，记录基线；检查现有测试对首次生成、二次修订、修订失败、事实缺失、拒绝消息和仅发送简历分支的覆盖。只给实际缺口补回归断言，先确认新增断言能识别错误实现。
-- [ ] 在 `application/message_discovery/run.js` 组装 `qualityCheckDraft`：调用 `buildMessageDraftQualityContext(db, { profileId, job, messageTexts })` 后，把证据和 `generate`、`shouldAssess` 交给 `generateQualityCheckedDraft`。
-- [ ] `core/message_discovery.js` 改为调用传入的 `qualityCheckDraft`，删除对 `application/message_draft_quality` 的 `require`。保留现有错误、重试次数、草稿可发送判断和事务顺序；不改变提示词、读取节奏或外部动作。
-- [ ] 删除 `architecture-boundaries.json` 中该条精确例外。运行上述两项定向测试、`node tests/architecture_boundaries_smoke.js`、`npm run test:fast`、`npm run test:integration` 和完整 `npm test`；提交。
+- [x] 先运行 `node tests/message_discovery_smoke.js`、`node tests/zhaopin_message_discovery_smoke.js`，记录基线；检查现有测试对首次生成、二次修订、修订失败、事实缺失、拒绝消息和仅发送简历分支的覆盖。只给实际缺口补回归断言，先确认新增断言能识别错误实现。
+- [x] 在 `application/message_discovery/run.js` 组装 `qualityCheckDraft`：调用 `buildMessageDraftQualityContext(db, { profileId, job, messageTexts })` 后，把证据和 `generate`、`shouldAssess` 交给 `generateQualityCheckedDraft`。
+- [x] `core/message_discovery.js` 改为调用传入的 `qualityCheckDraft`，删除对 `application/message_draft_quality` 的 `require`。保留现有错误、重试次数、草稿可发送判断和事务顺序；不改变提示词、读取节奏或外部动作。
+- [x] 删除 `architecture-boundaries.json` 中该条精确例外。运行上述两项定向测试、`node tests/architecture_boundaries_smoke.js`、`npm run test:fast`、`npm run test:integration` 和完整 `npm test`；提交。
 
 **完成标准：**相关 BOSS/智联离线测试、架构检查、`npm run test:fast`、`npm run test:integration` 和完整 `npm test` 通过；该反向依赖消失。单独提交，可独立回退。
 

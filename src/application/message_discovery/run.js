@@ -5,6 +5,10 @@ const { getJob } = require("../../storage/job_store");
 const { getBatch } = require("../../storage/scan_store");
 const { getProgressCardById } = require("../../core/candidate_progress");
 const { isClearlyUnmatchedMessageJob } = require("../../core/message_routing_policy");
+const {
+  generateQualityCheckedDraft,
+  buildMessageDraftQualityContext
+} = require("../message_draft_quality");
 
 function isClearlyUnmatchedMessageCard(db, { profileId, cardId, jobId } = {}) {
   if (!Number.isInteger(Number(cardId)) || Number(cardId) <= 0) return false;
@@ -21,7 +25,16 @@ async function runBossMessageDiscovery(options = {}) {
     ...options,
     messageInbox: options.messageInbox || messageInbox,
     messageTimeline: options.messageTimeline || messageTimeline,
-    isUnmatchedCard: options.isUnmatchedCard || isClearlyUnmatchedMessageCard
+    isUnmatchedCard: options.isUnmatchedCard || isClearlyUnmatchedMessageCard,
+    qualityCheckDraft: options.qualityCheckDraft || qualityCheckDraft
+  });
+}
+
+function qualityCheckDraft({ db, profileId, job, messageTexts, generate, shouldAssess }) {
+  return generateQualityCheckedDraft({
+    generate,
+    shouldAssess,
+    ...buildMessageDraftQualityContext(db, { profileId, job, messageTexts })
   });
 }
 

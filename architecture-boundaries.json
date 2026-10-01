@@ -88,7 +88,6 @@
     "dependency:core-outward:core/communication_batches.js -> storage/communication_store.js",
     "dependency:core-outward:core/llm_analyzer.js -> adapters/models/index.js",
     "dependency:core-outward:core/message_discovery.js -> adapters/sites/boss_message_dom.js",
-    "dependency:core-outward:core/message_discovery.js -> application/message_draft_quality/index.js",
     "dependency:core-outward:core/message_preview_state.js -> storage/scan_store.js",
     "dependency:core-outward:core/onboarding_run.js -> application/onboarding/run.js",
     "dependency:core-outward:core/scan_snapshot.js -> adapters/sites/boss.js",

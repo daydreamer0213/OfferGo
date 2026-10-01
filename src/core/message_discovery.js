@@ -32,10 +32,6 @@ const {
   RESUME_REQUEST_ACKNOWLEDGEMENT
 } = require("./message_requested_actions");
 const {
-  generateQualityCheckedDraft,
-  buildMessageDraftQualityContext
-} = require("../application/message_draft_quality");
-const {
   listPreviewStates,
   recordPreviewState,
   listUnresolvedMessageDiscoveryItems,
@@ -129,7 +125,8 @@ async function runBossMessageDiscovery({
   onStatus = () => {},
   messageInbox,
   messageTimeline,
-  isUnmatchedCard = () => false
+  isUnmatchedCard = () => false,
+  qualityCheckDraft
 }) {
   const {
     upsertMessageInboxItem,
@@ -684,7 +681,11 @@ async function runBossMessageDiscovery({
           requestedActions: requested.requestedActions,
           contextSource: resolved.contextSource || resolved.job.contextSource || ""
         };
-        const quality = await generateQualityCheckedDraft({
+        const quality = await qualityCheckDraft({
+          db,
+          profileId,
+          job: resolved.job,
+          messageTexts: requested.replyMessages.map((message) => String(message?.text || "")),
           generate: (qualityInput) => classifyMessageGroup({
             ...baseInput,
             messages: requested.replyMessages.map((message) => ({ ...message })),
@@ -694,12 +695,7 @@ async function runBossMessageDiscovery({
           }, { signal }),
           shouldAssess: (result) => result?.messageIntent !== "rejection"
             && !result?.missingFact
-            && !MANUAL_ONLY_CATEGORIES.has(String(result?.messageCategory || "")),
-          ...buildMessageDraftQualityContext(db, {
-            profileId,
-            job: resolved.job,
-            messageTexts: requested.replyMessages.map((message) => String(message?.text || ""))
-          })
+            && !MANUAL_ONLY_CATEGORIES.has(String(result?.messageCategory || ""))
         });
         classification = quality.sendable
           ? { ...quality.result, draftQualityWarnings: qualityWarningCodes(quality.assessment) }
