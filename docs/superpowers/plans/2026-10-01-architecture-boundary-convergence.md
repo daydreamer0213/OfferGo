@@ -55,12 +55,12 @@ OfferGo 保持 Node.js/CommonJS + 本地 Dashboard + CLI + SQLite 的模块化�
 
 **文件：**`src/cli.js`、`src/application/analysis/reassess_batch.js`（或在现有 `analysis` 模块中新增单一用例）、`tests/onboarding_smoke.js`、`tests/job_store_contract_smoke.js`。
 
-**接口：**新增 `reassessBatch({ db, batchId, planId, configs, logger, cleanDescription })`，返回现有 `reassessBatchObservations` 的结果。`configs.model` 由 CLI 按 `--agent`、`--use-model`、默认规则模式选定；`cleanDescription` 继续由 CLI 从现有 BOSS 适配器传入，避免 application 反向引入适配器；应用用例只补入已确认候选人画像和匹配卡，再调用现有分析与存储能力。CLI 负责把结果映射为原日志、中文输出和退出行为。
+**接口：**新增 `reassessBatch({ db, batchId, planId, createConfigs, logger, cleanDescription })`，返回现有 `reassessBatchObservations` 的结果。`createConfigs()` 由 CLI 提供，并仅在应用用例校验方案与已确认匹配卡后调用，以保持原有错误顺序；它按 `--agent`、`--use-model`、默认规则模式选定 `configs.model`。`cleanDescription` 继续由 CLI 从现有 BOSS 适配器传入，避免 application 反向引入适配器。CLI 负责把结果映射为原日志、中文输出和退出行为。
 
-- [ ] 先运行 `node tests/onboarding_smoke.js` 和 `node tests/job_store_contract_smoke.js`。核对缺参数、无方案、画像缺失、匹配卡未确认、默认最新批次、三种模型模式、成功输出和失败退出码；仅补现有检查没有覆盖的关键分支。
-- [ ] 从 `src/cli.js` 的 `reassessBatch` 提出方案读取、匹配上下文校验、运行配置补全、岗位分析执行到 `src/application/analysis/reassess_batch.js`，直接复用 `reassessBatchObservations`；不复制筛选或存储算法。
-- [ ] CLI 留下参数转换、默认批次选择、模型模式选择、现有 `cleanDetailText` 函数、日志与标准输出。接口只传 `db`、两个 ID、现有配置对象、logger 与文本清理函数；如果迁移需要大量透传参数，先重新审视边界，不继续堆抽象。
-- [ ] 运行两项定向测试、架构检查、`npm run test:fast`、`npm run test:integration` 和完整 `npm test`；逐字段比对 CLI 可观察输出后提交。
+- [x] 先运行 `node tests/onboarding_smoke.js` 和 `node tests/job_store_contract_smoke.js`。核对缺参数、无方案、画像缺失、匹配卡未确认、默认最新批次、三种模型模式、成功输出和失败退出码；仅补现有检查没有覆盖的关键分支。
+- [x] 从 `src/cli.js` 的 `reassessBatch` 提出方案读取、匹配上下文校验、运行配置补全、岗位分析执行到 `src/application/analysis/reassess_batch.js`，直接复用 `reassessBatchObservations`；不复制筛选或存储算法。
+- [x] CLI 留下参数转换、默认批次选择、模型模式选择、现有 `cleanDetailText` 函数、日志与标准输出。接口只传 `db`、两个 ID、配置创建函数、logger 与文本清理函数；如果迁移需要大量透传参数，先重新审视边界，不继续堆抽象。
+- [x] 运行两项定向测试、架构检查、`npm run test:fast`、`npm run test:integration` 和完整 `npm test`；逐字段比对 CLI 可观察输出后提交。
 
 **完成标准：**CLI 文本、错误码与退出行为一致；重评估结果、批次归属和失败恢复一致；定向测试、架构检查及完整离线门禁通过。单独提交，可独立回退。
 

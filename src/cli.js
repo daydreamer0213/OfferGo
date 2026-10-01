@@ -17,6 +17,7 @@ const { createJobAnalysisRunner, runWorkflowAnalysisPhase } = require("./core/jo
 const { completedWorkflowAnalysisCount } = require("./core/workflow_analysis_tasks");
 const { analyzeResumeToPlan } = require("./core/profile_onboarding");
 const { processOnboardingRun } = require("./application/onboarding/run");
+const { reassessBatch: reassessBatchUseCase } = require("./application/analysis/reassess_batch");
 const {
   agentOnboardCommand,
   agentConfirmCommand
@@ -92,7 +93,6 @@ const {
   attachResumeDocumentFile,
   bindBatchToPlan,
   rescorePlanObservations,
-  reassessBatchObservations,
   getWorkspacePlatformPreference
 } = require("./core/storage");
 const { listWorkflowInventory } = require("./core/workflow_inventory");
@@ -2679,38 +2679,24 @@ async function reassessBatch(db, args) {
   const planId = Number(args.plan);
   if (!Number.isInteger(batchId) || batchId <= 0) throw new Error("需要 --batch <批次 ID>");
   if (!Number.isInteger(planId) || planId <= 0) throw new Error("需要 --plan <Search Plan ID>");
-  const planRecord = getSearchPlan(db, planId);
-  if (!planRecord) throw new Error(`未找到 Search Plan #${planId}`);
-  const profileRecord = getCandidateProfile(db, planRecord.profileId);
-  if (!profileRecord) throw new Error(`Search Plan #${planId} 对应的候选人画像不存在。`);
-  // 重评与扫描使用同一套已确认匹配上下文：未确认的新简历不得影响重评结果。
-  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId);
-  assertSearchPlanReady(
-    planRecord,
-    matchingContext?.candidateProfile || {},
-    getSearchPlanDependency(db, planRecord.id),
-    { acquisitionMode: "inherited" }
-  );
-  if (!matchingContext) throw new Error(`Search Plan #${planId} 缺少已确认匹配偏好卡对应的画像版本。`);
-
-  let configs = loadConfigs(ROOT);
-  configs.model = args.agent === true
-    ? agentStdioModelConfig()
-    : args["use-model"] === true
-      ? resolveRuntimeModelConfig({
-          root: runtimePaths.dataRoot,
-          fallbackModelConfig: configs.model,
-          taskProfile: "batch_screening"
-        }).modelConfig
-      : offlineMockModelConfig();
-  configs = profileToRuntimeConfigs(configs, matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard);
-  const keywordPlan = (planRecord.plan.keywords || []).map((item) => ({ ...item }));
-  const analyzeJob = createJobAnalysisRunner(configs, keywordPlan, { db, logger });
-  const result = await reassessBatchObservations(db, {
+  const result = await reassessBatchUseCase({
+    db,
     batchId,
     planId,
-    configs,
-    analyzeJob,
+    createConfigs: () => {
+      const configs = loadConfigs(ROOT);
+      configs.model = args.agent === true
+        ? agentStdioModelConfig()
+        : args["use-model"] === true
+          ? resolveRuntimeModelConfig({
+              root: runtimePaths.dataRoot,
+              fallbackModelConfig: configs.model,
+              taskProfile: "batch_screening"
+            }).modelConfig
+          : offlineMockModelConfig();
+      return configs;
+    },
+    logger,
     cleanDescription: cleanDetailText
   });
   const analysisMode = args.agent === true ? "agent" : args["use-model"] === true ? "model" : "rules";

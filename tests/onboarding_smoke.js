@@ -570,6 +570,14 @@ const generatedReports = [];
   // 重评/重算与扫描共用同一套已确认匹配上下文：新简历未确认时仍使用旧确认卡，不得碰未确认的新画像。
   const reassess = runCliCommand(["reassess-batch", "--plan", String(planId)]);
   assert.strictEqual(reassess.status, 0, reassess.stderr || reassess.stdout);
+  assert.match(reassess.stdout, /^批次 #\d+ 已重评估 \d+ 条岗位（rules 模式）。\r?\n$/, "重评成功提示必须保持原有格式");
+  const reassessBatchId = Number(reassess.stdout.match(/^批次 #(\d+)/)?.[1]);
+  const missingReassessPlan = runCliCommand(["reassess-batch", "--batch", String(reassessBatchId), "--plan", "999999999"]);
+  assert.notStrictEqual(missingReassessPlan.status, 0);
+  assert(`${missingReassessPlan.stderr}\n${missingReassessPlan.stdout}`.includes("未找到 Search Plan #999999999"));
+  const missingReassessPlanWithModel = runCliCommand(["reassess-batch", "--batch", String(reassessBatchId), "--plan", "999999999", "--use-model"]);
+  assert.notStrictEqual(missingReassessPlanWithModel.status, 0);
+  assert(`${missingReassessPlanWithModel.stderr}\n${missingReassessPlanWithModel.stdout}`.includes("未找到 Search Plan #999999999"), "方案错误必须先于模型配置错误返回");
   const reassessedJobs = listReportJobs(db, { planId, batch: "latest" });
   assert(reassessedJobs.length > 0, "重评后必须有可检查的岗位分析");
   const confirmedCardRevision = matchingCardRevision(getActiveMatchingCard(db, profileId).card);
