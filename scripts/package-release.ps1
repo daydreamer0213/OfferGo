@@ -23,7 +23,7 @@ $Node = Join-Path $ProjectRoot ".runtime\node\node.exe"
 if (-not (Test-Path -LiteralPath $Node)) {
   $Node = (Get-Command node -ErrorAction Stop).Source
 }
-& $Node --disable-warning=ExperimentalWarning (Join-Path $ProjectRoot "tests\run_all.js")
+& $Node --disable-warning=ExperimentalWarning (Join-Path $ProjectRoot "tests\run_all.js") --browser-required
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Remove-ProjectPath -Path $StageDir

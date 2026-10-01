@@ -1,4 +1,5 @@
 const SUPPORTED_PLATFORMS = new Set(["boss", "zhaopin"]);
+const MESSAGE_ACTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const RESUME_REQUEST_ACKNOWLEDGEMENT = "好的，我把简历发您，您先看看。";
 
 function deriveRequestedActions({ platform, messages = [], manualActions = [] } = {}) {
@@ -136,6 +137,7 @@ function isGenericResumeRequestTemplate(value) {
 }
 
 module.exports = {
+  MESSAGE_ACTION_WINDOW_MS,
   deriveRequestedActions,
   findPendingResumeRequest,
   isInPlatformResumeRequest,

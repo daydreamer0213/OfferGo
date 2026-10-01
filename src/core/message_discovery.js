@@ -26,6 +26,7 @@ const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
 const {
+  MESSAGE_ACTION_WINDOW_MS,
   deriveRequestedActions,
   isInPlatformResumeRequest,
   RESUME_REQUEST_ACKNOWLEDGEMENT
@@ -46,7 +47,6 @@ const {
 
 const BOSS_MESSAGE_GROUP_LIMIT = 5;
 const BOSS_MESSAGE_GROUP_TEXT_LIMIT = 1000;
-const MESSAGE_ACTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const TERMINAL_MODEL_OUTPUT_CODES = new Set([
   "MODEL_EMPTY_RESPONSE",
   "MODEL_INVALID_RESPONSE",

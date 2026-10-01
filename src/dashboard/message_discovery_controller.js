@@ -20,6 +20,7 @@ const { resolveBossRiskWindow } = require("../core/boss_risk_window");
 const { sameBrowserTabId } = require("../core/browser_tab_identity");
 const { PRODUCT_POLICY } = require("../core/product_policy");
 const {
+  MESSAGE_ACTION_WINDOW_MS,
   findPendingResumeRequest,
   sanitizeDraftForRequestedActions
 } = require("../core/message_requested_actions");
@@ -437,13 +438,31 @@ function createMessageDiscoveryController(deps = {}) {
     clearExpiredRun(profileId);
     const run = runs.get(profileId);
     const state = run ? pageRun(run) : durableStatus(profileId);
+    const inbox = buildMessageInboxPageState(db, {
+      profileId,
+      platformRuns: state.platformRuns || [],
+      now: nowDate()
+    });
+    const inboxKeys = new Set(Object.values(inbox.groups).flat()
+      .map((item) => `${item.platform}\0${item.conversationKey}`));
+    const nowMs = nowDate().getTime();
+    const results = state.results.map((result) => {
+      if (result.platform !== "zhaopin" || result.contextComplete !== true
+        || !result.manualActions?.some((item) => item.kind === "resume_request")
+        || inboxKeys.has(`${result.platform}\0${result.conversationKey}`)) return result;
+      const timeline = projectActionableTimeline(result.platform, listMessageEvents(db, {
+        profileId, platform: result.platform, conversationKey: result.conversationKey, limit: 500
+      }));
+      const pending = findPendingResumeRequest({ platform: result.platform, events: timeline });
+      const occurredMs = Date.parse(String(pending?.occurredAt || pending?.firstObservedAt || ""));
+      const current = Number.isFinite(occurredMs) && occurredMs <= nowMs
+        && nowMs - occurredMs <= MESSAGE_ACTION_WINDOW_MS;
+      return { ...result, legacyTimeline: timeline, legacyActionExpired: !current };
+    });
     return {
       ...state,
-      inbox: buildMessageInboxPageState(db, {
-        profileId,
-        platformRuns: state.platformRuns || [],
-        now: nowDate()
-      })
+      results,
+      inbox
     };
   }
 

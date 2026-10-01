@@ -10,7 +10,7 @@ const { createDashboardServer } = require('../src/dashboard/server');
 const { recordUnresolvedMessageDiscoveryItem } = require('../src/core/message_preview_state');
 const { listIncomingContacts } = require('../src/application/funnel_analysis');
 const { upsertMessageInboxItem } = require('../src/storage/message_inbox_store');
-const NOW = '2026-09-08T01:00:00.000Z';
+const NOW = new Date().toISOString();
 const PARAMETERIZED_IM_URL = 'https://i.zhaopin.com/im?refcode=4089&sessionId=' + 'a'.repeat(32) + '#conversation';
 const digest = value => 'sha256:' + crypto.createHash('sha256').update(value).digest('hex');
 const logger = { info() {}, warn() {}, error() {}, requestId() { return 'unified'; }, listRecent() { return []; } };
@@ -126,13 +126,18 @@ async function main() {
     assert.equal(db.prepare('SELECT COUNT(*) n FROM candidate_funnel_entries').get().n,0,'rejected sent confirmation must not create funnel entries');
     assert.equal(storage.getMessageReplyDraft(db,{profileId,draftId:zl.drafts[0].id}).currentText,'好的，可以沟通。');
     let chromium;try{({chromium}=require('playwright'));}catch(error){if(process.env.ROLEFLOW_REQUIRE_PLAYWRIGHT==='1')throw error;console.log('dashboard_unified_messages_journey browser SKIP: Playwright unavailable');return;}
-    browser=await chromium.launch({channel:'msedge',headless:true});const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});const page=await context.newPage();const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',message=>{if(message.type()==='error'&&!message.text().includes('500 (Internal Server Error)'))errors.push(message.text());});await page.route('**/*',route=>{if(new URL(route.request().url()).origin!==base){external.push(route.request().url());return route.abort();}return route.continue();});
+    browser=await chromium.launch({channel:'msedge',headless:true});const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});const page=await context.newPage();const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',message=>{if(message.type()==='error'&&!message.text().includes('500 (Internal Server Error)')&&!message.text().includes('409 (Conflict)'))errors.push(message.text());});await page.route('**/*',route=>{if(new URL(route.request().url()).origin!==base){external.push(route.request().url());return route.abort();}return route.continue();});
     for(const route of ['queue','jobs']){await page.goto(base+'/'+route+'?planId='+planId+'&site=zhaopin');const entry=page.getByRole('link',{name:'消息与回复',exact:true});assert.equal(await entry.count(),1);assert.equal(new URL(await entry.getAttribute('href'),base).searchParams.get('workSite'),'zhaopin');const records=page.getByRole('link',{name:'沟通清单与记录',exact:true});assert.equal(await records.count(),1);assert.equal(new URL(await records.getAttribute('href'),base).pathname,'/communication');assert.equal(new URL(await records.getAttribute('href'),base).searchParams.get('site'),'zhaopin');}
     await page.goto(base+'/plan?planId='+planId+'&site=zhaopin');const inbox=page.getByRole('link',{name:'消息与回复',exact:true});assert.equal(await inbox.count(),1);await inbox.click();assert.equal(new URL(page.url()).searchParams.get('workSite'),'zhaopin');
     assert.equal(await page.getByRole('link',{name:'沟通清单与记录',exact:true}).count(),1);const today=page.getByRole('link',{name:'今日任务',exact:true});assert.equal(new URL(await today.getAttribute('href'),base).searchParams.get('site'),'zhaopin');
     assert.equal(await page.locator('.message-workspace').count(),1);assert.equal(await page.locator('.message-unresolved:not(.message-workspace *)').count(),0);assert.equal(await page.locator('[data-message-detail-panel]:visible').count(),1);
     const zlCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({has:page.locator('[data-draft-text]')});assert.equal(await zlCard.locator('[data-send-single]').count(),2);assert.equal(await zlCard.locator('[data-send-select]').count(),2);assert.equal(await zlCard.locator('[data-copy-draft]').count(),2);
-    const manualCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({hasNot:page.locator('[data-draft-text]')});assert.match(await manualCard.textContent(),/HR 邀请你发送简历/);assert.doesNotMatch(await manualCard.textContent(),/原始会话/);assert.match(await manualCard.textContent(),/没有经过验证的平台操作按钮/);assert.equal(await manualCard.locator('[data-message-action-confirm]').count(),0);assert.equal(await manualCard.locator('form').count(),0);
+    const manualCard=page.locator('[data-message-detail-panel].message-result[data-platform="zhaopin"]').filter({hasNot:page.locator('[data-draft-text]')});assert.match(await manualCard.textContent(),/HR 邀请你发送简历/);assert.doesNotMatch(await manualCard.textContent(),/原始会话/);assert.equal(await manualCard.locator('[data-message-action-confirm][data-action-kind="accept_resume"]').count(),1,'a recent trusted legacy invitation needs the existing guarded resume action');
+    const manualConversation=db.prepare('SELECT conversation_key FROM message_inbound_contexts WHERE card_id=?').get(manual.cardId).conversation_key;
+    db.prepare('UPDATE message_events SET occurred_at=? WHERE profile_id=? AND platform=? AND conversation_key=?').run(new Date(Date.now()-8*24*60*60*1000).toISOString(),profileId,'zhaopin',manualConversation);
+    await page.reload();assert.equal(await manualCard.locator('[data-message-action-confirm]').count(),0,'an invitation older than seven days must not offer a send action');
+    db.prepare('UPDATE message_events SET occurred_at=? WHERE profile_id=? AND platform=? AND conversation_key=?').run(NOW,profileId,'zhaopin',manualConversation);
+    await page.reload();assert.equal(await manualCard.locator('[data-message-action-confirm][data-action-kind="accept_resume"]').count(),1);
     assert.equal(await page.locator('[data-send-select]').count(),3,'BOSS and Zhaopin drafts both enter explicit batch selection');
     assert.equal(await page.locator('[data-send-select]:checked').count(),0,'batch starts with no implicit selection');
     assert.equal(await page.locator('.message-send-choice:visible').count(),0,'send selection is available only after explicitly entering batch mode');
@@ -191,7 +196,7 @@ async function main() {
     const evidence='D:/DevData/RoleFlow-zhaopin-messages-20260908';fs.mkdirSync(evidence,{recursive:true});for(const width of [1440,390]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(evidence,'unified-messages-'+width+'.png'),fullPage:true});}
     assert.equal(await page.locator('[data-source-filter], [data-task-filter]').count(),0);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM candidate_answer_memories WHERE profile_id=? AND final_text=? AND completion_kind='copied'").get(profileId,'可以的，我们继续沟通。').n,1,'edited copy teaches the answer without sent progress');
-    assert.equal(httpBrowserCalls,0,'inbox navigation and copying cannot start discovery');
+    assert.equal(httpReaderCalls,0,'inbox navigation and copying cannot start message discovery');
     db.prepare("UPDATE candidate_progress_cards SET source='unknown' WHERE id=?").run(boss.cardId);
     const unknownPage=await context.newPage();await unknownPage.goto(base+'/messages?profileId='+profileId);const unknownCard=unknownPage.locator('[data-message-detail-panel][data-platform=""]');assert.equal(await unknownCard.count(),1);assert.equal(await unknownCard.locator('[data-send-single], [data-send-select], [data-sent-draft]').count(),0);await unknownPage.close();db.prepare("UPDATE candidate_progress_cards SET source='boss' WHERE id=?").run(boss.cardId);
     await today.click();await page.waitForURL('**/plan?**');assert.equal(new URL(page.url()).searchParams.get('site'),'zhaopin');
@@ -213,7 +218,7 @@ async function main() {
     await page.getByRole('button',{name:'同步最新消息',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('button[data-page-primary]')||document.querySelector('button[data-page-primary]').disabled);await page.getByRole('button',{name:'安全停止',exact:true}).waitFor({state:'visible'});
     await page.waitForFunction(()=>Array.from(document.querySelectorAll('form[data-discovery-form]')).find(form=>form.querySelector('[name=action]').value==='stop').querySelector('button').disabled===false);
     assert.match(await page.locator('main').innerText(),/正在加载并读取消息/);assert.equal(httpBossCalls,0);assert.equal(httpReaderCalls,2);
-    await page.getByRole('button',{name:'安全停止',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.message-state h2')?.textContent==='已安全停止');assert.equal(httpBrowserCalls,2);
+    await page.getByRole('button',{name:'安全停止',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.message-state h2')?.textContent==='已安全停止');assert.equal(httpReaderCalls,2);
     const stoppedStatus=await (await fetch(base+'/api/message-discovery-status?profileId='+profileId)).json();assert.equal(stoppedStatus.status,'stopped');assert.equal(stoppedStatus.unresolved,0);assert.equal(stoppedStatus.reasonCode,'MESSAGE_DISCOVERY_STOPPED');
     const stoppedState=await page.locator('.message-state').innerText();assert.match(stoppedState,/已按你的操作安全停止/);assert.doesNotMatch(stoppedState,/无法确认本地岗位与会话是否一致/);assert.equal(await historicalRow.count(),0);
     assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
@@ -258,7 +263,8 @@ async function contactFiltersAndHistory(context, base, db) {
     assert.equal(await page.locator('.message-list-item:visible').count(),3,'unfinished resume confirmation remains visible while completed history stays collapsed');
     assert.equal(await page.locator('[data-action-group="needs_action"] .message-list-item',{hasText:'待确认简历岗位'}).count(),1,'the current inbox state must outrank the historical contact projection');
     const firstRow = page.locator('.message-list-item:visible').first();
-    assert((await firstRow.boundingBox()).y+100<=694,'390px viewport exposes the first message and HR preview');
+    const firstRowBox=await firstRow.boundingBox();
+    assert(firstRowBox.y+100<=694,`390px viewport exposes the first message and HR preview (first row y=${firstRowBox.y})`);
     const draftRow = page.locator('.message-list-item[data-platform="boss"]:visible').filter({has:page.locator('[data-message-view^="result-"]')});
     await draftRow.locator('[data-message-view]').focus();await page.keyboard.press('Space');
     // A prechecked radio does not emit change; keyboard activation must still open it.

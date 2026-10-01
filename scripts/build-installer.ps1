@@ -95,7 +95,7 @@ $NodeRoot = Resolve-PortableNodeRoot
 
 if (-not $SkipTests) {
   $TestNode = Join-Path $NodeRoot "node.exe"
-  & $TestNode --disable-warning=ExperimentalWarning (Join-Path $ProjectRoot "tests\run_all.js")
+  & $TestNode --disable-warning=ExperimentalWarning (Join-Path $ProjectRoot "tests\run_all.js") --browser-required
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }

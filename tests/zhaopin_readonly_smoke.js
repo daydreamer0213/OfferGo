@@ -123,7 +123,17 @@ async function main() {
     const afterSwitch = await adapter.readSearchState("ZHAOPIN-SEARCH");
     assert.equal(afterSwitch.selectedIndex, 1);
     assert.notEqual(afterSwitch.detail.sourceId, state.detail.sourceId, "same title cards must remain independent jobs");
-    assert.equal(await adapter.readVisiblePaneDetail("ZHAOPIN-SEARCH", afterSwitch.cards[2]), null, "unchanged detail link must not be adopted after a card click");
+    let staleDetailClock = Date.now();
+    adapter.detailNow = () => (staleDetailClock += 60_000);
+    try {
+      await assert.rejects(
+        () => adapter.readVisiblePaneDetail("ZHAOPIN-SEARCH", afterSwitch.cards[2]),
+        (error) => error.code === "ZHAOPIN_DETAIL_LOAD_TIMEOUT",
+        "unchanged detail link must stop the run instead of adopting the old pane"
+      );
+    } finally {
+      adapter.detailNow = Date.now;
+    }
     assert.equal(await adapter.readVisiblePaneDetail("ZHAOPIN-SEARCH", afterSwitch.cards[3]), null, "empty card title must stop before click");
 
     const deniedAdapter = new ZhaopinSiteAdapter({

@@ -100,7 +100,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       && Number(item.cardId) === Number(result.cardId)
       && item.conversationKey === result.conversationKey);
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
-    const expired = inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED";
+    const expired = inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED"
+      || result.legacyActionExpired === true;
     const pending = !expired && resultPending(result);
     const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
     const interviewInvited = Boolean(matchingContact?.interviewInvited || result.messageIntent === "interview_invitation");
@@ -131,7 +132,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       return messageIndex === 0 ? card : `<details class="message-draft-alternatives"><summary>查看其他回复版本</summary>${card}</details>`;
     }).join("");
     const inboundMessages = Array.isArray(result.inboundMessages) ? result.inboundMessages : [];
-    const timelineSection = renderConversationTimeline(inboxItem?.timeline, {
+    const timelineSection = renderConversationTimeline(inboxItem?.timeline || result.legacyTimeline, {
       escapeHtml,
       escapeAttr,
       messageActions,
@@ -371,7 +372,8 @@ function renderMessageActionControls(event, action, { escapeAttr, escapeHtml }) 
   };
   if (action) return `<div class="message-card-action" data-message-action-state="${escapeAttr(action.status)}"><strong>${escapeHtml(action.actionKind === "resume_request_accept" ? "同意发送简历" : "拒绝发送简历")}</strong><span>${escapeHtml(labels[action.status] || "等待处理")}</span></div>`;
   if (event.platform === "boss") return `<div class="message-card-action" data-message-action-group><span>直接处理这项请求</span><div class="button-row"><button type="button" data-message-action-confirm data-platform="boss" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="accept_resume">确认发送 BOSS 中最近更新的附件简历</button></div><small data-message-action-feedback role="status">点击后 OfferGo 会重新核对当前会话和附件更新时间；无法唯一确认时不会发送。</small></div>`;
-  if (event.platform !== "zhaopin") return "";
+  if (event.platform !== "zhaopin" || String(event.metadata?.cardType || "") !== "11"
+    || !/^\d{1,32}$/.test(String(event.platformMessageId || ""))) return "";
   return `<div class="message-card-action" data-message-action-group><span>直接处理这项请求</span><div class="button-row"><button type="button" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="accept_resume">同意发送简历</button><button type="button" class="secondary" data-message-action-confirm data-platform="zhaopin" data-conversation-key="${escapeAttr(event.conversationKey || "")}" data-message-key="${escapeAttr(event.messageKey || "")}" data-action-kind="decline_resume">拒绝</button></div><small data-message-action-feedback role="status">点击后 OfferGo 会先核对当前会话，再执行一次。</small></div>`;
 }
 

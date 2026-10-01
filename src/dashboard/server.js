@@ -1243,6 +1243,7 @@ function createDashboardServer({
     res.on("finish", () => logger.info("http_request_completed", { requestId, method: req.method, path: url?.pathname || req.url, statusCode: res.statusCode, durationMs: Date.now() - startedAt }));
     try {
       url = new URL(req.url, "http://127.0.0.1");
+      requireLocalDashboardRequest(req, dashboardServer.address()?.port);
       if (req.method === "GET" && DASHBOARD_ASSETS[url.pathname]) return sendDashboardAsset(res, DASHBOARD_ASSETS[url.pathname], assetReader);
       if (req.method === "GET" && url.pathname === "/favicon.ico") { res.writeHead(204); return res.end(); }
       if (req.method === "GET" && url.pathname === "/") {
@@ -3953,6 +3954,22 @@ function handleMessageDiscoveryStatus(res, controller, profileIdValue) {
       error: messageDiscoveryPublicError(error),
       errorCode: error?.code || "MESSAGE_DISCOVERY_FAILED"
     });
+  }
+}
+
+function requireLocalDashboardRequest(req, port) {
+  const host = String(req.headers.host || "");
+  let authority;
+  try { authority = new URL(`http://${host}`); } catch { authority = null; }
+  const validHost = authority
+    && ["127.0.0.1", "localhost"].includes(authority.hostname)
+    && Number(authority.port) === Number(port)
+    && authority.host === host;
+  const origin = String(req.headers.origin || "");
+  const validOrigin = !origin || origin === `http://${host}`;
+  const site = String(req.headers["sec-fetch-site"] || "").toLowerCase();
+  if (!validHost || (req.method === "POST" && (!validOrigin || site === "cross-site"))) {
+    throw appError("DASHBOARD_REQUEST_ORIGIN_REQUIRED", "请从当前 OfferGo 页面操作。", { statusCode: 403 });
   }
 }
 

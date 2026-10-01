@@ -20,6 +20,7 @@
     "test:fast": "node tests/run_group.js fast",
     "test:integration": "node tests/run_group.js integration",
     "test:package": "node tests/run_group.js package",
+    "test:release": "node tests/run_all.js --browser-required",
     "test:live-model": "node tests/job_match_benchmark.js --live"
   },
   "dependencies": {

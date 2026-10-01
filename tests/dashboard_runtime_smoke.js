@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 const { openDb, getWorkspacePlatformPreference, saveWorkspacePlatformPreference } = require("../src/core/storage");
 const { createDashboardServer } = require("../src/dashboard/server");
@@ -108,6 +109,33 @@ function quietLogger() {
       message: "招聘平台工作区尚未检查。"
     });
     assert.deepStrictEqual(health.body.browserAuthority, browserAuthority);
+    const platformBody = new URLSearchParams({ choice: "both", next: "/settings" });
+    for (const headers of [
+      { origin: "https://example.invalid" },
+      { origin: "null" },
+      { "sec-fetch-site": "cross-site" }
+    ]) {
+      const blocked = await fetch(`${base}/api/settings/platforms`, {
+        method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+        body: platformBody, redirect: "manual"
+      });
+      assert.strictEqual(blocked.status, 403, `untrusted local Dashboard POST is blocked: ${JSON.stringify(headers)}`);
+      assert.deepStrictEqual(getWorkspacePlatformPreference(db).platforms, ["boss"]);
+    }
+    const foreignHostStatus = await new Promise((resolve, reject) => {
+      const target = new URL(`${base}/api/settings/platforms`);
+      const request = http.request(target, { method: "POST", headers: {
+        host: "example.invalid", "content-type": "application/x-www-form-urlencoded"
+      } }, (response) => { response.resume(); response.on("end", () => resolve(response.statusCode)); });
+      request.on("error", reject);
+      request.end(platformBody.toString());
+    });
+    assert.strictEqual(foreignHostStatus, 403, "a foreign Host cannot access the local Dashboard");
+    const sameOrigin = await fetch(`${base}/api/settings/platforms`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: base, "sec-fetch-site": "same-origin" },
+      body: new URLSearchParams({ choice: "boss", next: "/settings" }), redirect: "manual"
+    });
+    assert.strictEqual(sameOrigin.status, 303, "normal Dashboard forms remain usable");
 
     const runtime = await getJson(base, "/api/runtime-status");
     assert.deepStrictEqual(runtime.body, {

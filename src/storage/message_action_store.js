@@ -1,4 +1,5 @@
 const { immediateTransaction, storageError } = require("./storage_shared");
+const { MESSAGE_ACTION_WINDOW_MS, isInPlatformResumeRequest } = require("../core/message_requested_actions");
 
 const PLATFORMS = new Set(["boss", "zhaopin"]);
 const ACTION_KINDS = new Set(["resume_request_accept", "resume_request_decline"]);
@@ -35,8 +36,20 @@ function confirmMessageAction(db, input = {}) {
     const event = db.prepare(`SELECT * FROM message_events
       WHERE profile_id = ? AND platform = ? AND conversation_key = ? AND message_key = ?`)
       .get(profileId, platform, conversationKey, messageKey);
-    if (!event || event.kind !== "resume_request" || event.direction !== "friend") {
+    const metadata = parseJson(event?.metadata_json);
+    const recognizedInvitation = event?.kind === "resume_request"
+      || (platform === "zhaopin" && event?.kind === "text" && isInPlatformResumeRequest(event.text));
+    if (!event || !recognizedInvitation || event.direction !== "friend") {
       throw actionError("MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE", "message action source is missing or no longer actionable");
+    }
+    if (platform === "zhaopin" && (String(metadata.cardType || "") !== "11"
+      || !/^\d{1,32}$/.test(String(event.platform_message_id || "")))) {
+      throw actionError("MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE", "message action source is missing a verified platform card");
+    }
+    const eventMs = Date.parse(String(event.occurred_at || event.first_observed_at || ""));
+    const confirmedMs = Date.parse(confirmedAt);
+    if (!Number.isFinite(eventMs) || eventMs > confirmedMs || confirmedMs - eventMs > MESSAGE_ACTION_WINDOW_MS) {
+      throw actionError("MESSAGE_ACTION_WINDOW_EXPIRED", "message action is outside the seven-day window");
     }
     const conflict = db.prepare(`SELECT * FROM message_platform_actions
       WHERE profile_id = ? AND platform = ? AND conversation_key = ? AND message_key = ? LIMIT 1`)
@@ -46,7 +59,6 @@ function confirmMessageAction(db, input = {}) {
       if (mapped.actionKind === actionKind) return mapped;
       throw actionError("MESSAGE_ACTION_DECISION_CONFLICT", "message action already has a different decision");
     }
-    const metadata = parseJson(event.metadata_json);
     const evidence = {
       sourceMessageId: String(event.platform_message_id || ""),
       cardType: String(metadata.cardType || "")

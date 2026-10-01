@@ -81,6 +81,20 @@ for (const item of roleKeywordCases) {
   assert.deepStrictEqual(selected.map((keyword) => keyword.word), item.expected);
 }
 assert.deepStrictEqual(
+  selectGeneratedRoleKeywords({ candidate: { targetTitles: ["Agent 工具调用", "数据分析", "产品经理（AI方向）"] } }, {
+    keywords: [{ word: "需求分析", priority: "A" }]
+  }).map((keyword) => keyword.word),
+  ["数据分析", "产品经理（AI方向）"],
+  "model-extracted targets must be checked like proposed search terms without losing real job titles"
+);
+assert.deepStrictEqual(
+  selectGeneratedRoleKeywords({ candidate: { targetTitles: ["Agent 工具调用"] }, experiences: [{ role: "客户成功专员" }] }, {
+    keywords: [{ word: "CRM配置", priority: "A" }]
+  }).map((keyword) => keyword.word),
+  ["客户成功专员"],
+  "a rejected model target must not suppress the supported experience fallback"
+);
+assert.deepStrictEqual(
   selectGeneratedRoleKeywords({ candidate: { targetTitles: [] }, experiences: [{ role: "客户成功专员" }] }, {
     keywords: [{ word: "CRM配置", priority: "A" }]
   }).map((keyword) => keyword.word),

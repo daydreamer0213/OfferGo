@@ -241,6 +241,41 @@ const { createZhaopinMessageActionSender } = require("../src/adapters/sites/zhao
     assert.equal(getMessageInboxItem(db, { profileId, platform: "boss", conversationKey: bossRunConversationKey }).actionGroup, "done");
     await bossController.close();
 
+    const legacyConversationKey = `sha256:${"2".repeat(64)}`;
+    const legacyMessageKey = `sha256:${"3".repeat(64)}`;
+    upsertMessageEvents(db, {
+      profileId, platform: "zhaopin", conversationKey: legacyConversationKey, observedAt: now,
+      events: [{ messageKey: legacyMessageKey, platformMessageId: "9003", direction: "friend",
+        kind: "text", text: "HR 邀请你发送简历", occurredAt: now, metadata: { cardType: "11" } }]
+    });
+    const legacyAction = confirmMessageAction(db, {
+      ...input, conversationKey: legacyConversationKey, messageKey: legacyMessageKey,
+      idempotencyKey: "27388b84-d274-4eaf-bf07-58d72e87e82f"
+    });
+    assert.equal(legacyAction.status, "confirmed", "a trusted legacy invitation can be confirmed without an inbox row");
+    const plainTextConversationKey = `sha256:${"6".repeat(64)}`;
+    const plainTextMessageKey = `sha256:${"7".repeat(64)}`;
+    upsertMessageEvents(db, {
+      profileId, platform: "zhaopin", conversationKey: plainTextConversationKey, observedAt: now,
+      events: [{ messageKey: plainTextMessageKey, platformMessageId: "9005", direction: "friend",
+        kind: "text", text: "HR 邀请你发送简历", occurredAt: now, metadata: {} }]
+    });
+    assert.throws(() => confirmMessageAction(db, {
+      ...input, conversationKey: plainTextConversationKey, messageKey: plainTextMessageKey,
+      idempotencyKey: "47388b84-d274-4eaf-bf07-58d72e87e82f"
+    }), (error) => error.code === "MESSAGE_ACTION_SOURCE_NOT_ACTIONABLE", "plain text is not a proven platform action card");
+    const oldConversationKey = `sha256:${"4".repeat(64)}`;
+    const oldMessageKey = `sha256:${"5".repeat(64)}`;
+    upsertMessageEvents(db, {
+      profileId, platform: "zhaopin", conversationKey: oldConversationKey, observedAt: now,
+      events: [{ messageKey: oldMessageKey, platformMessageId: "9004", direction: "friend",
+        kind: "resume_request", text: "HR 邀请你发送简历", occurredAt: "2026-09-09T08:00:00.000Z", metadata: { cardType: "11" } }]
+    });
+    assert.throws(() => confirmMessageAction(db, {
+      ...input, conversationKey: oldConversationKey, messageKey: oldMessageKey,
+      idempotencyKey: "37388b84-d274-4eaf-bf07-58d72e87e82f"
+    }), (error) => { assert.equal(error.code, "MESSAGE_ACTION_WINDOW_EXPIRED"); return true; }, "an old page cannot revive an expired invitation");
+
     console.log("message_platform_action_smoke ok");
   } finally {
     db.close();

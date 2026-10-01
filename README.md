@@ -169,7 +169,7 @@ OfferGo 通过当前进程的 JSON 行协议把结构化任务交给正在运行
 
 双击 `BuildRelease.bat` 生成 `dist\OfferGo-portable.zip`。发布包可以包含便携 Node，另一台 Windows 电脑解压后运行 `Install.bat` / `Start.bat`；当前版本默认使用“OfferGo 专用 Edge（推荐）”，不依赖 Codex 或 Edge Control。Edge Control 不内置在发布 zip 中，只用于显式高级模式。
 
-维护者双击 `BuildInstaller.bat` 可生成标准安装器和同名 `.sha256` 校验文件。构建会先运行一次完整离线回归，再在 `D:\DevData\OfferGo-installer` 创建不含数据库、简历、密钥、日志、报告、浏览器 profile、测试源码或 Edge Control 的干净暂存目录，然后调用固定的 Inno Setup 6 编译器。构建机需要把编译器放在 `D:\DevData\InnoSetup`，或设置 `ROLEFLOW_ISCC`。
+维护者双击 `BuildInstaller.bat` 可生成标准安装器和同名 `.sha256` 校验文件。两种发布构建默认都会先运行 `npm run test:release` 对应的完整检查，浏览器测试不能跳过；构建机需安装 Edge，并让 Node 能通过 `NODE_PATH` 找到 Playwright（开发工具建议放在 `D:\DevData`）。安装器构建随后在 `D:\DevData\OfferGo-installer` 创建不含数据库、简历、密钥、日志、报告、浏览器 profile、测试源码或 Edge Control 的干净暂存目录，再调用固定的 Inno Setup 6 编译器。编译器需放在 `D:\DevData\InnoSetup`，或设置 `ROLEFLOW_ISCC`。
 
 “OfferGo 专用 Edge（推荐）”的默认登录资料位于 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，不属于安装目录。它会跨覆盖升级和安装目录变化保留；更换电脑时不要直接复制浏览器登录资料，应在新电脑重新登录 BOSS。
 
