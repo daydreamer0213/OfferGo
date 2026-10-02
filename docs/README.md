@@ -26,7 +26,7 @@
 - [`releases/v1.2.0.md`](releases/v1.2.0.md)：已发布 v1.2.0 的历史版本说明；不代表当前 source candidate。
 - [`releases/v1.0.0.md`](releases/v1.0.0.md)：已发布 v1.0.0 的历史版本说明；不代表当前 source candidate。
 - [`product_spec.md`](product_spec.md)：产品边界、用户流程和功能规格。
-- [`architecture.md`](architecture.md)：当前架构、普通用户与 Agent 共用流程、架构风险和分阶段改进顺序。
+- [`architecture.md`](architecture.md)：当前分层、普通用户与 Agent 共用流程、已建立的护栏和仍需逐项处理的依赖。
 - [`lifecycle.md`](lifecycle.md)：扫描、工作流、分析、沟通和消息发送的状态负责人、恢复结果与事务边界。
 - [`daily_workflow.md`](daily_workflow.md)：每日扫描、模型分析、清单确认和批量沟通逻辑。
 - [`onboarding_workflow.md`](onboarding_workflow.md)：模型配置、简历解析、画像与筛选方案首次使用流程。
@@ -46,6 +46,8 @@
 - `two-run-workflow-validation.md`
 - `boss-communication-calibration.md`
 - `communication_live_acceptance.md`
+- [`PROJECT_HANDOFF_2026-09-10.md`](PROJECT_HANDOFF_2026-09-10.md)：9 月 10 日交接原文，保留当时分支和验收状态。
+- [`NEXT_PHASE_2026-09-10.md`](NEXT_PHASE_2026-09-10.md)：9 月 10 日主控索引原文，不代表当前待办。
 - `superpowers/plans/`
 - `superpowers/specs/`
 - `superpowers/reports/`
