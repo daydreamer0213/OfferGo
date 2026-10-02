@@ -21,7 +21,7 @@ const {
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
 const { MANUAL_ONLY_CATEGORIES } = require("./message_reply_contract");
-const { isExplicitRecruiterRejection, isClearlyUnmatchedMessageJob } = require("./message_routing_policy");
+const { isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
@@ -126,6 +126,8 @@ async function runBossMessageDiscovery({
   messageInbox,
   messageTimeline,
   isUnmatchedCard = () => false,
+  analysisAvailable = true,
+  retryConversationKeys = null,
   qualityCheckDraft
 }) {
   const {
@@ -138,7 +140,7 @@ async function runBossMessageDiscovery({
   } = messageInboxPort(messageInbox);
   const timeline = messageTimelinePort(messageTimeline);
   const source = discoveryPlatform(platform);
-  const candidates = listMessageDiscoveryCandidates(db, { profileId, platform: source });
+  const candidates = listMessageDiscoveryCandidates(db, { profileId, platform: source, includeRejected: true });
   const storedProfile = getCandidateProfile(db, profileId);
   if (!storedProfile) {
     throw discoveryError("MESSAGE_DISCOVERY_PROFILE_NOT_FOUND", "candidate profile was not found");
@@ -254,7 +256,8 @@ async function runBossMessageDiscovery({
       observedAt: now()
     });
   }
-  const queue = planned.queue.map((target) => {
+  const retryKeys = Array.isArray(retryConversationKeys) ? new Set(retryConversationKeys) : null;
+  const queue = planned.queue.filter((target) => !retryKeys || retryKeys.has(target.conversationKey)).map((target) => {
     const unresolved = unresolvedByConversation.get(target.conversationKey);
     const allowEmptyTimeline = source === "zhaopin"
       && Array.isArray(unresolved?.inboundMessages) && unresolved.inboundMessages.length > 0
@@ -390,7 +393,7 @@ async function runBossMessageDiscovery({
     let resolved = source === "boss"
       ? resolveUniqueCandidate(candidates, selectedSnapshot, target.conversationKey, target.sourceJobId)
       : { ok: false, reasonCode: "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE" };
-    if (isExplicitRecruiterRejection(selectedSnapshot?.messages)) {
+    if (isLatestRecruiterRejection(selectedSnapshot?.messages)) {
       const directIncoming = resolved.ok
         ? selectUnprocessedFriendMessageGroup(db, resolved.cardId, selectedSnapshot, resolved.threadKey, source)
         : null;
@@ -448,6 +451,62 @@ async function runBossMessageDiscovery({
       processed += 1;
       counters.newReplies += 1;
       if (terminal) results = results.filter((item) => item.cardId !== terminal.id);
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+      continue;
+    }
+    if (!analysisAvailable) {
+      const cached = resolved.ok ? resolved : source === "zhaopin"
+        ? cachedZhaopinConversation(candidates, selectedTarget, target.conversationKey)
+        : { ok: false };
+      const previousInbox = listMessageInboxItems(db, { profileId }).find((item) =>
+        item.platform === source && item.conversationKey === target.conversationKey);
+      const observedAt = now();
+      immediateTransaction(db, () => {
+        if (latestPersisted?.direction === "myself") {
+          commitBaseline(db, profileId, target, source, observedAt);
+          clearUnresolvedMessageDiscoveryItem(db, { profileId, platform: source, conversationKey: target.conversationKey });
+          return;
+        }
+        recordUnresolvedMessageDiscoveryItem(db, {
+          profileId, platform: source, conversationKey: target.conversationKey,
+          previewDigest: target.previewDigest, previewKind: target.previewKind,
+          reasonCode: "MESSAGE_DISCOVERY_MODEL_NOT_READY", observedAt,
+          identity: selectedIdentity(selectedSnapshot)
+        });
+        if (latestPersisted?.direction === "friend") {
+          for (const cardId of new Set([cached.cardId, previousInbox?.cardId]
+            .map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))) {
+            closeMessageReplyDrafts(db, { profileId, cardId, closedAt: observedAt });
+          }
+        }
+        if (latestPersisted?.direction === "friend" && cached.ok && cached.card.stage !== "rejected"
+          && cached.job.analysis?.semanticStatus === "complete"
+          && !isClearlyUnmatchedMessageJob(cached.job) && target.identityVerified === true) {
+          upsertMessageInboxItem(db, {
+            profileId, platform: source, conversationKey: target.conversationKey,
+            sourceJobId: selectedTarget.sourceJobId, jobId: cached.card.jobId, cardId: cached.cardId,
+            lastMessageId: selectedTarget.lastMessageId,
+            lastActivityAt: target.lastActivityAt || observedAt,
+            lastDirection: "friend", unread: true,
+            positionTitle: cached.job.title, company: cached.job.company,
+            latestExcerpt: timelineExcerpt(latestPersisted) || target.previewText || "",
+            actionGroup: "needs_review", actionCode: "", reasonCode: "MESSAGE_DISCOVERY_MODEL_NOT_READY",
+            observedAt
+          });
+        } else if (latestPersisted?.direction === "friend" && previousInbox) {
+          deleteMessageInboxItem(db, { profileId, platform: source, conversationKey: target.conversationKey });
+        }
+      });
+      if (latestPersisted?.direction !== "myself") {
+        continuedFailures.push({ conversationKey: target.conversationKey, reasonCode: "MESSAGE_DISCOVERY_MODEL_NOT_READY" });
+      }
+      clearSelectedSnapshot(selectedSnapshot);
+      processed += 1;
+      retained = unresolvedSummary(db, profileId, source);
+      emitStatus(safeStatus("running", {
+        queued: queue.length, processed, unresolved: retained.count,
+        reasonCode: retained.reasonCode, counters, results, phase: "reading_messages"
+      }), logger, onStatus);
       await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
       continue;
     }
@@ -880,6 +939,17 @@ async function paceBeforeNext({
   if (queueIndex + 1 >= queueLength) return;
   await sleepFn(randomBetween(1500, 2500, randomFn), signal);
   if (openedCount % 10 === 0) await sleepFn(15_000, signal);
+}
+
+function cachedZhaopinConversation(candidates, target, conversationKey) {
+  const matches = candidates.filter((candidate) => candidate.source === "zhaopin"
+    && target.sourceJobId === `zhaopin:${candidate.sourceId}`
+    && candidate.threadKey === conversationKey
+    && candidate.contextComplete === true
+    && candidate.stage !== "rejected");
+  if (matches.length !== 1) return { ok: false };
+  const candidate = matches[0];
+  return { ok: true, cardId: candidate.cardId, card: candidate, job: candidate };
 }
 
 function resolveUniqueCandidate(candidates, selected, canonicalThreadKey, sourceJobId = "") {
@@ -1985,10 +2055,13 @@ function reconcileTerminalMessageHistory({
       conversationKey: item.conversationKey,
       limit: 500
     });
-    const rejectionEvent = [...events].reverse().find((event) =>
-      event.direction === "friend"
-      && event.kind === "text"
-      && isExplicitRecruiterRejection([event]));
+    const latestConversationEvent = [...events].reverse().find((event) =>
+      event.direction === "friend" || event.direction === "myself");
+    const rejectionEvent = latestConversationEvent?.direction === "friend"
+      && latestConversationEvent.kind === "text"
+      && String(latestConversationEvent.platformMessageId || "") === String(item.lastMessageId || "")
+      && isExplicitRecruiterRejection([latestConversationEvent])
+      ? latestConversationEvent : null;
     const rejectionContext = rejectionEvent ? null : inboundContexts.find((context) =>
       context.conversationKey === item.conversationKey
       && Number(context.cardId) === Number(item.cardId)

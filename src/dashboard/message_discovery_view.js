@@ -44,14 +44,16 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const currentPath = profileIdValue
     ? `/messages?profileId=${encodeURIComponent(profileId)}${originQuery}`
     : `/messages?planId=${encodeURIComponent(plan?.id || "")}${originQuery}`;
-  const statusLabel = {
+  const statusLabel = status.reasonCode === "MESSAGE_DISCOVERY_MODEL_NOT_READY"
+    ? "消息已读取，回复建议待生成"
+    : ({
     idle: "尚未开始",
     running: "正在只读发现",
     completed: "本次发现已完成",
     needs_user_action: "需要人工处理",
     stopped: "已安全停止",
     dismissed: "本次草稿已放弃"
-  }[status.status] || "需要人工处理";
+  }[status.status] || "需要人工处理");
   const recoveryMessages = messageDiscoveryRecoveryMessages();
   const itemReasonCodes = new Set([
     "BOSS_MESSAGE_CARD_NOT_FOUND", "BOSS_MESSAGE_CARD_AMBIGUOUS", "BOSS_MESSAGE_SALARY_MISMATCH",
@@ -233,6 +235,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const messageGroups = [
     ["needs_action", "现在需要你处理", false],
     ["waiting", "等待对方回复", false],
+    ["needs_review", "已读取，等待回复建议", false],
     ["done", "已结束记录", true]
   ];
   const groupedLists = messageGroups.map(([group, label, collapsed]) => {
@@ -264,6 +267,12 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const value = inboxState.freshness?.[platform] || { label: "尚未同步", detail: "" };
     return `<div data-state="${escapeAttr(value.state || "idle")}"><strong>${platform === "zhaopin" ? "智联" : "BOSS"}</strong><span>${escapeHtml(value.label)}</span><small>${escapeHtml(value.detail || "")}</small></div>`;
   }).join("")}</section>`;
+  const checkedCount = Math.max(0, Number(status.processed) || 0);
+  const queuedCount = Math.max(0, Number(status.queued) || 0);
+  const pendingCount = Math.max(0, Number(status.unresolved) || 0);
+  const progress = status.startedAt || queuedCount || pendingCount
+    ? `<p class="line message-sync-progress" role="status">${queuedCount ? `本轮需核对 ${queuedCount} 条会话，已处理 ${Math.min(checkedCount, queuedCount)} 条。` : ""}${pendingCount ? `另有 ${pendingCount} 条消息尚未整理完成，后续同步会继续处理。` : ""}</p>`
+    : "";
   const scriptState = JSON.stringify({
     profileId,
     status: status.status,
@@ -281,7 +290,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     planId: plan?.id || "",
     stage: "消息",
     brandHref: todayPath,
-    content: `<main id="main-content" class="message-layout"><header class="page-heading message-heading"><p class="eyebrow">消息工作台</p><h1>行动收件箱</h1><p class="lede">OfferGo 已按下一步整理消息，你只需要打开需要处理的内容。</p></header>${controls}<p class="message-feedback" data-discovery-feedback role="status" aria-live="polite" aria-busy="false"></p>${status.status === "running" || showPageReason ? `<section class="panel message-state"><h2>${escapeHtml(statusLabel)}</h2>${phaseNotice ? `<p class="line">${escapeHtml(phaseNotice)}</p>` : ""}${reason ? `<p class="risk-text">${escapeHtml(reason)}</p>` : ""}</section>` : ""}${freshness}${platformNotices}${selectionLocked ? '<section class="panel message-not-found"><h2>没有找到这条联系</h2><p>它可能已经处理完成，请从列表重新选择。</p></section>' : ''}<p data-source-empty hidden role="status">当前没有消息。</p>${messageWorkspace || (!contactKey ? '<section class="panel"><p class="line">当前没有需要处理的消息。点击“同步最新消息”开始检查。</p></section>' : '')}${sendBatchPanel}<p class="button-row"><a class="button-link secondary" data-flush-drafts href="/follow-ups?profileId=${encodeURIComponent(profileId)}&amp;planId=${encodeURIComponent(plan?.id || "")}">查看无回复跟进</a><a class="button-link secondary" data-flush-drafts href="/communication-profile?profileId=${encodeURIComponent(profileId)}">管理我的沟通资料</a><a class="button-link secondary" data-flush-drafts href="${escapeAttr(manualPath)}">返回人工粘贴流程</a></p></main>`,
+    content: `<main id="main-content" class="message-layout"><header class="page-heading message-heading"><p class="eyebrow">消息工作台</p><h1>行动收件箱</h1><p class="lede">OfferGo 已按下一步整理消息，你只需要打开需要处理的内容。</p></header>${controls}<p class="message-feedback" data-discovery-feedback role="status" aria-live="polite" aria-busy="false"></p>${status.status === "running" || showPageReason ? `<section class="panel message-state"><h2>${escapeHtml(statusLabel)}</h2>${phaseNotice ? `<p class="line">${escapeHtml(phaseNotice)}</p>` : ""}${reason ? `<p class="risk-text">${escapeHtml(reason)}</p>` : ""}</section>` : ""}${freshness}${progress}${platformNotices}${selectionLocked ? '<section class="panel message-not-found"><h2>没有找到这条联系</h2><p>它可能已经处理完成，请从列表重新选择。</p></section>' : ''}<p data-source-empty hidden role="status">当前没有消息。</p>${messageWorkspace || (!contactKey ? '<section class="panel"><p class="line">当前没有需要处理的消息。点击“同步最新消息”开始检查。</p></section>' : '')}${sendBatchPanel}<p class="button-row"><a class="button-link secondary" data-flush-drafts href="/follow-ups?profileId=${encodeURIComponent(profileId)}&amp;planId=${encodeURIComponent(plan?.id || "")}">查看无回复跟进</a><a class="button-link secondary" data-flush-drafts href="/communication-profile?profileId=${encodeURIComponent(profileId)}">管理我的沟通资料</a><a class="button-link secondary" data-flush-drafts href="${escapeAttr(manualPath)}">返回人工粘贴流程</a></p></main>`,
     scripts: [messageDiscoveryClientScript(scriptState)]
   });
 }
@@ -333,15 +342,15 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
   const statusText = item.statusText || (item.actionGroup === "waiting" ? "已回复，等待对方消息" : "查看这条消息");
   const excerpt = item.latestExcerpt || statusText;
   const reason = item.actionGroup === "needs_review"
-    ? messageDiscoveryReasonText(item.reasonCode)
+    ? "消息原文已保存；模型恢复后重新同步，OfferGo 会接着生成回复建议。"
     : item.actionGroup === "waiting" ? "你已经回复过这条会话，新的对方消息出现后会自动移回待处理。" : statusText;
   return {
     key,
     identity: `${item.platform}\0${item.conversationKey}`,
     actionGroup: item.actionGroup,
     contactKey: "",
-    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action" || item.actionGroup === "needs_review"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line"><strong>OfferGo 判断：</strong>${escapeHtml(reason)}</p></section></section>`
+    list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${item.actionGroup}" data-pending="${item.actionGroup === "needs_action"}" data-resume="false" data-interview="false" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(excerpt)}</em></span></label>`,
+    detail: `<section id="message-detail-${key}" class="panel message-result${item.actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span> · ${escapeHtml(company)} · ${escapeHtml(messageTimeLabel(item.lastActivityAt))}</p>${renderConversationTimeline(item.timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.actionGroup !== "needs_review" && item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>${item.lastDirection === "myself" ? "当前会话状态" : "最新消息"}</h3><p class="line">${escapeHtml(excerpt)}</p></section>`}<section class="message-job-understanding"><p class="line">${escapeHtml(reason)}</p></section></section>`
   };
 }
 
@@ -425,7 +434,7 @@ function messageDiscoveryClientScript(scriptState) {
     const draftWrites=new Map();
     const messageFor=(code)=>initial.recoveryMessages[String(code||"")]||initial.recoveryMessages.default;
     const show=(code)=>{if(reloadPending)return;feedback.textContent=messageFor(code);feedback.dataset.errorCode=String(code||"");};
-    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const counts=queued?"已发现 "+queued+" 条消息。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_job")return counts+"岗位资料已读取，正在完成岗位分析；首次分析可能需要几分钟。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
+    const liveStatusText=(status)=>{const queued=Math.max(0,Number(status?.queued)||0);const processed=Math.max(0,Number(status?.processed)||0);const counts=queued?"本轮需核对 "+queued+" 条会话，已处理 "+Math.min(processed,queued)+" 条。":"";if(status?.phase==="cooldown"){const seconds=Math.max(1,Math.ceil((Date.parse(status.waitUntil)-Date.now())/1000));const wait=Number.isFinite(seconds)?(seconds>=60?"约 "+Math.ceil(seconds/60)+" 分钟":"约 "+seconds+" 秒"):"一会儿";return counts+"正在按平台安全节奏等待，"+wait+"后继续。";}if(status?.phase==="reading_detail")return counts+"正在后台读取岗位资料，不会抢占前台。";if(status?.phase==="analyzing_job")return counts+"岗位资料已读取，正在完成岗位分析；首次分析可能需要几分钟。";if(status?.phase==="analyzing_messages")return counts+"正在整理消息并生成回复建议，模型响应可能需要一些时间。";if(status?.phase==="reading_messages")return counts+"正在读取最新消息。";return counts+"消息同步正在进行。";};
     const requestReload=(resetSelection=false)=>{if(resetSelection)try{localStorage.removeItem(selectedKeyStorage);}catch{}reloadPending=true;location.reload();};
     const setPending=(pending)=>{feedback.setAttribute("aria-busy",String(pending));if(pending)feedback.textContent="正在处理，请稍候。";for(const form of forms)for(const button of form.querySelectorAll("button")){if(!("discoveryBaseDisabled" in button.dataset))button.dataset.discoveryBaseDisabled=String(button.disabled);button.disabled=pending||button.dataset.discoveryBaseDisabled==="true";}};
     const read=async(response)=>{const text=await response.text();try{return {json:true,body:JSON.parse(text)}}catch{return {json:false,body:null}}};
@@ -666,7 +675,7 @@ function messageDiscoveryRecoveryMessages() {
     BOSS_RUNTIME_BLOCKED: "浏览器操作当前被安全限制。请完成安全检查，解除前不要继续本地操作。",
     MESSAGE_DISCOVERY_LEASE_BUSY: "BOSS 正被另一项任务使用。请等待或停止冲突任务后重试。",
     MESSAGE_DISCOVERY_LEASE_LOST: "BOSS 任务控制权已丢失。请等待或停止冲突任务后重试。",
-    MESSAGE_DISCOVERY_MODEL_NOT_READY: "深度分析模型尚未就绪。请到模型设置测试深度分析模型。",
+    MESSAGE_DISCOVERY_MODEL_NOT_READY: "消息已保存，但模型暂不可用。模型恢复后重新同步，会接着整理回复建议。",
     MESSAGE_DISCOVERY_MODEL_QUOTA_EXHAUSTED: "消息已全部读取，但模型服务额度不足，仍有岗位分析尚未完成。请到“模型与设置”检查服务额度后重新同步；已完成结果不会丢失。",
     MESSAGE_DISCOVERY_JOB_ANALYSIS_FAILED: "消息已全部读取，但模型暂时未能完成部分岗位分析。未完成项已保留，请稍后重新同步；已完成结果不会丢失。",
     BOSS_MESSAGE_CARD_NOT_FOUND: verifyIdentity,

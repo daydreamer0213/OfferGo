@@ -16,6 +16,7 @@ const { createMessageDiscoveryController, createMessageDiscoveryDetailSafety } =
 const { safeDigest } = require("../src/adapters/sites/boss_message_dom");
 const { createZhaopinMessageJobContextResolver } = require("../src/application/message_discovery/zhaopin_job_context");
 const { listPreviewStates, listUnresolvedMessageDiscoveryItems, recordUnresolvedMessageDiscoveryItem } = require("../src/core/message_preview_state");
+const { getMessageInboxItem } = require("../src/application/message_inbox");
 
 const NOW = "2026-09-08T08:00:00.000Z";
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-zhaopin-message-"));
@@ -135,6 +136,36 @@ async function run() {
     try { await regression(); } catch (error) { failures.push(`${regression.name}: ${error.stack}`); }
   }
   assert.deepEqual(failures, []);
+  await modelUnavailableKnownZhaopinSmoke();
+}
+
+async function modelUnavailableKnownZhaopinSmoke() {
+  const fixture = createFixture({ id: "ZLMODELOFF001", title: "Model Offline Engineer" });
+  const conversationKey = safeDigest(["zhaopin", "model-offline-known"]);
+  const sourceJobId = "zhaopin:ZLMODELOFF001";
+  const firstMessage = { direction: "friend", messageId: "990001", text: "你好，方便聊聊吗？", contentKind: "text" };
+  const first = await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, platform: "zhaopin",
+    reader: zhaopinReaderFor({ conversationKey, sourceJobId, title: fixture.title, messages: [firstMessage] }),
+    classifyMessageGroup: async () => classification(["可以，想先了解一下岗位。"]),
+    resolveJobContext: createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId, now: () => NOW }),
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.equal(first.results.length, 1);
+  assert.equal(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 1);
+  const latestMessage = { direction: "friend", messageId: "990002", text: "想请你补充一下项目经历。", contentKind: "text" };
+  const offline = await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, platform: "zhaopin", analysisAvailable: false,
+    reader: zhaopinReaderFor({ conversationKey, sourceJobId, title: fixture.title, messages: [firstMessage, latestMessage] }),
+    classifyMessageGroup: async () => { throw new Error("model must not run while unavailable"); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.equal(offline.unresolved, 1);
+  assert.equal(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0,
+    "the old draft must close when a newer Zhaopin message arrives");
+  const inbox = getMessageInboxItem(db, { profileId: fixture.profileId, platform: "zhaopin", conversationKey });
+  assert.equal(inbox.actionGroup, "needs_review");
+  assert.equal(inbox.latestExcerpt, latestMessage.text);
 }
 
 async function contextChangedDuringReplySmoke() {

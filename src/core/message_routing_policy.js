@@ -28,6 +28,13 @@ function isExplicitRecruiterRejection(messages = []) {
   });
 }
 
+function isLatestRecruiterRejection(messages = []) {
+  const latest = (Array.isArray(messages) ? messages : [])
+    .filter((message) => ["friend", "myself"].includes(String(message?.direction || "")))
+    .at(-1);
+  return latest?.direction === "friend" && isExplicitRecruiterRejection([latest]);
+}
+
 function isClearlyUnmatchedMessageJob(job = {}) {
   const analysis = job?.analysis || {};
   if (analysis.semanticStatus !== "complete") return false;
@@ -37,4 +44,4 @@ function isClearlyUnmatchedMessageJob(job = {}) {
     || normalizeRecommendationTier(analysis.recommendation, Number(analysis.recommendationSchemaVersion || 1)) === "not_recommended";
 }
 
-module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection, isClearlyUnmatchedMessageJob };
+module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob };

@@ -1171,6 +1171,8 @@ async function main() {
 
   await leaseConstraintSmoke(db, root, dbPath, logger, fixture.profileId);
   assertNoPrivateData(logs);
+  await transientMessageRetrySmoke();
+  modelUnavailablePresentationSmoke();
   console.log("dashboard_message_discovery_smoke ok");
 }
 
@@ -1555,6 +1557,60 @@ async function controllerBrowserAuthoritySmoke() {
   assert.strictEqual(cleanupBrowser, browserSentinel, "controller cleanup must receive the owned adapter");
 }
 
+async function transientMessageRetrySmoke() {
+  const fixture = createFixture();
+  const browser = { listTabs: async () => [{ id: 901, windowId: 1, url: "https://i.zhaopin.com/im" }] };
+  const attempts = [];
+  const controller = createMessageDiscoveryController({
+    db, logger, modelReady: () => true, getEnabledPlatforms: () => ["zhaopin"],
+    createBrowser: async () => browser, cleanupBrowser: async () => {},
+    createReader: () => ({}), createDetailSafety: () => ({ beforeOpen: async () => {}, afterIssuedAttempt: async () => {} }),
+    createDetailReader: () => ({}), createJobContextResolver: () => async () => ({}),
+    createAnalyzer: () => ({}), analyzeMessageJob: null,
+    assertRuntimeAvailable: () => {},
+    acquireLease: () => {}, renewLease: () => {}, releaseLease: () => {},
+    retrySleepFn: async () => {},
+    runDiscovery: async (input) => {
+      attempts.push(input.retryConversationKeys || null);
+      return attempts.length === 1
+        ? { status: "completed", queued: 2, processed: 1, unresolved: 1,
+          reasonCode: "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT", results: [],
+          counters: { visible: 2, newReplies: 1 },
+          continuedFailures: [{ conversationKey: `sha256:${"a".repeat(64)}`, reasonCode: "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT" }] }
+        : { status: "completed", queued: 1, processed: 1, unresolved: 0,
+          reasonCode: "", results: [], counters: { visible: 2, newReplies: 1 }, continuedFailures: [] };
+    },
+    setInterval: () => 0, clearInterval: () => {}
+  });
+  controller.start(fixture.profileId);
+  await waitFor(() => controller.status(fixture.profileId).status !== "running");
+  assert.deepStrictEqual(attempts, [null, [`sha256:${"a".repeat(64)}`]], "only the transient failed conversation should be retried once");
+  assert.strictEqual(controller.status(fixture.profileId).unresolved, 0);
+  await controller.close();
+
+  let riskAttempts = 0;
+  const riskController = createMessageDiscoveryController({
+    db, logger, modelReady: () => true, getEnabledPlatforms: () => ["zhaopin"],
+    createBrowser: async () => browser, cleanupBrowser: async () => {},
+    createReader: () => ({}), createDetailSafety: () => ({ beforeOpen: async () => {}, afterIssuedAttempt: async () => {} }),
+    createDetailReader: () => ({}), createJobContextResolver: () => async () => ({}),
+    createAnalyzer: () => ({}), analyzeMessageJob: null, assertRuntimeAvailable: () => {},
+    acquireLease: () => {}, renewLease: () => {}, releaseLease: () => {}, retrySleepFn: async () => {},
+    runDiscovery: async () => {
+      riskAttempts += 1;
+      return { status: "needs_user_action", queued: 2, processed: 1, unresolved: 1,
+        reasonCode: "ZHAOPIN_MESSAGE_RISK_CONTROL", results: [],
+        counters: { visible: 2, newReplies: 1 },
+        continuedFailures: [{ conversationKey: `sha256:${"a".repeat(64)}`, reasonCode: "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT" }] };
+    },
+    setInterval: () => 0, clearInterval: () => {}
+  });
+  riskController.start(fixture.profileId);
+  await waitFor(() => riskController.status(fixture.profileId).status !== "running");
+  assert.strictEqual(riskAttempts, 1, "a platform safety stop must block even a pending transient retry");
+  await riskController.close();
+}
+
 async function dashboardSignalShutdownSmoke() {
   const events = [];
   const processRef = new EventEmitter();
@@ -1606,7 +1662,7 @@ async function modelReadinessGateSmoke(database, projectRoot, databasePath, scop
     messageDiscoveryDependencies: {
       createBrowser() {
         browserCreations += 1;
-        return {};
+        return { async listTabs() { return []; } };
       }
     }
   });
@@ -1620,17 +1676,45 @@ async function modelReadinessGateSmoke(database, projectRoot, databasePath, scop
       action: "start",
       profileId
     });
-    assert.strictEqual(response.status, 409);
-    assert.strictEqual(response.body.errorCode, "MESSAGE_DISCOVERY_MODEL_NOT_READY");
-    assert.strictEqual(browserCreations, 0, "unready model must stop before browser creation");
-    assert.strictEqual(
-      database.prepare("SELECT COUNT(*) AS count FROM site_scan_leases WHERE site = 'boss'").get().count,
-      0,
-      "unready model must stop before lease acquisition"
-    );
+    assert.strictEqual(response.status, 202, "message reading remains available without a model");
+    await new Promise(setImmediate);
+    assert.strictEqual(browserCreations, 1);
   } finally {
     await new Promise((resolve) => readinessServer.close(resolve));
   }
+}
+
+function modelUnavailablePresentationSmoke() {
+  const fixture = createFixture();
+  const conversationKey = `sha256:${"f".repeat(64)}`;
+  const messageText = "方便介绍一下这个岗位的具体工作吗？";
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey,
+    sourceJobId: "boss:model-pending", jobId: fixture.jobId, cardId: fixture.card.id,
+    lastMessageId: "123456789012997", lastActivityAt: "2026-08-11T08:00:00.000Z",
+    lastDirection: "friend", unread: true, positionTitle: fixture.title,
+    company: fixture.company, latestExcerpt: messageText,
+    actionGroup: "needs_review", actionCode: "", reasonCode: "MESSAGE_DISCOVERY_MODEL_NOT_READY",
+    observedAt: "2026-08-11T08:00:00.000Z"
+  });
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey,
+    observedAt: "2026-08-11T08:00:00.000Z",
+    events: [{ messageKey: `sha256:${"e".repeat(64)}`, platformMessageId: "123456789012997",
+      direction: "friend", kind: "text", text: messageText,
+      occurredAt: "2026-08-11T08:00:00.000Z", metadata: {} }]
+  });
+  const inbox = buildMessageInboxPageState(db, { profileId: fixture.profileId });
+  assert.strictEqual(inbox.groups.needsReview.length, 1);
+  const html = renderMessageDiscoveryPage({
+    db, searchParams: new URLSearchParams({ profileId: fixture.profileId }),
+    controller: { pageState: () => ({ status: "completed", results: [], platformRuns: [], inbox }) },
+    helpers: { getCandidateProfile: () => ({}), renderFramedPage: ({ content }) => content,
+      escapeHtml: String, escapeAttr: String, newProgressRequestKey: () => "model-pending" }
+  });
+  assert.match(html, /已读取，等待回复建议/);
+  assert.match(html, /方便介绍一下这个岗位的具体工作吗/);
+  assert.doesNotMatch(html, /data-message-action-confirm/, "reading without a model must not offer platform actions");
 }
 
 async function browserRuntimeGateSmoke(database, projectRoot, databasePath, scopedLogger, profileId) {

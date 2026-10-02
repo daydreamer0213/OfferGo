@@ -80,7 +80,12 @@ async function main() {
   await classificationOutcomeSmoke();
   await semanticRejectionSmoke();
   await directRejectionRoutingSmoke();
+  await reopenedAfterRejectionSmoke();
+  await modelUnavailableCaptureSmoke();
+  await retryTargetsOnlySmoke();
   await historicalRejectionReconciliationSmoke();
+  await historicalRejectionThenNewMessageSmoke();
+  await historicalRejectionUnobservedNewMessageSmoke();
   await historicalInboundContextRejectionReconciliationSmoke();
   await expiredActionReconciliationSmoke();
   await readerStopSmoke();
@@ -1696,6 +1701,139 @@ async function directRejectionRoutingSmoke() {
   assert.strictEqual(listProgressEvents(db, fixture.card.id)
     .filter((event) => event.type === "message_group_classified").length, classificationEventCount);
   assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  const reopened = selectedConversation({
+    title: fixture.title,
+    messageId: "123456789012891",
+    messages: [
+      message("friend", "123456789012890", rejectionMessage),
+      message("friend", "123456789012891", "我们还有一个新的机会，方便聊聊吗？")
+    ]
+  });
+  const reopenedSummary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([reopened]),
+    classifyMessageGroup: async () => classification({ messages: ["方便，您说说这个机会吧。"] }),
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(reopenedSummary.results.length, 1, "a later HR message should reopen the same job");
+}
+
+async function reopenedAfterRejectionSmoke() {
+  const fixture = createFixture({ suffix: "reopened-after-rejection", title: "Reopened Engineer" });
+  const selected = selectedConversation({
+    title: fixture.title,
+    messages: [
+      message("friend", "123456789012895", "不好意思，不太合适哦"),
+      message("myself", "123456789012896", "好的，谢谢"),
+      message("friend", "123456789012897", "我们有另一个岗位，方便聊聊吗？")
+    ]
+  });
+  let modelCalls = 0;
+  const summary = await runBossMessageDiscovery({
+    db,
+    profileId: fixture.profileId,
+    reader: fakeReader([selected]),
+    classifyMessageGroup: async () => {
+      modelCalls += 1;
+      return classification({ messages: ["方便，您说说这个岗位吧。"] });
+    },
+    now: () => NOW,
+    sleepFn: async () => {}
+  });
+  assert.strictEqual(modelCalls, 1, "a newer HR message must be classified instead of replaying an old rejection");
+  assert.strictEqual(summary.results.length, 1);
+  assert.notStrictEqual(getProgressCardForJob(db, {
+    profileId: fixture.profileId,
+    jobId: fixture.jobId
+  }).stage, "rejected");
+}
+
+async function modelUnavailableCaptureSmoke() {
+  const fixture = createFixture({ suffix: "model-unavailable-capture", title: "Known Message Engineer" });
+  const oldDraft = recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId, cardId: fixture.card.id, jobId: fixture.jobId,
+    messageGroupKey: safeDigest(["before-model-outage"]), questionSummary: "旧问题",
+    messageIntent: "information_request", messageCategory: "other",
+    messages: ["旧回复草稿"], createdAt: NOW
+  })[0];
+  const selected = selectedConversation({
+    title: fixture.title,
+    messageId: "123456789012997",
+    messages: [message("friend", "123456789012997", "方便介绍一下岗位的具体工作吗？")]
+  });
+  const offline = await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, reader: fakeReader([selected]), analysisAvailable: false,
+    classifyMessageGroup: async () => { throw new Error("model must not be called while unavailable"); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  const conversationKey = safeDigest(["conversation", "0"]);
+  assert.strictEqual(offline.unresolved, 1);
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 0);
+  assert.ok(getMessageReplyDraft(db, { profileId: fixture.profileId, draftId: oldDraft.id }).closedAt,
+    "a new unread message must retire the old draft even while the model is unavailable");
+  assert.strictEqual(getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey }).actionGroup, "needs_review");
+  assert.strictEqual(listMessageEvents(db, { profileId: fixture.profileId, platform: "boss", conversationKey }).at(-1).text,
+    "方便介绍一下岗位的具体工作吗？");
+  const online = await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, reader: fakeReader([selected]), analysisAvailable: true,
+    classifyMessageGroup: async () => classification({ messages: ["这个岗位主要负责产品需求和交付。"] }),
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(online.unresolved, 0);
+  assert.strictEqual(online.results.length, 1);
+
+  const unknown = createFixture({ suffix: "unknown-model-unavailable", title: "Different Known Engineer" });
+  const outdatedDraft = recordMessageReplyDrafts(db, {
+    profileId: unknown.profileId, cardId: unknown.card.id, jobId: unknown.jobId,
+    messageGroupKey: safeDigest(["old-job-before-new-title"]), questionSummary: "旧岗位问题",
+    messageIntent: "information_request", messageCategory: "other",
+    messages: ["旧岗位草稿"], createdAt: NOW
+  })[0];
+  upsertMessageInboxItem(db, {
+    profileId: unknown.profileId, platform: "boss", conversationKey,
+    sourceJobId: "boss:old-job", jobId: unknown.jobId, cardId: unknown.card.id,
+    lastMessageId: "123456789012996", lastActivityAt: NOW, lastDirection: "friend", unread: true,
+    positionTitle: unknown.title, company: unknown.company, latestExcerpt: "旧岗位问题",
+    actionGroup: "needs_action", actionCode: "reply", observedAt: NOW
+  });
+  const unknownSummary = await runBossMessageDiscovery({
+    db, profileId: unknown.profileId,
+    reader: fakeReader([selectedConversation({ title: "Unseen Advertiser Role" })]),
+    analysisAvailable: false,
+    classifyMessageGroup: async () => { throw new Error("model must not be called for an unknown job"); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(unknownSummary.unresolved, 1);
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: unknown.profileId, platform: "boss", conversationKey
+  }), null, "an unfamiliar greeting must wait for matching instead of becoming a user task");
+  assert.ok(getMessageReplyDraft(db, { profileId: unknown.profileId, draftId: outdatedDraft.id }).closedAt,
+    "a changed job in the same conversation must not leave its earlier draft sendable");
+}
+
+async function retryTargetsOnlySmoke() {
+  const first = createFixture({ suffix: "retry-first", title: "First Retry Engineer" });
+  const second = createFixture({
+    suffix: "retry-second", profileId: first.profileId, planId: first.planId,
+    title: "Second Retry Engineer"
+  });
+  const selected = [selectedConversation({ title: first.title }), selectedConversation({ title: second.title })];
+  let classified = 0;
+  const summary = await runBossMessageDiscovery({
+    db, profileId: first.profileId, reader: fakeReader(selected),
+    retryConversationKeys: [safeDigest(["conversation", "0"])],
+    classifyMessageGroup: async () => {
+      classified += 1;
+      return classification();
+    },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(summary.queued, 1);
+  assert.strictEqual(classified, 1, "automatic retry must leave the other conversation untouched");
+  assert.strictEqual(summary.results[0].jobId, first.jobId);
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: second.profileId }).length, 1);
 }
 
 async function historicalRejectionReconciliationSmoke() {
@@ -1788,6 +1926,61 @@ async function historicalRejectionReconciliationSmoke() {
   assert.strictEqual(rejectionEvents(), 1);
   await run();
   assert.strictEqual(rejectionEvents(), 1);
+}
+
+async function historicalRejectionThenNewMessageSmoke() {
+  const fixture = createFixture({ suffix: "historical-rejection-reopened", title: "Reopened History Engineer" });
+  const conversationKey = safeDigest(["historical-rejection-reopened-conversation"]);
+  const oldMessageId = "123456789012898";
+  const newMessageId = "123456789012899";
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId,
+    platform: "boss",
+    conversationKey,
+    observedAt: NOW,
+    events: [
+      { messageKey: messageKey({ platform: "boss", threadKey: conversationKey, messageId: oldMessageId }), platformMessageId: oldMessageId, direction: "friend", kind: "text", text: "不好意思，不太合适哦", occurredAt: "2026-07-29T01:00:00.000Z", metadata: {} },
+      { messageKey: messageKey({ platform: "boss", threadKey: conversationKey, messageId: newMessageId }), platformMessageId: newMessageId, direction: "friend", kind: "text", text: "还有另一个机会，可以聊聊吗？", occurredAt: NOW, metadata: {} }
+    ]
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey,
+    sourceJobId: "boss:historical-rejection-reopened", jobId: fixture.jobId, cardId: fixture.card.id,
+    lastMessageId: newMessageId, lastActivityAt: NOW, lastDirection: "friend", unread: true,
+    positionTitle: fixture.title, company: fixture.company, latestExcerpt: "还有另一个机会，可以聊聊吗？",
+    actionGroup: "needs_action", actionCode: "reply", observedAt: NOW
+  });
+  await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, reader: fakeReader([]), now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey
+  }).actionGroup, "needs_action", "an old rejection must not close a newer pending HR message");
+}
+
+async function historicalRejectionUnobservedNewMessageSmoke() {
+  const fixture = createFixture({ suffix: "unobserved-new-after-rejection", title: "New Preview Engineer" });
+  const conversationKey = safeDigest(["unobserved-new-after-rejection"]);
+  const oldMessageId = "123456789012980";
+  upsertMessageEvents(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey, observedAt: NOW,
+    events: [{ messageKey: messageKey({ platform: "boss", threadKey: conversationKey, messageId: oldMessageId }),
+      platformMessageId: oldMessageId, direction: "friend", kind: "text",
+      text: "不好意思，不太合适哦", occurredAt: NOW, metadata: {} }]
+  });
+  upsertMessageInboxItem(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey,
+    sourceJobId: "boss:unobserved-new-after-rejection", jobId: fixture.jobId, cardId: fixture.card.id,
+    lastMessageId: "123456789012981", lastActivityAt: NOW, lastDirection: "friend", unread: true,
+    positionTitle: fixture.title, company: fixture.company, latestExcerpt: "新消息还没读到正文",
+    actionGroup: "needs_action", actionCode: "reply", observedAt: NOW
+  });
+  await runBossMessageDiscovery({
+    db, profileId: fixture.profileId, reader: fakeReader([]), now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(getMessageInboxItem(db, {
+    profileId: fixture.profileId, platform: "boss", conversationKey
+  }).actionGroup, "needs_action", "a stale stored rejection must not close a newer unread preview");
 }
 
 async function historicalInboundContextRejectionReconciliationSmoke() {

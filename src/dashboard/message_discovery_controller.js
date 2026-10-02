@@ -7,7 +7,7 @@ const { createBossMessageDetailReader } = require("../adapters/sites/boss_messag
 const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_message_detail_reader");
 const { BossSiteAdapter, inspectBossSessionState } = require("../adapters/sites/boss");
 const { createMessageDiscoveryJobContextResolver } = require("../application/message_discovery/job_context");
-const { runBossMessageDiscovery, projectMessageDecisionCard } = require("../application/message_discovery/run");
+const { runBossMessageDiscovery, projectMessageDecisionCard, abortableSleep } = require("../application/message_discovery/run");
 const { answerMissingMessageFact } = require("../application/message_discovery/answer_fact");
 const { retryOneJobAnalysis } = require("../application/analysis");
 const { createMessageReplyAnalyzer } = require("../core/message_reply_analyzer");
@@ -56,6 +56,11 @@ const {
 
 const DEFAULT_CLEANUP_MS = 30 * 60 * 1000;
 const ALLOWED_RUN_STATUSES = new Set(["running", "completed", "needs_user_action", "stopped"]);
+const RETRYABLE_MESSAGE_READ_CODES = new Set([
+  "ZHAOPIN_MESSAGE_CONTENT_PENDING",
+  "ZHAOPIN_MESSAGE_TIMELINE_FAILED",
+  "ZHAOPIN_MESSAGE_DETAIL_READ_TIMEOUT"
+]);
 const MESSAGE_INTENTS = new Set([
   "interview_invitation",
   "interest_check",
@@ -115,6 +120,7 @@ function createMessageDiscoveryController(deps = {}) {
       adapter: createMessageModelAdapter(modelConfig, analyzerLogger)
     }),
     runDiscovery = runBossMessageDiscovery,
+    retrySleepFn = abortableSleep,
     pacingSleepFn,
     pacingRandomFn = Math.random,
     detailSleepFn,
@@ -148,13 +154,7 @@ function createMessageDiscoveryController(deps = {}) {
     if (previousRun?.status === "running") {
       throw messageDiscoveryError("MESSAGE_DISCOVERY_ALREADY_RUNNING", "message discovery is already running", 409);
     }
-    if (!modelReady()) {
-      throw messageDiscoveryError(
-        "MESSAGE_DISCOVERY_MODEL_NOT_READY",
-        "message discovery requires a verified deep analysis model",
-        409
-      );
-    }
+    const analysisAvailable = modelReady();
     const modelConfig = getModelConfig();
     const draftModelConfig = boundedMessageDraftModelConfig(modelConfig);
     const enabledPlatforms = normalizeEnabledPlatforms(getEnabledPlatforms());
@@ -313,9 +313,32 @@ function createMessageDiscoveryController(deps = {}) {
             resolverOptions.detailReader = detailReader;
           }
           const resolveJobContext = createJobContextResolver(resolverOptions);
-          const summary = await runDiscovery({ platform, db, profileId, reader, signal: abortController.signal, logger,
-            classifyMessageGroup: createAnalyzer({ modelConfig: draftModelConfig, logger }), resolveJobContext, onStatus: checkpoint });
+          const classifyMessageGroup = analysisAvailable
+            ? createAnalyzer({ modelConfig: draftModelConfig, logger }) : null;
+          let summary = await runDiscovery({ platform, db, profileId, reader, signal: abortController.signal, logger,
+            analysisAvailable,
+            classifyMessageGroup, resolveJobContext, onStatus: checkpoint });
           checkpoint(summary);
+          const retryConversationKeys = analysisAvailable
+            && (summary?.status === "completed" || RETRYABLE_MESSAGE_READ_CODES.has(summary?.reasonCode))
+            ? [...new Set((summary.continuedFailures || [])
+              .filter((item) => RETRYABLE_MESSAGE_READ_CODES.has(item.reasonCode)
+                && /^sha256:[a-f0-9]{64}$/.test(String(item.conversationKey || "")))
+              .map((item) => item.conversationKey))]
+            : [];
+          if (retryConversationKeys.length && !abortController.signal.aborted) {
+            setDetailWait(run, 1800, now);
+            await retrySleepFn(1800, abortController.signal);
+            setDetailPhase(run, "reading_messages", now);
+            const retried = await runDiscovery({
+              platform, db, profileId, reader, signal: abortController.signal, logger,
+              analysisAvailable, retryConversationKeys,
+              classifyMessageGroup, resolveJobContext,
+              onStatus: (progress) => checkpoint(mergeMessageRetrySummary(summary, progress))
+            });
+            summary = mergeMessageRetrySummary(summary, retried);
+            checkpoint(summary);
+          }
           if (isPlatformRiskControl(platform, summary?.reasonCode)) {
             recordRiskOnce(run, platform, summary.reasonCode, `${platform} requires security verification`);
           }
@@ -328,7 +351,9 @@ function createMessageDiscoveryController(deps = {}) {
         }
       }
       for (const entry of run.platformRuns) if (entry.status === "pending") entry.status = "stopped";
-      const analysisIssue = await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal);
+      const analysisIssue = analysisAvailable
+        ? await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal)
+        : null;
       const issue = run.platformRuns.find(entry => entry.status === "needs_user_action" || entry.status === "stopped");
       const stopped = abortController.signal.aborted || run.platformRuns.some(entry => entry.status === "stopped");
       const status = stopped
@@ -1320,6 +1345,23 @@ function clearResolvedMessageDiscoveryRuntimeBlock(db, {
   return true;
 }
 
+function mergeMessageRetrySummary(first, retried) {
+  const results = new Map((first.results || []).map((item) => [item.cardId, item]));
+  for (const item of retried.results || []) results.set(item.cardId, item);
+  return {
+    ...retried,
+    queued: first.queued,
+    processed: (Number(first.processed) || 0) + (Number(retried.processed) || 0),
+    unresolved: Number(retried.unresolved) || 0,
+    results: [...results.values()],
+    counters: {
+      ...retried.counters,
+      newReplies: (Number(first.counters?.newReplies) || 0)
+        + (Number(retried.counters?.newReplies) || 0)
+    }
+  };
+}
+
 function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = new Date() } = {}) {
   const current = now instanceof Date ? now : new Date(now);
   const runningByPlatform = new Map((platformRuns || []).map((item) => [item.platform, item]));
@@ -1336,11 +1378,12 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
       limit: 500
     }))
   }));
-  const visibleItems = items.filter((item) => item.actionGroup !== "needs_review");
+  const visibleItems = items.filter((item) => item.actionGroup !== "needs_review"
+    || (item.reasonCode === "MESSAGE_DISCOVERY_MODEL_NOT_READY" && Number(item.cardId) > 0));
   const groups = {
     needsAction: visibleItems.filter((item) => item.actionGroup === "needs_action"),
     waiting: visibleItems.filter((item) => item.actionGroup === "waiting"),
-    needsReview: [],
+    needsReview: visibleItems.filter((item) => item.actionGroup === "needs_review"),
     done: visibleItems.filter((item) => item.actionGroup === "done")
   };
   const freshness = Object.fromEntries(["boss", "zhaopin"].map((platform) => {
@@ -1374,7 +1417,7 @@ function presentInboxItem(item) {
   const presentation = {
     needs_action: { statusText: "需要你处理", label: "查看建议回复" },
     waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
-    needs_review: { statusText: "内部处理中", label: "查看记录" },
+    needs_review: { statusText: "消息已读取，回复建议待生成", label: "查看消息" },
     done: { statusText: "已经处理", label: "查看记录" }
   }[item.actionGroup];
   return {

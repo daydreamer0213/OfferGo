@@ -553,10 +553,28 @@ function recordDiscoveredMessageGroupClassification(db, input = {}) {
         occurredAt
       });
     }
-    if (!INTERVIEW_PROGRESS_STAGES.has(card.stage)) {
+    if (card.stage === "rejected" && messageIntent !== "rejection") {
+      persistProgressEvent(db, {
+        cardId,
+        idempotencyKey: derivedProgressIdempotencyKey(["opportunity-reopened", platform, threadKey, messageGroupKey]),
+        type: "opportunity_reopened",
+        actor: "system",
+        summary: "招聘方发来新的消息，重新处理这份机会",
+        metadata: { platform, threadKey, messageGroupKey },
+        occurredAt
+      });
+      const reopened = db.prepare(`UPDATE candidate_progress_cards
+        SET stage = 'needs_user_action', next_action = '', scheduled_at = NULL, updated_at = ?
+        WHERE id = ? AND stage = 'rejected'`).run(occurredAt, cardId);
+      if (Number(reopened.changes) !== 1) {
+        throw progressError("PROGRESS_STAGE_CONFLICT", "rejected opportunity changed before reopening");
+      }
+    }
+    const currentStage = getProgressCard(db, cardId).stage;
+    if (!INTERVIEW_PROGRESS_STAGES.has(currentStage)) {
       transitionProgressCard(db, {
         cardId,
-        expectedStage: card.stage,
+        expectedStage: currentStage,
         stage,
         nextAction: safeDiscoveredNextAction(stage),
         now: occurredAt
@@ -825,7 +843,7 @@ function listProgressCards(db, input = {}) {
     .map(mapCard);
 }
 
-function listMessageDiscoveryCandidates(db, { profileId, platform = "boss" } = {}) {
+function listMessageDiscoveryCandidates(db, { profileId, platform = "boss", includeRejected = false } = {}) {
   const source = discoveryPlatform(platform);
   return db.prepare(`SELECT
       cards.id AS card_id,
@@ -886,7 +904,7 @@ function listMessageDiscoveryCandidates(db, { profileId, platform = "boss" } = {
     WHERE cards.profile_id = ?
       AND jobs.source = ?
       AND cards.source = jobs.source
-      AND cards.stage NOT IN ('rejected', 'closed')
+      AND cards.stage NOT IN (${includeRejected ? "'closed'" : "'rejected', 'closed'"})
     ORDER BY cards.updated_at DESC, cards.id DESC`)
     .all(positiveInteger(profileId, "profileId"), source)
     .map(mapDiscoveryCandidate);
