@@ -736,6 +736,7 @@ async function runBossMessageDiscovery({
           job: resolved.job,
           facts: currentFacts,
           answerMemories,
+          now: now(),
           platform: source,
           requestedActions: requested.requestedActions,
           contextSource: resolved.contextSource || resolved.job.contextSource || ""

@@ -126,6 +126,23 @@ async function main() {
   }
 
   const memory = listCandidateAnswerMemories(db, { profileId: fixture.profileId, source: "user_edited_reply" })[0];
+  assert.strictEqual(memory.scope.kind, "job", "new edits should stay with their original job by default");
+  assert(profilePage.body.includes('name="action" value="set_memory_scope"'));
+  response = await postForm(base, "/api/communication-profile", {
+    action: "set_memory_scope", profileId: fixture.otherProfileId, memoryId: memory.id, scopeKind: "global"
+  });
+  assert.strictEqual(response.status, 404, "another candidate must not change memory reuse scope");
+  response = await postForm(base, "/api/communication-profile", {
+    action: "set_memory_scope", profileId: fixture.profileId, memoryId: memory.id, scopeKind: "company"
+  });
+  assert.strictEqual(response.status, 400, "only job and explicit cross-job scope should be accepted");
+  response = await postForm(base, "/api/communication-profile", {
+    action: "set_memory_scope", profileId: fixture.profileId, memoryId: memory.id, scopeKind: "global"
+  });
+  assert.strictEqual(response.status, 303);
+  assert.deepStrictEqual(listCandidateAnswerMemories(db, {
+    profileId: fixture.profileId, source: "user_edited_reply"
+  })[0].scope, { kind: "global", key: "" });
   response = await postForm(base, "/api/communication-profile", {
     action: "revise_memory",
     profileId: fixture.otherProfileId,
@@ -143,6 +160,18 @@ async function main() {
   });
   assert.strictEqual(response.status, 303);
   assert.strictEqual(listCandidateAnswerMemories(db, { profileId: fixture.profileId, source: "user_edited_reply" })[0].finalText, "我目前在广州，最快下周一到岗。");
+  assert.strictEqual(listCandidateAnswerMemories(db, {
+    profileId: fixture.profileId, source: "user_edited_reply"
+  })[0].scope.kind, "global", "editing an explicitly shared answer must preserve its selected scope");
+  response = await postForm(base, "/api/communication-profile", {
+    action: "set_memory_scope", profileId: fixture.profileId,
+    memoryId: listCandidateAnswerMemories(db, { profileId: fixture.profileId, source: "user_edited_reply" })[0].id,
+    scopeKind: "job"
+  });
+  assert.strictEqual(response.status, 303);
+  assert.deepStrictEqual(listCandidateAnswerMemories(db, {
+    profileId: fixture.profileId, source: "user_edited_reply"
+  })[0].scope, { kind: "job", key: String(fixture.jobId) });
 
   response = await postForm(base, "/api/communication-profile", {
     action: "save_fact",

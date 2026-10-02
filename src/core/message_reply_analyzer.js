@@ -1,4 +1,5 @@
 const { validateMessageReply } = require("./message_reply_contract");
+const { VOLATILE_FACT_MAX_AGE_DAYS } = require("./candidate_fact_policy");
 
 function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
   if (!adapter || typeof adapter.draftMessageGroup !== "function") {
@@ -16,8 +17,9 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     }));
     const requestedSubjectKeys = deriveRequestedSubjectKeys(messages, normalizedFacts);
     const scopedFacts = normalizedFacts.filter((fact) => factMatchesRequestedScope(fact, requestedSubjectKeys));
-    const activeMemories = normalizeAnswerMemories(answerMemories)
-      .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys));
+    const activeMemories = normalizeAnswerMemories((Array.isArray(answerMemories) ? answerMemories : [])
+      .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys)
+        && memoryIsCurrent(memory, now)));
     const input = {
       profile,
       job,
@@ -98,6 +100,18 @@ function memoryMatchesContext(memory, job = {}, requestedSubjectKeys = []) {
   if (scope.kind === "company") return scopeText(scope.key) === scopeText(job?.company);
   if (scope.kind === "experience") return requestedSubjectKeys.includes(scope.key);
   return false;
+}
+
+function memoryIsCurrent(memory, now) {
+  const days = {
+    availability: VOLATILE_FACT_MAX_AGE_DAYS.availability_date,
+    salary: VOLATILE_FACT_MAX_AGE_DAYS.expected_salary
+  }[String(memory?.messageCategory || "")];
+  if (!days) return true;
+  const answerAt = Date.parse(String(memory?.createdAt || memory?.updatedAt || ""));
+  const currentAt = Date.parse(String(now || new Date().toISOString()));
+  return !Number.isFinite(answerAt) || !Number.isFinite(currentAt)
+    || currentAt - answerAt <= days * 86_400_000;
 }
 
 function deriveRequestedSubjectKeys(messages, facts) {

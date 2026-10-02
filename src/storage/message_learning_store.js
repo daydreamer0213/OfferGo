@@ -225,6 +225,40 @@ function listCandidateAnswerMemories(db, {
     ORDER BY m.updated_at DESC, m.id DESC LIMIT ?`).all(...args).map(mapMemory);
 }
 
+function setCandidateAnswerMemoryScope(db, {
+  profileId,
+  memoryId,
+  scopeKind,
+  updatedAt = nowIso()
+} = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(memoryId, "memoryId");
+  const kind = String(scopeKind || "").trim();
+  if (kind !== "job" && kind !== "global") {
+    throw storageError("CANDIDATE_ANSWER_MEMORY_SCOPE_INVALID", "answer memory scope is invalid");
+  }
+  const at = isoText(updatedAt, "updatedAt");
+  return immediateTransaction(db, () => {
+    const row = db.prepare(`SELECT m.*, d.job_id FROM candidate_answer_memories m
+      JOIN message_reply_drafts d ON d.id = m.draft_id
+      WHERE m.id = ? AND m.profile_id = ?`).get(id, profile);
+    if (!row) throw storageError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
+    const active = db.prepare(`SELECT id FROM candidate_answer_memories
+      WHERE profile_id = ? AND draft_id = ? AND withdrawn_at IS NULL
+      ORDER BY updated_at DESC, id DESC LIMIT 1`).get(profile, row.draft_id);
+    if (row.source !== "user_edited_reply" || row.withdrawn_at || Number(active?.id) !== id) {
+      throw storageError("CANDIDATE_ANSWER_MEMORY_SCOPE_INVALID", "only the current edited answer can change reuse scope");
+    }
+    const scope = { kind, key: kind === "job" ? String(row.job_id) : "" };
+    const previousScope = parseJson(row.scope_json, {});
+    if (previousScope.kind !== scope.kind || previousScope.key !== scope.key) {
+      db.prepare(`UPDATE candidate_answer_memories SET scope_json = ?, updated_at = ? WHERE id = ?`)
+        .run(JSON.stringify(scope), at, id);
+    }
+    return mapMemory(db.prepare("SELECT * FROM candidate_answer_memories WHERE id = ?").get(id));
+  });
+}
+
 function withdrawCandidateAnswerMemory(db, {
   profileId,
   memoryId,
@@ -605,6 +639,7 @@ module.exports = {
   saveMessageReplyDraftEdit,
   completeMessageReplyDraft,
   listCandidateAnswerMemories,
+  setCandidateAnswerMemoryScope,
   reviseCandidateAnswerMemory,
   withdrawCandidateAnswerMemory,
   listCandidateFactRevisions,

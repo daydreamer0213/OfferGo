@@ -640,6 +640,10 @@ async function main() {
     messages: scopedMemoryMessages,
     facts: [],
     answerMemories: [
+      ...Array.from({ length: 13 }, (_, index) => ({
+        id: 100 + index, source: "user_edited_reply", finalText: `其他岗位的新回答 ${index}`,
+        scope: { kind: "job", key: String(100 + index) }
+      })),
       { id: 20, source: "user_edited_reply", finalText: "全局回答", scope: { kind: "global", key: "" } },
       { id: 21, source: "user_edited_reply", finalText: "当前岗位回答", scope: { kind: "job", key: "2" } },
       { id: 22, source: "user_edited_reply", finalText: "其他岗位回答", scope: { kind: "job", key: "99" } },
@@ -650,6 +654,22 @@ async function main() {
   });
   assert.deepStrictEqual(scopedMemoryResult.usedMemoryIds, [20, 21, 23]);
   assert.deepStrictEqual(scopedMemoryAdapterInput.answerMemories.map((memory) => memory.id), [20, 21, 23], "answer memories must stay inside their saved scope");
+
+  await scopedMemoryAnalyzer({
+    profile: { id: 1 }, job: { id: 2, title: "Java Engineer" },
+    messages: [{ messageKey: "sha256:" + "6".repeat(64), text: "何时可以到岗？" }],
+    facts: [], now: NOW,
+    answerMemories: [
+      { id: 30, source: "user_edited_reply", finalText: "下周一可以到岗。",
+        messageCategory: "availability", createdAt: "2026-07-01T08:00:00.000Z", updatedAt: NOW,
+        scope: { kind: "global", key: "" } },
+      { id: 31, source: "user_edited_reply", finalText: "我负责过项目交付。",
+        messageCategory: "project_fact", createdAt: "2026-07-01T08:00:00.000Z", updatedAt: NOW,
+        scope: { kind: "global", key: "" } }
+    ]
+  });
+  assert.deepStrictEqual(scopedMemoryAdapterInput.answerMemories.map((memory) => memory.id), [31],
+    "changing reuse scope must not refresh an expired availability answer");
 
   const qualityMock = new MockModelAdapter();
   const defaultMockDraft = await qualityMock.draftMessageGroup({

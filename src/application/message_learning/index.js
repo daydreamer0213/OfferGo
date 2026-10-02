@@ -1,5 +1,6 @@
 const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDraft,
   listCandidateAnswerMemories, reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
+  setCandidateAnswerMemoryScope,
   listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
 const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
 const {
@@ -22,6 +23,7 @@ function createMessageReplyLearningService({
     completeDraft,
     listCommunicationProfile,
     reviseMemory,
+    setMemoryScope,
     withdrawMemory,
     saveFact,
     deleteFact
@@ -109,11 +111,17 @@ function createMessageReplyLearningService({
       memoryId,
       finalText,
       changedText,
-      scope: extraction.scope,
+      scope: current.scope,
       extractedFacts: extraction.facts,
       completedAt: nowIso(now())
     });
     return completionResult(memory, requiredDraft(profileId, current.draftId), extraction.facts.length, extraction.status);
+  }
+
+  function setMemoryScope({ profileId, memoryId, scopeKind }) {
+    return setCandidateAnswerMemoryScope(db, {
+      profileId, memoryId, scopeKind, updatedAt: nowIso(now())
+    });
   }
 
   function withdrawMemory({ profileId, memoryId }) {

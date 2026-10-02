@@ -4288,6 +4288,8 @@ async function handleCommunicationProfile(req, res, service) {
     const action = String(params.action || "").trim();
     if (action === "revise_memory") {
       await service.reviseMemory({ profileId, memoryId: params.memoryId, finalText: params.finalText });
+    } else if (action === "set_memory_scope") {
+      service.setMemoryScope({ profileId, memoryId: params.memoryId, scopeKind: params.scopeKind });
     } else if (action === "withdraw_memory") {
       service.withdrawMemory({ profileId, memoryId: params.memoryId });
     } else if (action === "save_fact") {
