@@ -90,6 +90,7 @@ async function main() {
   liveBossRuntimeRecoverySmoke();
   durableDraftRecoverySmoke();
   unmatchedStoredMessageViewSmoke();
+  await supplementedFactQualitySmoke();
   await durableMissingFactRecoverySmoke();
   await pendingDurableAnalysisRepairSmoke();
   await controllerBrowserAuthoritySmoke();
@@ -3158,4 +3159,96 @@ function deferred() {
   let resolve;
   const promise = new Promise((next) => { resolve = next; });
   return { promise, resolve };
+}
+
+async function supplementedFactQualitySmoke() {
+  const { listCandidateFacts } = require('../src/storage/candidate_store');
+  const { listOpenMessageReplyDrafts } = require('../src/storage/message_learning_store');
+  const store = require('../src/storage/message_discovery_store');
+  function fixture(platform = 'boss', invitation = false) {
+    const db = openDb(':memory:');
+    const now = new Date().toISOString();
+    const profileId = Number(db.prepare("INSERT INTO candidate_profiles(display_name,profile_json,created_at,updated_at) VALUES ('Anonymous candidate','{}',?,?)").run(now,now).lastInsertRowid);
+    const planId = Number(db.prepare("INSERT INTO search_plans(profile_id,name,plan_json,is_active,created_at,updated_at) VALUES (?,'Test','{}',1,?,?)").run(profileId,now,now).lastInsertRowid);
+    const jobId = Number(db.prepare("INSERT INTO jobs(source,source_id,title,company,description,first_seen_at,last_seen_at) VALUES (?,'factqualityjob','产品经理','示例公司','完整岗位职责。',?,?)").run(platform,now,now).lastInsertRowid);
+    const card = ensureProgressCard(db,{profileId,planId,jobId,source:platform,stage:'contact_started',occurredAt:now});
+    const messageGroupKey = 'sha256:' + 'e'.repeat(64);
+    recordDiscoveredMessageGroupClassification(db,{cardId:card.id,platform,threadKey:'sha256:'+'f'.repeat(64),messageKeys:['sha256:'+'a'.repeat(64)],messageGroupKey,messageIntent:'information_request',messageCategory:'salary',missingFactKey:'expected_salary',missingFactQuestion:'期望薪资多少？',manualActions:invitation?[{kind:'resume_request'}]:[],progressUpdate:{stage:'needs_user_action'},occurredAt:now});
+    saveMessageInboundContext(db,{profileId,cardId:card.id,platform,messageGroupKey,conversationKey:'sha256:'+'b'.repeat(64),sourceJobId:platform+':factqualityjob',lastMessageId:'123456789012345',messageIntent:'information_request',messageCategory:'salary',inboundMessages:invitation?[{kind:'resume_request',text:'HR 邀请你发送简历'},{kind:'text',text:'方便发一下简历吗？期望薪资多少？'}]:[{kind:'text',text:'期望薪资多少？'}],manualActions:invitation?[{kind:'resume_request'}]:[],createdAt:now});
+    return {db,profileId,jobId,cardId:card.id,messageGroupKey,factKey:'expected_salary',factValue:'20K',now:()=>now};
+  }
+  const good = {messageIntent:'information_request',messageCategory:'salary',messageSummary:'确认期望薪资',requiredFactKeys:['expected_salary'],usedFactKeys:['expected_salary'],responseItems:[{id:'expected_salary',kind:'question',required:true}],coverage:[{responseItemId:'expected_salary',covered:true}],missingFact:null,messages:['期望薪资20K。']};
+  const bad = {...good,messages:['期望薪资20K，之前我累计服务过100个客户。']};
+  const f = fixture();
+  try {
+    let attempts = 0;
+    const generated = await answerMissingMessageFact({...f,classifyMessageGroup:createMessageReplyAnalyzer({adapter:{async draftMessageGroup(input) {
+      attempts++;
+      assert.equal(input.messages[0].text,'期望薪资多少？','quality revision must retain HR question after the analyzer clears its input');
+      return input.draftQualityRevision ? good : bad;
+    }}})});
+    assert.equal(generated.drafts[0].currentText,good.messages[0],'supplemented facts must revise unsupported customer claims before exposing a draft');
+    assert.equal(attempts,2);
+  } finally {f.db.close();}
+  const nextFact = fixture();
+  try {
+    const generated = await answerMissingMessageFact({...nextFact,classifyMessageGroup:createMessageReplyAnalyzer({adapter:{async draftMessageGroup(input) {
+      return input.draftQualityRevision
+        ? {...good,messageCategory:'availability',requiredFactKeys:['availability_date'],usedFactKeys:[],responseItems:[],coverage:[],missingFact:{key:'availability_date',question:'什么时候可以到岗？'},messages:[]}
+        : bad;
+    }}})});
+    assert.deepEqual(generated.drafts,[]);
+    assert.equal(generated.missingFact.key,'availability_date','a revision may discover the next missing fact instead of producing a draft');
+    assert.equal(store.getMessageGroupClassification(nextFact.db,nextFact).missingFactKey,'availability_date');
+    assert.equal(listCandidateFacts(nextFact.db,nextFact.profileId).find(f=>f.factKey==='expected_salary').factValue,'20K');
+    assert.equal(listOpenMessageReplyDrafts(nextFact.db,{profileId:nextFact.profileId}).length,0);
+  } finally {nextFact.db.close();}
+  const priorDraft = fixture();
+  try {
+    const [draft] = recordMessageReplyDrafts(priorDraft.db,{...priorDraft,questionSummary:'期望薪资多少？',messageIntent:'information_request',messageCategory:'salary',messages:bad.messages,createdAt:priorDraft.now()});
+    const sending = require('../src/application/message_reply_sending').createMessageReplySendingService({db:priorDraft.db,learningService:{async completeDraft(){}},executeBatch:()=>{throw new Error('external execution forbidden');}});
+    await assert.rejects(async()=>sending.confirmBatch({profileId:priorDraft.profileId,items:[{draftId:draft.id,revision:draft.revision}]}),error=>error.code==='MESSAGE_DRAFT_FACT_UNSUPPORTED','the prior bad draft was already blocked at final sending confirmation');
+  } finally {priorDraft.db.close();}
+  const failed = fixture();
+  try {
+    await assert.rejects(answerMissingMessageFact({...failed,classifyMessageGroup:async input=> {
+      if(input.draftQualityRevision) throw new Error('revision unavailable');
+      return bad;
+    }}),error=>error.code==='MESSAGE_DISCOVERY_DRAFT_NOT_GENERATED');
+    assert.equal(listOpenMessageReplyDrafts(failed.db,{profileId:failed.profileId}).length,0);
+    assert.equal(listCandidateFacts(failed.db,failed.profileId).find(f=>f.factKey==='expected_salary').factValue,'20K');
+    assert.equal(store.getMessageGroupClassification(failed.db,failed).missingFactKey,'expected_salary');
+    const retry = await answerMissingMessageFact({...failed,classifyMessageGroup:async()=>good});
+    assert.equal(retry.drafts[0].currentText,good.messages[0]);
+  } finally {failed.db.close();}
+  for(const platform of ['boss','zhaopin']) {
+    const invitation = fixture(platform,true);
+    try {
+      const result = await answerMissingMessageFact({...invitation,classifyMessageGroup:createMessageReplyAnalyzer({adapter:{async draftMessageGroup(input) {
+        assert.equal(input.platform,platform);
+        assert.deepEqual(input.requestedActions,[{kind:'resume_request'}]);
+        assert(input.messages.some(m=>m.text.includes('期望薪资多少')));
+        assert(!input.messages.some(m=>m.text.includes('方便发一下简历')));
+        return good;
+      }}})});
+      assert.equal(result.drafts[0].currentText,good.messages[0]);
+      assert.deepEqual(getMessageInboundContext(invitation.db,invitation).manualActions,[{kind:'resume_request'}]);
+    } finally {invitation.db.close();}
+  }
+  for(const change of ['delete','new-answer','abort']) {
+    const stale = fixture();
+    const controller = new AbortController();
+    try {
+      let release;
+      const waiting = answerMissingMessageFact({...stale,signal:controller.signal,classifyMessageGroup:()=>new Promise(resolve=>{release=resolve;})});
+      if(change==='delete') deleteMessageInboundContext(stale.db,stale);
+      if(change==='new-answer') await answerMissingMessageFact({...stale,factValue:'25K',classifyMessageGroup:async()=>({...good,messages:['期望薪资25K。']})});
+      if(change==='abort') controller.abort();
+      release(good);
+      await assert.rejects(waiting,error=>error.code==='MESSAGE_DISCOVERY_FACT_STALE');
+      const drafts=listOpenMessageReplyDrafts(stale.db,{profileId:stale.profileId});
+      assert.equal(drafts.length,change==='new-answer'?1:0,'a late result must not restore a deleted or superseded draft');
+      if(change==='new-answer') assert.equal(drafts[0].currentText,'期望薪资25K。');
+    } finally {stale.db.close();}
+  }
 }

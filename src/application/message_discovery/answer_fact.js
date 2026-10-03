@@ -11,7 +11,9 @@ const {
   updateMessageGroupFactRequest
 } = require("../../storage/message_discovery_store");
 const { messageReplyProfile } = require("../../core/message_discovery");
+const { deriveRequestedActions } = require('../../core/message_requested_actions');
 const { candidateReplyMaterial } = require('./materials');
+const { generateQualityCheckedDraft, buildMessageDraftQualityContext } = require('../message_draft_quality');
 
 async function answerMissingMessageFact({
   db,
@@ -56,10 +58,15 @@ async function answerMissingMessageFact({
   const facts = listCandidateFacts(db, profile, { job: { id: jobRow.job_id, sourceId: jobRow.source_id, company: jobRow.company } })
     .filter((fact) => fact.factKey !== key)
     .concat([{ factKey: key, factValue: answer, source: "user_provided", updatedAt: answeredAt }]);
-  const messages = context.inboundMessages
+  const savedFact = listCandidateFacts(db, profile).find(fact => fact.factKey === key);
+  const originalMessages = context.inboundMessages
     .filter((message) => message.kind === "text" && String(message.text || "").trim())
     .map((message, index) => ({ messageKey: `${groupKey}:${index}`, text: String(message.text) }));
-  const result = await classifyMessageGroup({
+  const requested = deriveRequestedActions({ platform: context.platform, messages: originalMessages, manualActions: context.manualActions });
+  const messages = requested.replyMessages;
+  const input = {
+    platform: context.platform,
+    requestedActions: requested.requestedActions,
     ...candidateReplyMaterial(db, profile),
     profile: messageReplyProfile(candidate.profile),
     job: {
@@ -75,10 +82,31 @@ async function answerMissingMessageFact({
     messages,
     facts,
     now: answeredAt
-  }, { signal });
+  };
+  const quality = await generateQualityCheckedDraft({
+    ...buildMessageDraftQualityContext(db, { profileId: profile, job: input.job, messageTexts: messages.map(message => message.text), now: answeredAt }),
+    generate: qualityInput => classifyMessageGroup({
+      ...input,
+      messages: messages.map(message => ({ ...message })),
+      ...qualityInput
+    }, { signal }),
+    shouldAssess: result => !result?.missingFact
+  });
+  const currentClassification = getMessageGroupClassification(db, { profileId: profile, cardId: card, messageGroupKey: groupKey });
+  const currentContext = getMessageInboundContext(db, { profileId: profile, cardId: card, messageGroupKey: groupKey });
+  const currentFact = listCandidateFacts(db, profile).find(fact => fact.factKey === key);
+  if (signal?.aborted || JSON.stringify(currentClassification) !== JSON.stringify(classification)
+    || JSON.stringify(currentContext) !== JSON.stringify(context)
+    || JSON.stringify(currentFact) !== JSON.stringify(savedFact)) {
+    throw answerFactError("MESSAGE_DISCOVERY_FACT_STALE", "message fact context changed while generating the reply", 409);
+  }
+  const result = quality.result;
   if (result?.missingFact?.key && result.missingFact.question) {
     updateMessageGroupFactRequest(db, { profileId: profile, cardId: card, messageGroupKey: groupKey, missingFact: result.missingFact });
     return { drafts: [], missingFact: result.missingFact };
+  }
+  if (!quality.sendable) {
+    throw answerFactError("MESSAGE_DISCOVERY_DRAFT_NOT_GENERATED", "reply draft did not pass quality checks after saving the fact", 409);
   }
   const drafts = result?.missingFact || !Array.isArray(result?.messages) || !result.messages.length
     ? []
