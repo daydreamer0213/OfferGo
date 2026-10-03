@@ -1,8 +1,9 @@
 const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, listCandidateFacts,
   getCandidateResumeDocument } = require("../../storage/candidate_store");
-const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
+const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
 const { listCandidateEvidence } = require('../../storage/candidate_evidence_store');
 const { selectRelevantCandidateMaterial } = require('../../core/candidate_evidence');
+const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
 const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
 const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
   saveResumeOptimizationDraft, activateResumeOptimization } = require("../../storage/resume_optimization_store");
@@ -64,9 +65,10 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       originalFileName: source.fileName,
       strict: true
     });
-    const facts = listCandidateFacts(db, profileId);
+    const allEvidence = listCandidateEvidence(db, { profileId });
+    const facts = mergeCandidateFacts(listCandidateFacts(db, profileId), allEvidence, { job: jobs[0] || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) });
     const query = jobs.map(job => job.description).join('\n') || prepared.text;
-    const candidateEvidence = selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId }), {
+    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, {
       query, job: jobs[0] || {}, limit: 12, maxChars: 16000
     });
     const answers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {

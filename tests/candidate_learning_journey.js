@@ -108,6 +108,44 @@ class InterviewAdapter extends MockModelAdapter {
     } } });
     const oldAnswerDraft = await oldAnswerService.createDraft({ ...context, sourceResumeVersionId: profile.resumeVersionId, mode: 'general' });
     assert.equal(oldAnswerService.activateDraft({ ...context, draftId: oldAnswerDraft.id, finalText: oldAnswerDraft.finalText + '\n项目经历：参与企业知识库开发' }).status, 'activated');
+    await confirmedFactsJourney();
     console.log('candidate_learning_journey ok');
   } finally { db.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+async function confirmedFactsJourney() {
+  const { mergeCandidateFacts } = require('../src/core/candidate_fact_policy');
+  const profile = storage.saveProfileAnalysis(db, {
+    profile: { candidate: { name: '状态测试', targetTitles: ['工程师'] } },
+    document: { contentHash: 'confirmed-state', text: '状态测试\n参与接口联调', format: 'text', originalFileName: 'state.txt' },
+    searchPlan: { name: '状态方案', directions: ['工程师'] }
+  });
+  const service = createMockInterviewService({ db, adapter: new MockModelAdapter() });
+  const context = { profileId: profile.profileId, planId: profile.planId, resumeVersionId: profile.resumeVersionId, settings: { plannedQuestions: 3 } };
+  let session = await service.startSession(context);
+  const answer = '我目前已经离职，下周可以到岗。';
+  session = await service.answerTurn({ ...context, sessionId: session.id, turnNumber: 1, answerText: answer });
+  const entry = service.confirmEvidence({ ...context, sessionId: session.id, turnNumber: 1, sourceQuote: answer, subject: '求职状态', text: answer });
+  const reply = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+    assert.equal(input.facts.find(fact => fact.key === 'employment_status')?.value, '已离职');
+    assert.equal(input.facts.find(fact => fact.key === 'availability_date')?.value, '下周');
+    return { messageIntent: 'information_request', messageCategory: 'availability', messageSummary: '确认在职和到岗',
+      requiredFactKeys: ['employment_status', 'availability_date'], usedFactKeys: ['employment_status', 'availability_date'], usedMemoryIds: [],
+      responseItems: [{ id: 'employment_status', kind: 'question', required: true }, { id: 'availability_date', kind: 'question', required: true }],
+      coverage: [{ responseItemId: 'employment_status', covered: true }, { responseItemId: 'availability_date', covered: true }],
+      missingFact: null, messages: ['目前已离职，下周可以到岗。'] };
+  } } });
+  assert.equal((await reply({ messages: [{ text: '你现在在职吗？何时到岗？' }], candidateEvidence: [entry] })).messages.length, 1);
+  const newer = new Date(Date.parse(entry.updatedAt) + 1000).toISOString();
+  assert.equal(mergeCandidateFacts([{ factKey: 'employment_status', factValue: '在职', updatedAt: newer }], [entry]).find(fact => fact.factKey === 'employment_status').factValue, '在职');
+  assert(!mergeCandidateFacts([], [entry], { factRevisions: [{ id: 1, factKey: 'employment_status', operation: 'delete', createdAt: newer }] }).some(fact => fact.factKey === 'employment_status'), 'deleted facts must not reappear from older confirmed records');
+  storage.saveCandidateFact(db, { profileId: profile.profileId, factKey: 'employment_status', factValue: '在职' });
+  const updatedSession = await service.startSession(context);
+  assert.equal(updatedSession.context.candidateFacts.find(fact => fact.factKey === 'employment_status').factValue, '在职', 'interview context must also prefer the new manual correction');
+  evidenceStore.withdrawCandidateEvidence(db, { profileId: profile.profileId, id: entry.id });
+  assert.deepEqual(mergeCandidateFacts([], evidenceStore.listCandidateEvidence(db, { profileId: profile.profileId })), []);
+  assert.deepEqual(mergeCandidateFacts([], [{ ...entry, text: '我同事目前已经离职，下周可以到岗。' }]), [], 'another person is not a candidate fact');
+  const hypothetical = mergeCandidateFacts([], [{ ...entry, text: '如果拿到 offer，我可以下周到岗，但目前没有确定。' }]);
+  assert(!hypothetical.some(fact => fact.factKey === 'availability_date'), 'a hypothetical schedule is not confirmed');
+  assert.equal(mergeCandidateFacts([], [{ ...entry, text: '我目前已离职，但到岗时间还没确定。' }]).find(fact => fact.factKey === 'employment_status').factValue, '已离职', 'one unknown item must not hide another known fact');
+}

@@ -4,6 +4,7 @@ const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDra
   listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
 const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
 const { listCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
+const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
 const {
   replyDraftDigest,
   replyDraftWasEdited,
@@ -90,16 +91,18 @@ function createMessageReplyLearningService({
   }
 
   function listCommunicationProfile({ profileId }) {
+    const evidence = listCandidateEvidence(db, { profileId });
+    const revisions = listCandidateFactRevisions(db, { profileId, limit: 2000 });
     return {
-      facts: listCandidateFacts(db, profileId),
-      evidence: listCandidateEvidence(db, { profileId }),
+      facts: mergeCandidateFacts(listCandidateFacts(db, profileId), evidence, { factRevisions: revisions }),
+      evidence,
       answers: listCandidateAnswerMemories(db, {
         profileId,
         activeOnly: true,
         source: "user_edited_reply",
         limit: 100
       }),
-      revisions: listCandidateFactRevisions(db, { profileId, limit: 500 })
+      revisions
     };
   }
 

@@ -19,7 +19,7 @@ function buildResumeInterviewEvidenceCatalog(sourceText) {
   return lines.map((text, index) => ({ id: `R${index + 1}`, kind: "resume", text }));
 }
 
-function projectInterviewFacts({ factRevisions = [], answerMemories = [], allowedScopeKinds = [] } = {}) {
+function projectInterviewFacts({ factRevisions = [], answerMemories = [], allowedScopeKinds = [], includeTimestamps = false } = {}) {
   const allowedScopes = new Set(allowedScopeKinds.map((kind) => String(kind || "").trim()).filter(Boolean));
   const memoriesById = new Map((Array.isArray(answerMemories) ? answerMemories : [])
     .filter((memory) => memory && !memory.withdrawnAt)
@@ -48,7 +48,8 @@ function projectInterviewFacts({ factRevisions = [], answerMemories = [], allowe
     .map(([factKey, selected]) => ({
       factKey,
       factValue: String(selected.revision.factValue ?? ""),
-      source: String(selected.revision.source || "")
+      source: String(selected.revision.source || ""),
+      ...(includeTimestamps ? { updatedAt: new Date(selected.rank).toISOString() } : {})
     }));
 }
 

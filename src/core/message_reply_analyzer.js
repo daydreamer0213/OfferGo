@@ -1,5 +1,5 @@
 const { validateMessageReply } = require("./message_reply_contract");
-const { VOLATILE_FACT_MAX_AGE_DAYS } = require("./candidate_fact_policy");
+const { VOLATILE_FACT_MAX_AGE_DAYS, mergeCandidateFacts } = require("./candidate_fact_policy");
 const { selectRelevantCandidateMaterial } = require('./candidate_evidence');
 
 function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
@@ -7,10 +7,10 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     throw new Error("message reply analyzer requires adapter.draftMessageGroup");
   }
   return async function analyzeMessageGroup(
-    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
+    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], factRevisions = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
     { signal = null } = {}
   ) {
-    const normalizedFacts = (facts || []).map((fact) => ({
+    const normalizedFacts = mergeCandidateFacts(facts, candidateEvidence, { job, factRevisions }).map((fact) => ({
       key: String(fact.key || fact.factKey || ""),
       value: fact.value !== undefined ? fact.value : fact.factValue,
       subjectKey: fact.subjectKey || "",

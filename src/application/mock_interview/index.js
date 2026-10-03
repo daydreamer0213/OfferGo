@@ -2,6 +2,7 @@ const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCand
 const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
 const { listCandidateEvidence, saveCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const { selectRelevantCandidateMaterial } = require("../../core/candidate_evidence");
+const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
 const { listDecisionPool } = require("../../storage/job_store");
 const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
   answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry } = require("../../storage/mock_interview_store");
@@ -264,7 +265,8 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         ...(session.report.improvements || []),
         ...(session.report.retryRecommendations || []).map((item) => item.reason)
       ]).filter(Boolean).slice(0, 8);
-    const candidateEvidence = selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId }), {
+    const allEvidence = listCandidateEvidence(db, { profileId });
+    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, {
       query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000
     });
     const resumeEvidenceCatalog = buildResumeInterviewEvidenceCatalog(prepared.text);
@@ -287,11 +289,12 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         text: prepared.text
       },
       resumeEvidenceCatalog,
-      candidateFacts: projectInterviewFacts({
+      candidateFacts: mergeCandidateFacts(projectInterviewFacts({
         factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }),
         answerMemories: factMemories,
-        allowedScopeKinds
-      }),
+        allowedScopeKinds,
+        includeTimestamps: true
+      }), allEvidence, { job: job || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) }),
       answerMemories: activeAnswers,
       priorWeaknesses
     };
