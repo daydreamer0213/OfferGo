@@ -236,15 +236,19 @@ function createMessageReplyLearningService({
   }
 
   async function reviseMemory({ profileId, memoryId, finalText }) {
-    const current = listCandidateAnswerMemories(db, { profileId, activeOnly: false, limit: 500 })
-      .find((memory) => memory.id === Number(memoryId));
-    if (!current) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
+    const selected = listCandidateAnswerMemories(db, { profileId, activeOnly: false, limit: 500 })
+      .find(memory => memory.id === Number(memoryId));
+    if (!selected) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
+    const current = getCurrentCandidateAnswerMemory(db, { profileId, memoryId });
+    if (!current) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory is no longer current");
     const draft = requiredDraft(profileId, current.draftId);
     const changedText = deriveUserChangedText(current.finalText, finalText) || String(finalText || "").trim();
     const confirmedExperiences = listCandidateEvidence(db, { profileId }).filter(entry =>
       entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`);
     const extraction = await extractFacts({ draft, finalText, changedText, confirmedExperiences });
-    const retainedExperiences = confirmedExperiences.filter(entry => String(finalText || '').includes(entry.sourceQuote));
+    if (!getCurrentCandidateAnswerMemory(db, { profileId, memoryId: current.id })) {
+      throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory changed during learning");
+    }
     const memory = reviseCandidateAnswerMemory(db, {
       profileId,
       memoryId,
@@ -253,8 +257,19 @@ function createMessageReplyLearningService({
       scope: current.scope,
       extractedFacts: extraction.facts,
       afterComplete: memory => {
+        const retainedExperiences = listCandidateEvidence(db, { profileId }).filter(entry =>
+          entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`
+          && String(finalText || '').includes(entry.sourceQuote));
+        const withdrawnDuringExtraction = new Set(confirmedExperiences
+          .filter(entry => !retainedExperiences.some(active => active.id === entry.id))
+          .map(entry => entry.sourceQuote));
+        for (const entry of listCandidateEvidence(db, { profileId, includeWithdrawn: true })) {
+          if (entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`
+            && entry.withdrawnAt) withdrawnDuringExtraction.add(entry.sourceQuote);
+        }
         saveReplyExperiences(memory, draft,
-          [...retainedExperiences, ...(extraction.experiences || [])].filter((entry, index, entries) =>
+          [...retainedExperiences, ...(extraction.experiences || []).filter(entry =>
+            !withdrawnDuringExtraction.has(entry.sourceQuote))].filter((entry, index, entries) =>
             entries.findIndex(item => item.sourceQuote === entry.sourceQuote) === index));
         recordMessageReplyLearningStatus(db, { profileId, memoryId: memory.id,
           status: extraction.status, factCount: extraction.facts.length, at: nowIso(now()) });

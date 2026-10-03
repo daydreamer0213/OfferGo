@@ -278,6 +278,7 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
     assert.strictEqual(currentFacts(db, fixture.profileId).employment_status, undefined);
 
     await reusableExperienceSmoke(db, fixture);
+    await delayedRevisionSmoke();
     await factsLifecycleSmoke();
     await recoveryLifecycleSmoke();
     await explicitRevertSmoke();
@@ -378,6 +379,73 @@ async function reusableExperienceSmoke(database, fixture) {
   }), /completion failed/);
   assert.deepEqual(listCandidateEvidence(database, { profileId: fixture.profileId }), [], 'failed completion must roll back its reusable story');
   assert(!listCandidateAnswerMemories(database, { profileId: fixture.profileId }).some(item => item.draftId === rollbackDraft.id), 'failed completion must roll back its answer memory');
+}
+
+async function delayedRevisionSmoke() {
+  const database = openDb(':memory:');
+  try {
+    const fixture = createFixture(database);
+    const quote = '我参与接口联调，先复现故障，再对比请求参数找出原因。';
+    const salary = '这份岗位我期望薪资20K。';
+    const draft = seedDraft(database, fixture, 'delayed-revision', '我做过接口联调。', 'project_fact');
+    const service = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+      return { facts: [], experiences: [{ subject: '排障经历', sourceQuote: quote }] };
+    } } });
+    const original = await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id,
+      finalText: quote + salary, completionKind: 'copied' });
+    let release;
+    const delayed = createMessageReplyLearningService({ db: database, adapter: {
+      extractReplyEditFacts: () => new Promise(resolve => { release = () => resolve({
+        facts: [], experiences: [{ subject: '排障经历', sourceQuote: quote }]
+      }); })
+    } });
+    const pending = delayed.reviseMemory({ profileId: fixture.profileId, memoryId: original.memoryId,
+      finalText: quote + salary.replace('20K', '25K') });
+    const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+    const evidence = listCandidateEvidence(database, { profileId: fixture.profileId })[0];
+    delayed.withdrawEvidence({ profileId: fixture.profileId, id: evidence.id });
+    release();
+    await pending;
+    assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId }).length, 0,
+      'a story withdrawn while revision waits must not be restored by the late extractor');
+
+    const correctionDraft = seedDraft(database, fixture, 'delayed-correction', '我做过接口联调。', 'project_fact');
+    const corrected = await service.completeDraft({ profileId: fixture.profileId, draftId: correctionDraft.id,
+      finalText: quote + salary, completionKind: 'copied' });
+    const correctionPending = delayed.reviseMemory({ profileId: fixture.profileId, memoryId: corrected.memoryId,
+      finalText: quote + salary.replace('20K', '25K') });
+    const correction = listCandidateEvidence(database, { profileId: fixture.profileId })[0];
+    const revisedText = `${quote} 补充：我也做了回归验证。`;
+    delayed.reviseEvidence({ profileId: fixture.profileId, id: correction.id,
+      subject: correction.subject, text: revisedText });
+    release();
+    await correctionPending;
+    assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text, revisedText,
+      'a manual correction made while revision waits must win over the old extractor result');
+
+    const withdrawnDraft = seedDraft(database, fixture, 'delayed-source-withdrawn', '我做过接口联调。', 'project_fact');
+    const withdrawn = await service.completeDraft({ profileId: fixture.profileId, draftId: withdrawnDraft.id,
+      finalText: quote + salary, completionKind: 'copied' });
+    const withdrawnPending = delayed.reviseMemory({ profileId: fixture.profileId, memoryId: withdrawn.memoryId,
+      finalText: quote + salary.replace('20K', '25K') });
+    delayed.withdrawMemory({ profileId: fixture.profileId, memoryId: withdrawn.memoryId });
+    release();
+    await assert.rejects(withdrawnPending, error => error.code === 'CANDIDATE_ANSWER_MEMORY_NOT_CURRENT',
+      'a source answer withdrawn during extraction cannot receive a late revision');
+
+    const supersededDraft = seedDraft(database, fixture, 'delayed-source-superseded', '我做过接口联调。', 'project_fact');
+    const superseded = await service.completeDraft({ profileId: fixture.profileId, draftId: supersededDraft.id,
+      finalText: quote + salary, completionKind: 'copied' });
+    const supersededPending = delayed.reviseMemory({ profileId: fixture.profileId, memoryId: superseded.memoryId,
+      finalText: quote + salary.replace('20K', '25K') });
+    const newer = await service.reviseMemory({ profileId: fixture.profileId, memoryId: superseded.memoryId,
+      finalText: quote + salary.replace('20K', '26K') });
+    release();
+    await assert.rejects(supersededPending, error => error.code === 'CANDIDATE_ANSWER_MEMORY_NOT_CURRENT',
+      'a superseded source answer cannot receive a late revision');
+    assert.equal(listCandidateAnswerMemories(database, { profileId: fixture.profileId })
+      .find(item => item.draftId === supersededDraft.id)?.id, newer.memoryId);
+  } finally { database.close(); }
 }
 
 async function recoveryLifecycleSmoke() {
