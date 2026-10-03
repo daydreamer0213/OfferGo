@@ -2,7 +2,7 @@ const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCand
 const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
 const { listCandidateEvidence, saveCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const { selectRelevantCandidateMaterial } = require("../../core/candidate_evidence");
-const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
+const { mergeCandidateFacts, currentCandidateMaterial } = require('../../core/candidate_fact_policy');
 const { listDecisionPool } = require("../../storage/job_store");
 const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
   answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry } = require("../../storage/mock_interview_store");
@@ -79,6 +79,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       turnNumber: item.turnNumber,
       question: item.questionText,
       focus: item.questionFocus,
+      resumeEvidenceIds: item.resumeEvidenceIds,
       answer: item.turnNumber === turnNumber ? answerText : item.answerText,
       answerReview: item.answerReview
     }));
@@ -241,7 +242,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         ...(session.report.retryRecommendations || []).map((item) => item.reason)
       ]).filter(Boolean).slice(0, 8);
     const resumeEvidenceCatalog = buildResumeInterviewEvidenceCatalog(prepared.text);
-    return refreshSupplementalContext({ profileId, context: {
+    return refreshSupplementalContext({ profileId, planId, context: {
       sessionKind,
       job: job ? {
         id: Number(job.id),
@@ -283,15 +284,36 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const job = context.job || {};
     query = query || job.description || context.resume?.text;
     const allEvidence = listCandidateEvidence(db, { profileId: session.profileId });
-    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, { query, job, limit: 12, maxChars: 12000 });
+    const factRevisions = listCandidateFactRevisions(db, { profileId: session.profileId, limit: 2000 });
+    const candidateFacts = mergeCandidateFacts(listCandidateFacts(db, session.profileId, { job }), allEvidence, { job, factRevisions });
+    const selectedEvidence = selectRelevantCandidateMaterial(currentCandidateMaterial(allEvidence, { facts: candidateFacts, factRevisions }),
+      { query, job, limit: 12, maxChars: 12000 });
+    const sourceSessions = listMockInterviewSessions(db, { profileId: session.profileId,
+      sessionIds: selectedEvidence.filter(item => item.sourceKind === 'interview_turn' && /^\d+$/.test(item.sourceId)).map(item => Number(item.sourceId)), limit: 12 });
+    const candidateEvidence = selectedEvidence.map(item => {
+      if (item.sourceKind !== 'interview_turn' || !/^\d+$/.test(item.sourceId)) {
+        // Manual confirmation can explicitly name the same resume experience.
+        const resumeEvidenceIds = context.resumeEvidenceCatalog.filter(row => {
+          const experience = row.text.replace(/^(?:我|曾|主要|参与|协助|支持|负责|主导|牵头)+/, '').trim();
+          const key = item.scope?.kind === 'experience' ? String(item.scope.key || '').replace(/项目$/, '') : '';
+          return (experience.length >= 4 && item.text.includes(experience)) || (key.length >= 3 && row.text.includes(key));
+        }).map(row => row.id);
+        return { ...item, resumeEvidenceIds };
+      }
+      const source = sourceSessions.find(source => source.id === Number(item.sourceId));
+      const turn = item.sourceItemKey.startsWith('retry:')
+        ? source?.turns.find(turn => turn.retries.some(retry => `retry:${retry.id}` === item.sourceItemKey))
+        : source?.turns.find(turn => `turn:${turn.turnNumber}` === item.sourceItemKey);
+      const texts = (source?.context?.resumeEvidenceCatalog || []).filter(row => turn?.resumeEvidenceIds.includes(row.id)).map(row => row.text);
+      return { ...item, resumeEvidenceIds: context.resumeEvidenceCatalog.filter(row => texts.includes(row.text)).map(row => row.id) };
+    });
     return {
       ...context,
       candidateEvidence,
-      candidateFacts: mergeCandidateFacts(listCandidateFacts(db, session.profileId, { job }), allEvidence,
-        { job, factRevisions: listCandidateFactRevisions(db, { profileId: session.profileId, limit: 2000 }) }),
-      answerMemories: selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
+      candidateFacts,
+      answerMemories: selectRelevantCandidateMaterial(currentCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
         profileId: session.profileId, activeOnly: true, source: 'user_edited_reply', limit: 500
-      }), { sessionKind: context.sessionKind, job }), { query, job, limit: 12, maxChars: 12000 }),
+      }), { sessionKind: context.sessionKind, job }), { facts: candidateFacts, factRevisions }), { query, job, limit: 12, maxChars: 12000 }),
       interviewBrief: buildInterviewBrief({ sessionKind: context.sessionKind, job: context.job,
         resumeEvidenceCatalog: context.resumeEvidenceCatalog, candidateEvidence, priorWeaknesses: context.priorWeaknesses })
     };
@@ -342,13 +364,13 @@ function createMockInterviewService({ db, adapter = null } = {}) {
   async function generateStep(context, settings, turns) {
     const progress = buildInterviewProgress(context.interviewBrief, turns);
     const validationContext = { turns, resumeEvidenceCatalog: context.resumeEvidenceCatalog,
-      interviewBrief: context.interviewBrief, sessionKind: context.sessionKind };
+      interviewBrief: context.interviewBrief, sessionKind: context.sessionKind, candidateEvidence: context.candidateEvidence };
     const input = { context, settings, turns, progress };
     const rawStep = await adapter.generateMockInterviewStep(input);
     try {
       return validateInterviewStep(rawStep, validationContext);
     } catch (error) {
-      if (!['MOCK_INTERVIEW_REPEATED_QUESTION', 'MOCK_INTERVIEW_LOGISTICS_QUESTION'].includes(error.code)) throw error;
+      if (!['MOCK_INTERVIEW_REPEATED_QUESTION', 'MOCK_INTERVIEW_LOGISTICS_QUESTION', 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY'].includes(error.code)) throw error;
       const questionRevision = { reason: error.code,
         avoidQuestions: [...new Set([...progress.askedQuestions, String(rawStep.nextQuestion?.text || '').trim()].filter(Boolean))] };
       const revised = await adapter.generateMockInterviewStep({ ...input, questionRevision });

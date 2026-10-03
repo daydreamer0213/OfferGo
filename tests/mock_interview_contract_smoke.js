@@ -252,3 +252,15 @@ assert.strictEqual(retry.improved, true);
 assert.throws(() => validateRetryReview({ ...retry, turnNumber: 1 }, { turnNumber: 2 }), /题号/);
 
 console.log("mock_interview_contract_smoke ok");
+
+// Confirmed, linked responsibilities supplement a sparse resume; unrelated roles do not.
+const dutyStep = trainingStep('你负责的接口联调有哪些关键取舍？');
+const linkedDuty = { text: '我负责接口联调并完成验收。', resumeEvidenceIds: ['R2'] };
+assert.doesNotThrow(() => validateInterviewStep(dutyStep, { ...stepContext, turns: [], candidateEvidence: [linkedDuty] }));
+for (const text of ['我没有负责接口联调。', '接口联调由同事负责，我参与测试。', '我负责薪资系统开发。']) {
+  assert.throws(() => validateInterviewStep(dutyStep, { ...stepContext, turns: [], candidateEvidence: [{ ...linkedDuty, text }] }), /职责边界/);
+}
+assert.throws(() => validateInterviewStep(dutyStep, { ...stepContext, turns: [], candidateEvidence: [{ ...linkedDuty, resumeEvidenceIds: ['R3'] }] }), /职责边界/);
+const dutyFollowup = { ...dutyStep, answerReview: { conclusion: '复盘', strengths: [], improvements: [], turnNumbers: [1] }, nextQuestion: { ...dutyStep.nextQuestion, questionKind: 'follow_up', basedOnTurnNumber: 1, answerEvidence: '我负责接口联调' } };
+assert.doesNotThrow(() => validateInterviewStep(dutyFollowup, { ...stepContext, interviewBrief: generalBrief, turns: [{turnNumber: 1, resumeEvidenceIds: ['R2'], answer: '我负责接口联调并完成验收。'}] }));
+assert.throws(() => validateInterviewStep(trainingStep('请介绍项目，你期望薪资是多少，什么时候能到岗，能否出差，目前是否在职？'), { ...stepContext, interviewBrief: generalBrief, turns: [] }), error => error.code === 'MOCK_INTERVIEW_LOGISTICS_QUESTION');

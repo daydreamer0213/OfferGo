@@ -171,6 +171,12 @@ function listMockInterviewSessions(db, input = {}) {
   const boundedLimit = Math.max(1, Math.min(100, Number(input.limit) || 30));
   const clauses = ["profile_id = ?"];
   const params = [positiveId(input.profileId, "profileId")];
+  if (Array.isArray(input.sessionIds)) {
+    const ids = [...new Set(input.sessionIds.map(value => positiveId(value, 'sessionId')))];
+    if (!ids.length) return [];
+    clauses.push(`id IN (${ids.map(() => '?').join(', ')})`);
+    params.push(...ids);
+  }
   if (input.planId !== undefined && input.planId !== null && input.planId !== "") {
     clauses.push("plan_id = ?");
     params.push(positiveId(input.planId, "planId"));

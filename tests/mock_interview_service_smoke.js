@@ -114,7 +114,7 @@ const db = storage.openDb(":memory:");
     const globalMemory = seedAnswerMemory(db, memoryFixture, {
       key: "global", scope: { kind: "global", key: "" },
       finalText: "通用回答：我可以在两周内到岗。", factKey: "availability", factValue: "两周内",
-      completedAt: "2026-08-29T08:01:00.000Z"
+      completedAt: new Date().toISOString()
     });
     const experienceMemory = seedAnswerMemory(db, memoryFixture, {
       key: "experience", scope: { kind: "experience", key: "知识库项目" },
@@ -454,7 +454,7 @@ const db = storage.openDb(":memory:");
     "主动查看历史训练时必须保留用户选择");
 
     // Regeneration must occur before persistence: one answer and one next turn are saved.
-    for (const problem of ['repeat', 'logistics']) {
+    for (const problem of ['repeat', 'logistics', 'responsibility', 'mixed_logistics']) {
       const regenerationInputs = [];
       const regeneratedService = createMockInterviewService({ db, adapter: { ...adapter,
         async generateMockInterviewStep(input) {
@@ -464,7 +464,10 @@ const db = storage.openDb(":memory:");
           if (!input.questionRevision) {
             raw.nextQuestion = { questionKind: 'topic_transition', focus: 'project',
               resumeEvidenceIds: [input.context.resumeEvidenceCatalog[0].id], basedOnTurnNumber: null,
-              text: problem === 'repeat' ? input.turns[0].question : '你的期望薪资是多少？' };
+              text: problem === 'repeat' ? input.turns[0].question
+                : problem === 'responsibility' ? '你主导的薪资系统有哪些设计取舍？'
+                  : problem === 'mixed_logistics' ? '请介绍项目，你期望薪资是多少，什么时候能到岗，能否出差，目前是否在职？'
+                    : '你的期望薪资是多少？' };
           }
           return raw;
         }
@@ -475,9 +478,12 @@ const db = storage.openDb(":memory:");
         sessionId: fresh.id, turnNumber: 1, answerText: firstAnswer });
       assert.strictEqual(regenerationInputs.length, 2, 'content error receives only one targeted regeneration');
       assert.strictEqual(regenerationInputs[1].questionRevision.reason,
-        problem === 'repeat' ? 'MOCK_INTERVIEW_REPEATED_QUESTION' : 'MOCK_INTERVIEW_LOGISTICS_QUESTION');
+        problem === 'repeat' ? 'MOCK_INTERVIEW_REPEATED_QUESTION'
+          : problem === 'responsibility' ? 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY' : 'MOCK_INTERVIEW_LOGISTICS_QUESTION');
       assert(regenerationInputs[1].questionRevision.avoidQuestions.includes(
-        problem === 'repeat' ? fresh.turns[0].questionText : '你的期望薪资是多少？'));
+        problem === 'repeat' ? fresh.turns[0].questionText
+          : problem === 'responsibility' ? '你主导的薪资系统有哪些设计取舍？'
+            : problem === 'mixed_logistics' ? '请介绍项目，你期望薪资是多少，什么时候能到岗，能否出差，目前是否在职？' : '你的期望薪资是多少？'));
       assert.deepStrictEqual(regenerationInputs[1].turns, regenerationInputs[0].turns, 'regeneration preserves original answers');
       assert.deepStrictEqual(regenerationInputs[1].progress.askedQuestions, [fresh.turns[0].questionText]);
       assert.strictEqual(accepted.turns.length, 2);
@@ -633,6 +639,30 @@ const db = storage.openDb(":memory:");
     assert(topicRetry.context.candidateEvidence.some(item => item.id === retryStory.id),
       'retry review must use the new answer to select relevant material');
     assert.deepStrictEqual(topicRetry.context.resume, topicSession.context.resume);
+
+    // Actual answer clarification and confirmed source links survive long interview history.
+    const dutyOwner = storage.saveProfileAnalysis(db, { profile: profile('职责回归'), document: document('duty-regression'), searchPlan: {name:'职责', directions:['开发']} });
+    let dutyMode = 'neutral';
+    const dutyCalls = [];
+    const dutyService = createMockInterviewService({db, adapter: { async generateMockInterviewStep(input) {
+      dutyCalls.push(input);
+      const answered = input.turns.length > 0;
+      return { complete: false, answerReview: answered ? {conclusion:'已回答',strengths:[],improvements:[],turnNumbers:[1]} : null,
+        nextQuestion: {text: dutyMode === 'neutral' && !answered ? '请介绍你参与的知识库项目。' : '你负责的接口联调有哪些关键取舍？',focus:'contribution',resumeEvidenceIds:['R2'],
+          questionKind: answered ? 'follow_up' : 'topic_transition', basedOnTurnNumber: answered ? 1 : null, answerEvidence: answered ? '我负责接口联调' : ''} };
+    } } });
+    const dutyBase = {profileId:dutyOwner.profileId,planId:dutyOwner.planId,resumeVersionId:dutyOwner.resumeVersionId,settings:{plannedQuestions:3}};
+    const dutySession = await dutyService.startSession(dutyBase);
+    const dutyIdentity = {...dutyBase,sessionId:dutySession.id,turnNumber:1};
+    const clarified = await dutyService.answerTurn({...dutyIdentity,answerText:'我负责接口联调并完成验收。'});
+    assert.strictEqual(clarified.turns[0].answerText, '我负责接口联调并完成验收。');
+    const dutyEvidence = dutyService.confirmEvidence({...dutyIdentity,subject:'接口联调职责',text:'我负责接口联调并完成验收。',sourceQuote:'我负责接口联调并完成验收。'});
+    for (let n=0;n<101;n++) seedCompletedHistory(db, {...dutyBase,sessionKind:'resume_general',weakness:'历史',createdAt:'2099-01-01T00:00:00.000Z'});
+    dutyMode = 'confirmed';
+    const reusedDuty = await dutyService.startSession(dutyBase);
+    assert.strictEqual(reusedDuty.turns[0].questionText, '你负责的接口联调有哪些关键取舍？');
+    assert.deepStrictEqual(dutyCalls.at(-1).context.candidateEvidence.find(item => item.id === dutyEvidence.id).resumeEvidenceIds, ['R2']);
+    assert.deepStrictEqual(storage.listMockInterviewSessions(db, {profileId:owner.profileId,sessionIds:[dutySession.id]}), [], 'source filter still enforces candidate ownership');
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();
