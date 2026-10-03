@@ -206,7 +206,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       sessions,
       selectedSession: sessionId
         ? hydrateSessionContext(getMockInterviewSession(db, { profileId: profile, planId: plan.id, sessionId }))
-        : sessions[0] || null
+        : sessions.find((session) => session.status === "active") || sessions[0] || null
     };
   }
 

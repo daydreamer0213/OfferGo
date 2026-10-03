@@ -427,6 +427,20 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(db.prepare("SELECT count(*) AS n FROM candidate_answer_memories WHERE profile_id = ?").get(owner.profileId).n, memoryCount);
     assert.strictEqual(service.listSessions({ profileId: owner.profileId, planId: owner.planId }).length, 3);
 
+    const newerCompletedId = seedCompletedHistory(db, {
+      profileId: owner.profileId,
+      planId: owner.planId,
+      sessionKind: "resume_general",
+      resumeVersionId: owner.resumeVersionId,
+      weakness: "较新的历史训练",
+      createdAt: "2099-01-01T00:00:00.000Z"
+    });
+    assert.strictEqual(service.dashboard({ profileId: owner.profileId, planId: owner.planId }).selectedSession.id,
+      jobSpecific.id, "打开面试页时应优先继续未完成的训练");
+    assert.strictEqual(service.dashboard({ profileId: owner.profileId, planId: owner.planId,
+      sessionId: newerCompletedId }).selectedSession.id, newerCompletedId,
+    "主动查看历史训练时必须保留用户选择");
+
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();

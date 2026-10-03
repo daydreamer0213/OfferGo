@@ -144,6 +144,10 @@ try {
     }
   };
   const service = createResumeOptimizationService({ db, adapter });
+  const preview = service.dashboard({ profileId: owner.profileId, planId: owner.planId });
+  const previewJobs = preview.sampleJobsByDirection["AI 应用工程师"];
+  assert(previewJobs.length >= 3 && previewJobs.length <= 5);
+  assert(previewJobs.every((item) => item.id && item.title && item.company));
 
   assert.rejects(() => service.createDraft({
     profileId: owner.profileId,
@@ -196,6 +200,9 @@ try {
   assert(calls[0].sourceResume.text.includes("参与企业知识库开发"));
   assert(!calls[0].sourceResume.text.includes("候选人甲"), "model input must redact the candidate identity");
   assert(draft.targetJobIds.length >= 3 && draft.targetJobIds.length <= 5);
+  assert.deepStrictEqual(previewJobs.map((item) => item.id).sort((a, b) => a - b),
+    [...draft.targetJobIds].sort((a, b) => a - b),
+    "生成前显示的参考岗位应与实际用于生成的岗位一致");
   assert(!draft.targetJobIds.includes(incompleteJobId));
   const selectedJobs = calls[0].jobs;
   assert.strictEqual(new Set(selectedJobs.map((item) => item.company)).size, selectedJobs.length);

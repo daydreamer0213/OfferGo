@@ -81,10 +81,11 @@ const logger = {
       calls.dashboard.push(input);
       return {
         profile: { id: owner.profileId, displayName: "页面候选人" },
-        plan: { id: owner.planId, profileId: owner.profileId, name: "页面测试方案", plan: { directions: ["AI 应用工程师"] } },
+        plan: { id: owner.planId, profileId: owner.profileId, name: "页面测试方案", plan: { directions: ["AI 应用工程师", "后端工程师"] } },
         resumes: [{ id: owner.resumeVersionId, name: "基础简历", isActive: true, resumeTextExcerpt: "个人总结\n参与知识库开发" }],
         jobs: [{ id: 71, title: "AI <应用> 工程师", company: "示例科技", description: "完整 JD", analysis: { semanticStatus: "complete" } }],
-        directions: ["AI 应用工程师"],
+        directions: ["AI 应用工程师", "后端工程师"],
+        sampleJobsByDirection: { "AI 应用工程师": [{ id: 71, title: "AI <应用> 工程师", company: "示例科技" }], "后端工程师": [] },
         selectedJobs: [{ id: 71, title: "AI <应用> 工程师", company: "示例科技" }],
         drafts: [selectedDraft],
         selectedDraft,
@@ -123,6 +124,9 @@ const logger = {
   const baseUrl = await listen(server);
   try {
     const page = await request(baseUrl, `/resume-optimization?planId=${owner.planId}&draftId=41`);
+    assert.match(page.body, /生成前可查看本次预计参考的岗位/);
+    assert.match(page.body, /AI &lt;应用&gt; 工程师/);
+    resumeSamplePreviewClientSmoke(page.body);
     assert.equal(page.status, 200);
     assert.match(page.body, /<title>定向简历优化<\/title>/);
     assert.match(page.body, /class="[^"]*resume-workbench/);
@@ -297,6 +301,39 @@ async function waitFor(predicate) {
     if (Date.now() > deadline) throw new Error("timed out waiting for request");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function resumeSamplePreviewClientSmoke(page) {
+  const script = page.match(/<script>\(\(\)=>\{const picker=document\.querySelector\('\[data-resume-direction-picker\]'\)[\s\S]*?<\/script>/)?.[0];
+  assert(script, "参考岗位预览应随方向选择更新");
+  const button = { disabled: false, dataset: { resumeCreateReady: "true" } };
+  const prompt = { hidden: false };
+  const picker = {
+    value: "",
+    form: { querySelector() { return button; } },
+    addEventListener(type, handler) { assert.equal(type, "change"); this.onChange = handler; }
+  };
+  const groups = [
+    { dataset: { resumeSampleDirection: "AI 应用工程师", resumeSampleCount: "1" }, hidden: true },
+    { dataset: { resumeSampleDirection: "后端工程师", resumeSampleCount: "0" }, hidden: true }
+  ];
+  vm.runInNewContext(script.replace(/^<script>|<\/script>$/g, ""), {
+    document: {
+      querySelector(selector) { return selector === "[data-resume-sample-prompt]" ? prompt : picker; },
+      querySelectorAll() { return groups; }
+    }
+  });
+  assert.equal(button.disabled, true);
+  picker.value = "AI 应用工程师";
+  picker.onChange();
+  assert.equal(groups[0].hidden, false);
+  assert.equal(prompt.hidden, true);
+  assert.equal(button.disabled, false);
+  picker.value = "后端工程师";
+  picker.onChange();
+  assert.equal(groups[0].hidden, true);
+  assert.equal(groups[1].hidden, false);
+  assert.equal(button.disabled, true);
 }
 
 async function resumeSubmitClientSmoke(markup) {

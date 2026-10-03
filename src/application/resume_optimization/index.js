@@ -165,6 +165,11 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     const profile = requiredId(profileId, "profileId");
     const plan = ownedPlan(profile, planId);
     const jobs = listDecisionPool(db, { planId: plan.id }).filter(isCompleteJob);
+    const directions = Array.isArray(plan.plan?.directions) ? plan.plan.directions : [];
+    const sampleJobsByDirection = Object.fromEntries(directions.map((direction) => [direction,
+      selectRepresentativeResumeJobs(jobs, { targetDirection: direction, limit: 5 })
+        .map((job) => ({ id: Number(job.id), title: job.title, company: job.company }))
+    ]));
     const drafts = listResumeOptimizations(db, profile, 30).filter((draft) => draft.planId === plan.id);
     const selectedDraft = draftId
       ? getResumeOptimization(db, { profileId: profile, optimizationId: draftId })
@@ -175,7 +180,8 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       plan,
       resumes: listCandidateResumeVersions(db, profile),
       jobs,
-      directions: Array.isArray(plan.plan?.directions) ? plan.plan.directions : [],
+      directions,
+      sampleJobsByDirection,
       drafts,
       selectedDraft: scopedDraft,
       selectedJobs: scopedDraft ? rowsForJobIds(scopedDraft.targetJobIds) : [],

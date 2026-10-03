@@ -51,6 +51,7 @@ function renderCreatePanel(dashboard, modelReady) {
   const resumes = dashboard.resumes || [];
   const jobs = dashboard.jobs || [];
   const directions = dashboard.directions || [];
+  const sampleJobsByDirection = dashboard.sampleJobsByDirection || {};
   const activeResume = resumes.find((resume) => resume.isActive) || resumes[0] || null;
   const ready = modelReady && resumes.length > 0 && jobs.length > 0 && directions.length > 0;
   return `<section class="card pad resume-opt-create" aria-labelledby="resume-opt-create-title">
@@ -59,13 +60,19 @@ function renderCreatePanel(dashboard, modelReady) {
     <form class="resume-opt-create-form" method="post" action="/api/resume-optimization" data-resume-submit data-resume-success-target="resume-opt-draft-title">
       <input type="hidden" name="planId" value="${escapeAttr(plan.id || "")}">
       <label>源简历版本<select name="sourceResumeVersionId" required>${resumes.map((resume) => `<option value="${escapeAttr(resume.id)}"${activeResume?.id === resume.id ? " selected" : ""}>${escapeHtml(resume.name || "简历版本")}${resume.isActive ? " · 当前使用" : ""}</option>`).join("")}</select></label>
-      <label>目标投递方向<select name="targetDirection" required><option value="">请选择方向</option>${directions.map((direction) => `<option value="${escapeAttr(direction)}">${escapeHtml(direction)}</option>`).join("")}</select><small>系统会自动挑选 3–5 个资料完整、公司尽量不同的代表岗位。</small></label>
+      <label>目标投递方向<select name="targetDirection" required data-resume-direction-picker><option value="">请选择方向</option>${directions.map((direction) => `<option value="${escapeAttr(direction)}">${escapeHtml(direction)}</option>`).join("")}</select><small>系统会从已有的完整岗位中挑选最多 5 个，尽量覆盖不同公司。</small></label>
+      <section class="resume-opt-sample-preview" aria-live="polite"><h3>本次参考岗位</h3><p data-resume-sample-prompt>生成前可查看本次预计参考的岗位；请先选择投递方向。</p>${directions.map((direction) => {
+        const samples = sampleJobsByDirection[direction] || [];
+        return `<div data-resume-sample-direction="${escapeAttr(direction)}" data-resume-sample-count="${samples.length}" hidden><p class="hint">${samples.length ? `当前预计参考 ${samples.length} 个岗位；生成时会按最新完整资料确定。` : "当前方向没有完整的参考岗位，暂时不能生成。"}</p>${samples.length ? `<div class="resume-opt-selected-jobs">${samples.map((job) => `<article><strong>${escapeHtml(job.title || "未命名岗位")}</strong><span>${escapeHtml(job.company || "公司未记录")}</span></article>`).join("")}</div>` : ""}</div>`;
+      }).join("")}</section>
       ${jobs.length ? "" : '<p class="muted resume-opt-create-note">当前方案还没有可信的完整 JD，暂时不能生成定向版本。</p>'}
-      <div class="button-row"><button${ready ? "" : " disabled"}>生成完整草稿</button><span class="hint">所有修改通过证据校验后才会保存；失败不会留下半成品。</span></div>
+      <div class="button-row"><button data-resume-create-ready="${ready}"${ready ? "" : " disabled"}>生成完整草稿</button><span class="hint">所有修改通过证据校验后才会保存；失败不会留下半成品。</span></div>
       <p class="alert" data-resume-error role="alert"></p>
     </form>
-  </section>`;
+  </section>${RESUME_SAMPLE_PREVIEW_SCRIPT}`;
 }
+
+const RESUME_SAMPLE_PREVIEW_SCRIPT = `<script>(()=>{const picker=document.querySelector('[data-resume-direction-picker]');const groups=[...document.querySelectorAll('[data-resume-sample-direction]')];const prompt=document.querySelector('[data-resume-sample-prompt]');const button=picker?.form?.querySelector('[data-resume-create-ready]');if(!picker)return;const update=()=>{const selected=groups.find((group)=>group.dataset.resumeSampleDirection===picker.value);for(const group of groups)group.hidden=group!==selected;if(prompt)prompt.hidden=Boolean(selected);if(button)button.disabled=button.dataset.resumeCreateReady!=='true'||!selected||Number(selected.dataset.resumeSampleCount)<1;};picker.addEventListener('change',update);update();})();</script>`;
 
 function renderEmptyState() {
   return `<section class="card pad resume-opt-empty"><p class="section-label">尚未生成草稿</p><h2>先选择简历和方向</h2><p>OfferGo 会生成一份完整版本，你可以直接在全文上继续修改，不需要逐条确认建议。</p></section>`;
