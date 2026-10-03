@@ -148,4 +148,5 @@ async function confirmedFactsJourney() {
   const hypothetical = mergeCandidateFacts([], [{ ...entry, text: '如果拿到 offer，我可以下周到岗，但目前没有确定。' }]);
   assert(!hypothetical.some(fact => fact.factKey === 'availability_date'), 'a hypothetical schedule is not confirmed');
   assert.equal(mergeCandidateFacts([], [{ ...entry, text: '我目前已离职，但到岗时间还没确定。' }]).find(fact => fact.factKey === 'employment_status').factValue, '已离职', 'one unknown item must not hide another known fact');
+  assert.deepEqual(mergeCandidateFacts([], [{ ...entry, text: '去年我已经离职，后来入职了一家新公司。' }]), [], 'historical departure must not become current employment status');
 }

@@ -47,6 +47,8 @@ function mergeCandidateFacts(facts = [], evidence = [], { job = {}, factRevision
       if (/(?:同事|朋友|客户|招聘方|HR|别人|他们|她们|他|她)(?:目前|现在|已经|已|可以|仍|还)/i.test(clause)) candidateSubject = false;
       else if (/(?:我|本人)(?:目前|现在|已经|已|可以|仍|还)/.test(clause)) candidateSubject = true;
       if (!candidateSubject || /(?:如果|假如|可能|尚未确定|没有确定|还没确定)/.test(clause)) continue;
+      if (/(?:去年|前年|当时|曾经|以前|之前|那时|过去|\d{4}年)/.test(clause)
+        && !/(?:目前|现在|如今|当前)/.test(clause)) continue;
       if (/(?:已经|已)离职/.test(clause)) add('employment_status', '已离职');
       else if (/(?:目前|现在|仍然|仍|还)在职/.test(clause)) add('employment_status', '在职');
       const arrival = clause.match(/(下周[一二三四五六日天]?|两周后|一个月内|随时|\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日)(?:就|即可|可以|可|能)?(?:到岗|入职)/);

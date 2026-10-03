@@ -125,6 +125,33 @@ function assertQuestionResponsibilityBoundary(questionText, citedEvidence) {
   }
 }
 
+function normalizedQuestion(text) {
+  return String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}]/gu, '');
+}
+
+function assertTrainingQuestion(text, turns) {
+  const normalized = normalizedQuestion(text);
+  if (turns.some(turn => normalizedQuestion(turn.question || turn.questionText) === normalized)) {
+    throw Object.assign(new Error('下一题重复了已问问题，请换成新的能力考察问题'), { code: 'MOCK_INTERVIEW_REPEATED_QUESTION' });
+  }
+  // A project preface alone is not training. Preserve mixed questions that actually ask about capability or motivation.
+  const clauses = text.split(/[，,。.!！?？;；]/).filter(Boolean);
+  const logistics = clause => /(?:到岗|入职|上岗).*(?:时间|日期|多久|何时|什么时候|几天)|(?:何时|什么时候|多久|几天|哪天|是否|能否|可以|能).*?(?:到岗|入职|上岗)/.test(clause)
+    || /(?:期望|预期|期待|希望|要求|接受多少).*?(?:薪资|薪酬|工资|待遇)|(?:薪资|薪酬|工资|待遇).*?(?:期望|预期|期待|要求|多少|范围)/.test(clause)
+    || /在职还是|是否.*离职|(?:目前|现在|当前).*?(?:在职|离职|就业状态|工作状态)|(?:在职|离职).*?(?:了吗|了么|吗|么)/.test(clause)
+    || /(?:在哪|哪个|哪些|意向|期望|希望|接受).*?(?:城市|工作地点)|(?:是否|能否|可以|能|接受).*?出差|出差.*?(?:频率|接受|吗)/.test(clause)
+    || /面试.*?(?:时间|日期|安排|方便)|(?:何时|什么时候|几点|哪天|是否|能否|可以|方便).*?(?:参加面试|安排面试)/.test(clause);
+  const substantive = clauses.some(clause => {
+    if (/为什么|为何|原因|动机/.test(clause)
+      && !/到岗|入职|薪资|薪酬|工资|待遇|出差|面试安排/.test(clause)) return true;
+    return /请(?:介绍|说明|描述)|(?:继续)?说明|说说|讲讲|如何|怎么|怎样|哪些|什么(?:技术|难题|问题|工作|贡献|结果|成果|经历|取舍)/.test(clause)
+      && /技术|设计|实现|取舍|排障|难题|解决|复盘|项目|贡献|个人行动|协作|成果/.test(clause);
+  });
+  if (!substantive && clauses.some(logistics)) {
+    throw Object.assign(new Error('日常条件和安排确认不能充当面试训练题'), { code: 'MOCK_INTERVIEW_LOGISTICS_QUESTION' });
+  }
+}
+
 function validateInterviewStep(raw, context = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("面试步骤格式无效");
   const turns = Array.isArray(context.turns) ? context.turns : [];
@@ -172,6 +199,7 @@ function validateInterviewStep(raw, context = {}) {
         throw new Error("追问必须用上一题回答中的真实回答片段承接");
       }
     }
+    assertTrainingQuestion(nextQuestion.text, turns);
   }
 
   return { answerReview, nextQuestion, complete };
@@ -251,15 +279,42 @@ function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], can
   const jobFocus = job ? {
     role: understanding.roleSummary || job.analysis?.roleSummary || '',
     description: job.description,
-    requirements: understanding.requirements || job.analysis?.requirementAssessments || [],
+    coreResponsibilities: understanding.coreResponsibilities || job.analysis?.coreResponsibilities || [],
+    coreRequirements: understanding.coreRequirements || job.analysis?.coreRequirements || [],
+    requirementMatches: job.analysis?.requirementMatches || [],
+    roleGaps: job.analysis?.roleGaps || [],
+    questionsToVerify: job.analysis?.questionsToVerify || [],
+    roleResumeEvidence: job.analysis?.roleResumeEvidence || [],
+    requirements: understanding.coreRequirements || job.analysis?.coreRequirements
+      || understanding.requirements || job.analysis?.requirementAssessments || [],
     matchingEvidence: job.analysis?.evidence || {}
   } : null;
   return { sessionKind, generalThemes, jobFocus, resumeEvidenceCatalog, candidateEvidence, priorWeaknesses,
     coverageRule: '先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。' };
 }
 
+function buildInterviewProgress(brief, turns = []) {
+  const themes = Array.isArray(brief?.generalThemes) ? brief.generalThemes : [];
+  const themePatterns = [
+    /intro|motivation|career|direction|经历与求职方向|自我介绍|职业方向|求职|动机|离职原因|空档/,
+    /contribution|responsibility|实际承担的工作|个人贡献|职责|承担|负责|参与.*工作/,
+    /problem_solving|tradeoff|technical|解决问题与取舍|难题|排障|定位|解决问题|取舍|技术/,
+    /collaboration|teamwork|communication|协作与沟通|协作|合作|沟通|分歧/,
+    /result|reflection|成果与复盘|成果|结果|复盘|量化|改进/
+  ];
+  const askedQuestions = turns.map(turn => String(turn.question || turn.questionText || '').trim()).filter(Boolean);
+  const coveredThemes = themes.filter((theme, index) => turns.some(turn => {
+    const focus = String(turn.focus || turn.questionFocus || '').toLowerCase();
+    const question = String(turn.question || turn.questionText || '');
+    const recognizedFocus = themes.includes(focus) || themePatterns.some(pattern => pattern.test(focus));
+    return focus === theme || themePatterns[index]?.test(recognizedFocus ? focus : question);
+  }));
+  return { askedQuestions, coveredThemes, remainingThemes: themes.filter(theme => !coveredThemes.includes(theme)) };
+}
+
 module.exports = {
   buildInterviewBrief,
+  buildInterviewProgress,
   normalizeInterviewSettings,
   buildResumeInterviewEvidenceCatalog,
   projectInterviewFacts,

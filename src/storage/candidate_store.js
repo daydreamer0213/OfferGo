@@ -3,7 +3,7 @@ const { nowIso, parseJson } = require("./storage_shared");
 const { normalizeMatchingCard, matchingCardRevision } = require("../core/matching_card");
 const { maskResumeContacts, maskResumeFileName, maskResumeDiagnostics } = require("../core/resume_privacy");
 const { canonicalSearchPlanV2 } = require("../core/search_plan_schema");
-const { recordCandidateFactValue } = require("./message_learning_store");
+const { recordCandidateFactValue, listCandidateFacts } = require("./message_learning_store");
 
 function saveProfileAnalysis(db, {
   profileId = null,
@@ -544,12 +544,6 @@ function compareProfileVersions(db, profileId) {
 
 function saveCandidateFact(db, { profileId, factKey, factValue, source = "user_provided" }) {
   return recordCandidateFactValue(db, { profileId, factKey, factValue, source });
-}
-
-function listCandidateFacts(db, profileId) {
-  return db.prepare("SELECT fact_key, fact_value, source, updated_at FROM candidate_facts WHERE profile_id = ? ORDER BY fact_key").all(Number(profileId)).map((row) => ({
-    factKey: row.fact_key, factValue: row.fact_value, source: row.source, updatedAt: row.updated_at
-  }));
 }
 
 function compareValue(changes, label, previous, current) {

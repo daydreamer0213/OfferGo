@@ -10,6 +10,7 @@ const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   normalizeInterviewSettings,
   buildInterviewBrief,
+  buildInterviewProgress,
   buildResumeInterviewEvidenceCatalog,
   projectInterviewFacts,
   validateInterviewStep,
@@ -44,13 +45,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const resume = ownedResume(profileId, input.resumeVersionId);
     const settings = normalizeInterviewSettings(input.settings);
     const context = buildFrozenContext(profileId, plan.id, sessionKind, job, resume);
-    const rawStep = await adapter.generateMockInterviewStep({ context, settings, turns: [] });
-    const step = validateInterviewStep(rawStep, {
-      turns: [],
-      resumeEvidenceCatalog: context.resumeEvidenceCatalog,
-      interviewBrief: context.interviewBrief,
-      sessionKind: context.sessionKind
-    });
+    const step = await generateStep(context, settings, []);
     const session = createMockInterviewSession(db, {
       profileId,
       planId: plan.id,
@@ -88,17 +83,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       answer: item.turnNumber === turnNumber ? answerText : item.answerText,
       answerReview: item.answerReview
     }));
-    const rawStep = await adapter.generateMockInterviewStep({
-      context: session.context,
-      settings: session.settings,
-      turns
-    });
-    const step = validateInterviewStep(rawStep, {
-      turns,
-      resumeEvidenceCatalog: session.context.resumeEvidenceCatalog,
-      interviewBrief: session.context.interviewBrief,
-      sessionKind: session.context.sessionKind
-    });
+    const step = await generateStep(session.context, session.settings, turns);
     const plannedQuestions = Number(session.settings.plannedQuestions);
     if (turns.length < plannedQuestions && step.complete) {
       throw serviceError("MOCK_INTERVIEW_STEP_TOO_EARLY", "模型在达到计划题数前结束了面试，本次回答未保存");
@@ -355,6 +340,23 @@ function createMockInterviewService({ db, adapter = null } = {}) {
   function requireAdapterMethod(name) {
     if (!adapter || typeof adapter[name] !== "function") {
       throw serviceError("MOCK_INTERVIEW_MODEL_UNAVAILABLE", "当前深度分析模型不可用，请先检查模型设置");
+    }
+  }
+
+  async function generateStep(context, settings, turns) {
+    const progress = buildInterviewProgress(context.interviewBrief, turns);
+    const validationContext = { turns, resumeEvidenceCatalog: context.resumeEvidenceCatalog,
+      interviewBrief: context.interviewBrief, sessionKind: context.sessionKind };
+    const input = { context, settings, turns, progress };
+    const rawStep = await adapter.generateMockInterviewStep(input);
+    try {
+      return validateInterviewStep(rawStep, validationContext);
+    } catch (error) {
+      if (!['MOCK_INTERVIEW_REPEATED_QUESTION', 'MOCK_INTERVIEW_LOGISTICS_QUESTION'].includes(error.code)) throw error;
+      const questionRevision = { reason: error.code,
+        avoidQuestions: [...new Set([...progress.askedQuestions, String(rawStep.nextQuestion?.text || '').trim()].filter(Boolean))] };
+      const revised = await adapter.generateMockInterviewStep({ ...input, questionRevision });
+      return validateInterviewStep(revised, validationContext);
     }
   }
 }

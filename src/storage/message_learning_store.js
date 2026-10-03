@@ -262,7 +262,8 @@ function setCandidateAnswerMemoryScope(db, {
 function withdrawCandidateAnswerMemory(db, {
   profileId,
   memoryId,
-  withdrawnAt = nowIso()
+  withdrawnAt = nowIso(),
+  afterWithdraw
 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
   const id = positiveInteger(memoryId, "memoryId");
@@ -277,7 +278,9 @@ function withdrawCandidateAnswerMemory(db, {
     const keys = db.prepare("SELECT DISTINCT fact_key FROM candidate_fact_revisions WHERE answer_memory_id = ?")
       .all(id).map((item) => item.fact_key);
     for (const key of keys) projectCandidateFact(db, profile, key, occurredAt);
-    return mapMemory(db.prepare("SELECT * FROM candidate_answer_memories WHERE id = ?").get(id));
+    const result = mapMemory(db.prepare("SELECT * FROM candidate_answer_memories WHERE id = ?").get(id));
+    afterWithdraw?.(result);
+    return result;
   });
 }
 
@@ -327,7 +330,8 @@ function deleteCandidateFact(db, {
   profileId,
   factKey,
   source = "user_provided",
-  occurredAt = nowIso()
+  occurredAt = nowIso(),
+  recordIfMissing = false
 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
   assertProfile(db, profile);
@@ -336,7 +340,7 @@ function deleteCandidateFact(db, {
   return immediateTransaction(db, () => {
     const current = db.prepare("SELECT id FROM candidate_facts WHERE profile_id = ? AND fact_key = ?")
       .get(profile, key);
-    if (!current) return false;
+    if (!current && !recordIfMissing) return false;
     db.prepare(`INSERT INTO candidate_fact_revisions(
       profile_id, fact_key, fact_value, operation, source,
       answer_memory_id, evidence_text, withdrawn_at, created_at
@@ -390,8 +394,9 @@ function closeOpenMessageReplyDraftsByIntent(db, {
   });
 }
 
-function projectCandidateFact(db, profileId, factKey, projectedAt) {
-  const revision = db.prepare(`SELECT r.*
+function latestCandidateFactRevision(db, profileId, factKey) {
+  return db.prepare(`SELECT r.*,
+      CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END AS confirmed_at
     FROM candidate_fact_revisions r
     LEFT JOIN candidate_answer_memories m ON m.id = r.answer_memory_id
     WHERE r.profile_id = ? AND r.fact_key = ? AND r.withdrawn_at IS NULL
@@ -407,6 +412,20 @@ function projectCandidateFact(db, profileId, factKey, projectedAt) {
       ))
     ORDER BY CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END DESC, r.id DESC
     LIMIT 1`).get(profileId, factKey);
+}
+
+function listCandidateFacts(db, profileId) {
+  return db.prepare('SELECT fact_key, fact_value, source, updated_at FROM candidate_facts WHERE profile_id = ? ORDER BY fact_key')
+    .all(Number(profileId)).map(row => {
+      const revision = latestCandidateFactRevision(db, Number(profileId), row.fact_key);
+      const confirmedAt = revision?.operation === 'set' && revision.fact_value === row.fact_value && revision.source === row.source
+        ? revision.confirmed_at : row.updated_at;
+      return { factKey: row.fact_key, factValue: row.fact_value, source: row.source, updatedAt: confirmedAt };
+    });
+}
+
+function projectCandidateFact(db, profileId, factKey) {
+  const revision = latestCandidateFactRevision(db, profileId, factKey);
   if (!revision || revision.operation === "delete") {
     db.prepare("DELETE FROM candidate_facts WHERE profile_id = ? AND fact_key = ?")
       .run(profileId, factKey);
@@ -425,7 +444,7 @@ function projectCandidateFact(db, profileId, factKey, projectedAt) {
       revision.fact_value,
       revision.source,
       revision.created_at,
-      projectedAt
+      revision.confirmed_at
     );
 }
 
@@ -643,6 +662,7 @@ module.exports = {
   reviseCandidateAnswerMemory,
   withdrawCandidateAnswerMemory,
   listCandidateFactRevisions,
+  listCandidateFacts,
   recordCandidateFactValue,
   deleteCandidateFact,
   closeOpenMessageReplyDraftsByIntent,

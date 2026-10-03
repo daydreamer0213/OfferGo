@@ -359,6 +359,7 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(loaded.turns[1].answerText, "", "early model completion must not strand an unfinished session");
 
     invalidStep = true;
+    const callsBeforeInvalidStep = calls.filter(call => call.kind === 'step').length;
     await assert.rejects(() => service.answerTurn({
       profileId: owner.profileId, planId: owner.planId, sessionId: session.id, turnNumber: 2, answerText: "第二题回答"
     }), /上一题|追问/);
@@ -366,6 +367,8 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(loaded.turns.length, 2, "invalid model output must not advance the session");
     assert.strictEqual(loaded.turns[1].answerText, "", "invalid model output must not partially save the current answer");
     assert.strictEqual(loaded.turns[0].answerText, firstAnswer, "prior completed answers must remain saved");
+    assert.strictEqual(calls.filter(call => call.kind === 'step').length, callsBeforeInvalidStep + 1,
+      'unrelated validation failure must not be retried');
 
     invalidStep = false;
     await service.answerTurn({ profileId: owner.profileId, planId: owner.planId, sessionId: session.id, turnNumber: 2, answerText: "第二题回答" });
@@ -440,6 +443,91 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(service.dashboard({ profileId: owner.profileId, planId: owner.planId,
       sessionId: newerCompletedId }).selectedSession.id, newerCompletedId,
     "主动查看历史训练时必须保留用户选择");
+
+    // Regeneration must occur before persistence: one answer and one next turn are saved.
+    for (const problem of ['repeat', 'logistics']) {
+      const regenerationInputs = [];
+      const regeneratedService = createMockInterviewService({ db, adapter: { ...adapter,
+        async generateMockInterviewStep(input) {
+          const raw = await adapter.generateMockInterviewStep(input);
+          if (!input.turns.length) return raw;
+          regenerationInputs.push(JSON.parse(JSON.stringify(input)));
+          if (!input.questionRevision) {
+            raw.nextQuestion = { questionKind: 'topic_transition', focus: 'project',
+              resumeEvidenceIds: [input.context.resumeEvidenceCatalog[0].id], basedOnTurnNumber: null,
+              text: problem === 'repeat' ? input.turns[0].question : '你的期望薪资是多少？' };
+          }
+          return raw;
+        }
+      } });
+      const fresh = await regeneratedService.startSession({ profileId: owner.profileId, planId: owner.planId,
+        resumeVersionId: owner.resumeVersionId, settings: { plannedQuestions: 3 } });
+      const accepted = await regeneratedService.answerTurn({ profileId: owner.profileId, planId: owner.planId,
+        sessionId: fresh.id, turnNumber: 1, answerText: firstAnswer });
+      assert.strictEqual(regenerationInputs.length, 2, 'content error receives only one targeted regeneration');
+      assert.strictEqual(regenerationInputs[1].questionRevision.reason,
+        problem === 'repeat' ? 'MOCK_INTERVIEW_REPEATED_QUESTION' : 'MOCK_INTERVIEW_LOGISTICS_QUESTION');
+      assert(regenerationInputs[1].questionRevision.avoidQuestions.includes(
+        problem === 'repeat' ? fresh.turns[0].questionText : '你的期望薪资是多少？'));
+      assert.deepStrictEqual(regenerationInputs[1].turns, regenerationInputs[0].turns, 'regeneration preserves original answers');
+      assert.deepStrictEqual(regenerationInputs[1].progress.askedQuestions, [fresh.turns[0].questionText]);
+      assert.strictEqual(accepted.turns.length, 2);
+      assert.strictEqual(accepted.turns.filter(turn => turn.answerText).length, 1);
+      assert.strictEqual(accepted.turns[0].answerText, firstAnswer);
+      assert.strictEqual(accepted.turns[1].answerText, '');
+      const replayed = await regeneratedService.answerTurn({ profileId: owner.profileId, planId: owner.planId,
+        sessionId: fresh.id, turnNumber: 1, answerText: firstAnswer });
+      assert.strictEqual(replayed.turns.length, 2);
+      assert.strictEqual(regenerationInputs.length, 2, 'accepted regeneration replay does not persist or regenerate again');
+    }
+
+    let repeatedAttempts = 0;
+    const rejectingService = createMockInterviewService({ db, adapter: { ...adapter,
+      async generateMockInterviewStep(input) {
+        const raw = await adapter.generateMockInterviewStep(input);
+        if (!input.turns.length) return raw;
+        repeatedAttempts += 1;
+        raw.nextQuestion = { questionKind: 'topic_transition', focus: 'intro',
+          resumeEvidenceIds: [input.context.resumeEvidenceCatalog[0].id], basedOnTurnNumber: null,
+          text: input.turns[0].question };
+        return raw;
+      }
+    } });
+    const rejected = await rejectingService.startSession({ profileId: owner.profileId, planId: owner.planId,
+      resumeVersionId: owner.resumeVersionId, settings: { plannedQuestions: 3 } });
+    await assert.rejects(() => rejectingService.answerTurn({ profileId: owner.profileId, planId: owner.planId,
+      sessionId: rejected.id, turnNumber: 1, answerText: firstAnswer }),
+    error => error.code === 'MOCK_INTERVIEW_REPEATED_QUESTION');
+    assert.strictEqual(repeatedAttempts, 2, 'rejected content regeneration must stop after one retry');
+    const rejectedStored = rejectingService.getSession({ profileId: owner.profileId, planId: owner.planId, sessionId: rejected.id });
+    assert.strictEqual(rejectedStored.turns.length, 1);
+    assert.strictEqual(rejectedStored.turns[0].answerText, '', 'neither failed attempt partially persists the answer');
+
+    const attemptsBeforeUnrelatedFailure = calls.filter(call => call.kind === 'step').length;
+    failStep = true;
+    await assert.rejects(() => service.answerTurn({ profileId: owner.profileId, planId: owner.planId,
+      sessionId: rejected.id, turnNumber: 1, answerText: firstAnswer }), /forced step failure/);
+    failStep = false;
+    assert.strictEqual(calls.filter(call => call.kind === 'step').length, attemptsBeforeUnrelatedFailure + 1,
+      'unrelated adapter failure must not be retried');
+
+    let openingAttempts = 0;
+    const openingService = createMockInterviewService({ db, adapter: { ...adapter,
+      async generateMockInterviewStep(input) {
+        openingAttempts += 1;
+        const raw = await adapter.generateMockInterviewStep(input);
+        if (!input.questionRevision) raw.nextQuestion.text = '你什么时候能到岗？';
+        return raw;
+      }
+    } });
+    const beforeOpening = db.prepare('SELECT count(*) AS n FROM mock_interview_sessions').get().n;
+    const revisedOpening = await openingService.startSession({ profileId: owner.profileId, planId: owner.planId,
+      resumeVersionId: owner.resumeVersionId, settings: { plannedQuestions: 3 } });
+    assert.strictEqual(openingAttempts, 2);
+    assert.strictEqual(revisedOpening.turns.length, 1);
+    assert(revisedOpening.turns[0].questionText.includes('介绍你自己'));
+    assert.strictEqual(db.prepare('SELECT count(*) AS n FROM mock_interview_sessions').get().n, beforeOpening + 1,
+      'regenerating the initial question creates only one session');
 
     console.log("mock_interview_service_smoke ok");
   } finally {

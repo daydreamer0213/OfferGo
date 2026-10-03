@@ -3,7 +3,7 @@ const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDra
   setCandidateAnswerMemoryScope,
   listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
 const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
-const { listCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
+const { listCandidateEvidence, saveCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
 const {
   replyDraftDigest,
@@ -77,7 +77,10 @@ function createMessageReplyLearningService({
       finalText,
       changedText,
       completionKind,
-      afterComplete,
+      afterComplete: memory => {
+        saveReplyExperiences(memory, draft, extraction.experiences || []);
+        afterComplete?.(memory);
+      },
       scope: extraction.scope,
       extractedFacts: extraction.facts,
       completedAt: nowIso(now())
@@ -112,7 +115,10 @@ function createMessageReplyLearningService({
     if (!current) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
     const draft = requiredDraft(profileId, current.draftId);
     const changedText = deriveUserChangedText(current.finalText, finalText) || String(finalText || "").trim();
-    const extraction = await extractFacts({ draft, finalText, changedText });
+    const confirmedExperiences = listCandidateEvidence(db, { profileId }).filter(entry =>
+      entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`);
+    const extraction = await extractFacts({ draft, finalText, changedText, confirmedExperiences });
+    const retainedExperiences = confirmedExperiences.filter(entry => String(finalText || '').includes(entry.sourceQuote));
     const memory = reviseCandidateAnswerMemory(db, {
       profileId,
       memoryId,
@@ -120,6 +126,9 @@ function createMessageReplyLearningService({
       changedText,
       scope: current.scope,
       extractedFacts: extraction.facts,
+      afterComplete: memory => saveReplyExperiences(memory, draft,
+        [...retainedExperiences, ...(extraction.experiences || [])].filter((entry, index, entries) =>
+          entries.findIndex(item => item.sourceQuote === entry.sourceQuote) === index)),
       completedAt: nowIso(now())
     });
     return completionResult(memory, requiredDraft(profileId, current.draftId), extraction.facts.length, extraction.status);
@@ -141,7 +150,8 @@ function createMessageReplyLearningService({
       result = withdrawCandidateAnswerMemory(db, {
         profileId,
         memoryId: memory.id,
-        withdrawnAt
+        withdrawnAt,
+        afterWithdraw: () => withdrawReplyExperiences(profileId, new Set([`reply-edit:${memory.id}`]))
       });
     }
     return result;
@@ -152,15 +162,17 @@ function createMessageReplyLearningService({
   }
 
   function deleteFact({ profileId, factKey }) {
+    const recordIfMissing = listCommunicationProfile({ profileId }).facts.some(fact => fact.factKey === factKey);
     return deleteCandidateFact(db, {
       profileId,
       factKey,
       source: "user_provided",
+      recordIfMissing,
       occurredAt: nowIso(now())
     });
   }
 
-  async function extractFacts({ draft, finalText, changedText }) {
+  async function extractFacts({ draft, finalText, changedText, confirmedExperiences = [] }) {
     if (!adapter || typeof adapter.extractReplyEditFacts !== "function") {
       return { scope: defaultScope(draft), facts: [], status: "unavailable" };
     }
@@ -169,12 +181,13 @@ function createMessageReplyLearningService({
         originalText: draft.originalText,
         finalText: String(finalText || "").trim().slice(0, 4000),
         changedText,
+        confirmedExperiences,
         questionSummary: draft.questionSummary,
         messageIntent: draft.messageIntent,
         messageCategory: draft.messageCategory,
         scope: defaultScope(draft)
       });
-      const validated = validateReplyEditFactExtraction(value, { changedText, scope: defaultScope(draft) });
+      const validated = validateReplyEditFactExtraction(value, { changedText, finalText, confirmedExperiences, scope: defaultScope(draft) });
       return { ...validated, status: "succeeded" };
     } catch (error) {
       logger?.warn?.("message_reply_fact_extraction_failed", {
@@ -192,6 +205,22 @@ function createMessageReplyLearningService({
     const draft = getMessageReplyDraft(db, { profileId, draftId });
     if (!draft) throw serviceError("MESSAGE_REPLY_DRAFT_NOT_FOUND", "message reply draft was not found");
     return draft;
+  }
+
+  function withdrawReplyExperiences(profileId, sourceIds) {
+    for (const entry of listCandidateEvidence(db, { profileId })) {
+      if (entry.sourceKind === 'manual' && sourceIds.has(entry.sourceId)) withdrawCandidateEvidence(db, { profileId, id: entry.id });
+    }
+  }
+
+  function saveReplyExperiences(memory, draft, experiences) {
+    const previous = listCandidateAnswerMemories(db, { profileId: memory.profileId, activeOnly: false, limit: 500 })
+      .filter(item => item.draftId === draft.id);
+    withdrawReplyExperiences(memory.profileId, new Set(previous.map(item => `reply-edit:${item.id}`)));
+    experiences.forEach((entry, index) => saveCandidateEvidence(db, {
+      ...entry, profileId: memory.profileId, sourceKind: 'manual', sourceId: `reply-edit:${memory.id}`,
+      sourceItemKey: String(index), scope: { kind: 'global', key: '' }
+    }));
   }
 }
 

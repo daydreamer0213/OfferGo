@@ -67,6 +67,19 @@ assert.deepStrictEqual(validateReplyEditFactExtraction({
 
 const db = openDb(":memory:");
 
+for (const [quote, expectedCount] of [
+  ['我负责薪资结算系统的测试，发现计算精度问题并修复。', 1],
+  ['针对这家公司我每周到北京办公三天。', 0]
+]) {
+  const result = validateReplyEditFactExtraction({ facts: [], experiences: [{ subject: '用户补充', sourceQuote: quote }] }, { changedText: quote, finalText: quote });
+  assert.equal(result.experiences.length, expectedCount, 'personal work and company commitments must be distinguished');
+}
+const repeatedEditQuote = '我负责接口联调，先复现故障，再对比请求参数找出原因。';
+assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调', sourceQuote: repeatedEditQuote }] }, {
+  changedText: '负责', finalText: '我负责日常运维。' + repeatedEditQuote,
+  confirmedExperiences: [{ sourceQuote: repeatedEditQuote.replace('负责', '参与') }]
+}).experiences.length, 1, 'confirmed correction must not use the first occurrence of the edited word as its position');
+
 (async () => {
   try {
     const fixture = createFixture(db);
@@ -212,6 +225,8 @@ const db = openDb(":memory:");
     service.withdrawMemory({ profileId: fixture.profileId, memoryId: completed.memoryId });
     assert.strictEqual(currentFacts(db, fixture.profileId).employment_status, undefined);
 
+    await reusableExperienceSmoke(db, fixture);
+    await factsLifecycleSmoke();
     console.log("message_reply_learning_smoke ok");
   } finally {
     db.close();
@@ -220,6 +235,85 @@ const db = openDb(":memory:");
   console.error(error);
   process.exitCode = 1;
 });
+
+async function reusableExperienceSmoke(database, fixture) {
+  const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+  const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
+  let quote = '我参与接口联调，先复现故障，再对比请求参数找出原因。';
+  const condition = '这份岗位我可以下周到岗，期望薪资20K。';
+  const draft = seedDraft(database, fixture, 'reusable-experience', '我做过接口联调。', 'project_fact');
+  const service = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+    return { facts: [], experiences: [
+      { subject: '排障经历', sourceQuote: quote, text: '模型额外改写不作为新事实' },
+      { subject: '原岗位条件', sourceQuote: condition },
+      { subject: '不存在的经历', sourceQuote: '我独立主导了架构' }
+    ] };
+  } } });
+  let completionCallbacks = 0;
+  const result = await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id, finalText: quote + condition, completionKind: 'copied', afterComplete: () => { completionCallbacks++; } });
+  assert.equal(completionCallbacks, 1, 'shared learning must preserve the completion callback');
+  let entries = listCandidateEvidence(database, { profileId: fixture.profileId });
+  assert.equal(entries.length, 1, 'only the literal personal story should be reusable');
+  assert.equal(entries[0].text, quote);
+  assert.equal(entries[0].scope.kind, 'global');
+  assert.equal(entries[0].sourceId, `reply-edit:${result.memoryId}`);
+  const wholeAnswer = listCandidateAnswerMemories(database, { profileId: fixture.profileId }).find(item => item.id === result.memoryId);
+  assert.equal(wholeAnswer.scope.kind, 'job', 'the mixed whole answer must stay scoped to its original job');
+  await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id, finalText: quote + condition, completionKind: 'copied' });
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId }).length, 1, 'repeated completion must not duplicate stories');
+  const analyze = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+    assert.equal(input.candidateEvidence[0].text, quote);
+    assert.equal(input.answerMemories.length, 0);
+    return { messageIntent: 'information_request', messageCategory: 'project_fact', messageSummary: '询问排障经历', requiredFactKeys: [], usedFactKeys: [], usedMemoryIds: [], usedEvidenceIds: [entries[0].id], responseItems: [], coverage: [], missingFact: null, messages: [quote] };
+  } } });
+  await analyze({ job: { id: fixture.jobId + 100 }, messages: [{ text: '碰到难题一般怎么处理？' }], candidateEvidence: entries, answerMemories: [wholeAnswer] });
+  quote = '我参与接口联调，通过日志定位超时，再逐项验证修正结果。';
+  const revised = await service.reviseMemory({ profileId: fixture.profileId, memoryId: result.memoryId, finalText: quote + condition });
+  entries = listCandidateEvidence(database, { profileId: fixture.profileId });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].text, quote, 'old story must not remain active after a correction');
+  quote = quote.replace('参与', '负责');
+  const shortCorrection = await service.reviseMemory({ profileId: fixture.profileId, memoryId: revised.memoryId, finalText: quote + condition });
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text, quote, 'a short correction of a confirmed user story must remain reusable');
+  const salaryOnly = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() { return { facts: [], experiences: [] }; } } });
+  const latest = await salaryOnly.reviseMemory({ profileId: fixture.profileId, memoryId: shortCorrection.memoryId, finalText: quote + condition.replace('20K', '25K') });
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text, quote, 'editing salary alone must keep the unchanged personal story');
+  salaryOnly.withdrawMemory({ profileId: fixture.profileId, memoryId: latest.memoryId });
+  assert.deepEqual(listCandidateEvidence(database, { profileId: fixture.profileId }), []);
+  const rollbackDraft = seedDraft(database, fixture, 'reusable-rollback', '感谢介绍。', 'project_fact');
+  await assert.rejects(service.completeDraft({ profileId: fixture.profileId, draftId: rollbackDraft.id,
+    finalText: quote, completionKind: 'copied', afterComplete: () => { throw new Error('completion failed'); }
+  }), /completion failed/);
+  assert.deepEqual(listCandidateEvidence(database, { profileId: fixture.profileId }), [], 'failed completion must roll back its reusable story');
+  assert(!listCandidateAnswerMemories(database, { profileId: fixture.profileId }).some(item => item.draftId === rollbackDraft.id), 'failed completion must roll back its answer memory');
+}
+
+async function factsLifecycleSmoke() {
+  const database = openDb(':memory:');
+  try {
+    const fixture = createFixture(database);
+    const { recordCandidateFactValue } = require('../src/storage/message_learning_store');
+    const { saveCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+    recordCandidateFactValue(database, { profileId: fixture.profileId, factKey: 'employment_status', factValue: '在职', occurredAt: '2026-10-01T00:00:00.000Z' });
+    const entry = saveCandidateEvidence(database, { profileId: fixture.profileId, subject: '求职状态', text: '我目前已离职，下周可以到岗。',
+      sourceQuote: '我目前已离职，下周可以到岗。', sourceKind: 'manual', sourceId: 'timeline', sourceItemKey: '0' });
+    database.prepare('UPDATE candidate_evidence_entries SET updated_at = ? WHERE id = ?').run('2026-10-02T00:00:00.000Z', entry.id);
+    let clock = '2026-10-02T12:00:00.000Z';
+    const service = createMessageReplyLearningService({ db: database, now: () => clock, adapter: { async extractReplyEditFacts() {
+      return { facts: [{ factKey: 'employment_status', factValue: '已离职', evidenceText: '已离职' }] };
+    } } });
+    const draft = seedDraft(database, fixture, 'timeline', '感谢介绍。', 'availability');
+    const result = await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id, finalText: '我目前已离职。', completionKind: 'copied' });
+    clock = '2026-10-03T00:00:00.000Z';
+    service.withdrawMemory({ profileId: fixture.profileId, memoryId: result.memoryId });
+    assert.equal(service.listCommunicationProfile({ profileId: fixture.profileId }).facts.find(fact => fact.factKey === 'employment_status').factValue, '已离职', 'withdrawal must not make an older fact look newly confirmed');
+    database.prepare('UPDATE candidate_facts SET updated_at = ? WHERE profile_id = ? AND fact_key = ?').run(clock, fixture.profileId, 'employment_status');
+    assert.equal(service.listCommunicationProfile({ profileId: fixture.profileId }).facts.find(fact => fact.factKey === 'employment_status').factValue, '已离职', 'old databases with projection timestamps must use the source confirmation time when read');
+    assert.equal(service.deleteFact({ profileId: fixture.profileId, factKey: 'availability_date' }), true, 'projected facts shown in the profile must be deletable');
+    assert(!service.listCommunicationProfile({ profileId: fixture.profileId }).facts.some(fact => fact.factKey === 'availability_date'));
+    assert.equal(service.deleteFact({ profileId: fixture.profileId, factKey: 'availability_date' }), false, 'repeated deletion must not add another revision');
+  } finally { database.close(); }
+}
 
 function createFixture(database) {
   const now = "2026-08-28T02:00:00.000Z";
