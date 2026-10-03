@@ -96,7 +96,7 @@ try {
     factValue: "两周内到岗",
     source: "user_provided"
   });
-  const now = "2026-08-29T03:00:00.000Z";
+  const now = new Date().toISOString();
   const cardId = Number(db.prepare(`INSERT INTO candidate_progress_cards(
     profile_id, plan_id, job_id, source, stage, next_action, last_event_at, created_at, updated_at
   ) VALUES (?, ?, ?, 'boss', 'reply_ready', '处理草稿', ?, ?, ?)`)
@@ -339,6 +339,71 @@ try {
   const { restoreResumeSuggestionAnchors } = require('../src/core/resume_optimization');
   assert.throws(() => restoreResumeSuggestionAnchors({ suggestions: [{ originalText: 'AA' }] }, { sourceText: 'ＡＡＡ', modelText: 'AAA' }), /不唯一/);
   assert.throws(() => restoreResumeSuggestionAnchors({ suggestions: [{ originalText: '[姓名已隐藏]' }] }, { sourceText: '真实姓名', modelText: '[姓名已隐藏]' }), /不存在/);
+
+  const { saveCandidateEvidence, withdrawCandidateEvidence, reviseCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+  const { deleteCandidateFact, recordCandidateFactValue } = require('../src/storage/message_learning_store');
+  for (const change of ['unchanged', 'withdraw', 'delete', 'correct', 'scope']) {
+    const person = storage.saveProfileAnalysis(db, {
+      profile: profile('资料测试'), document: document(`current-material-${change}`, '资料测试'),
+      searchPlan: { name: '资料方案', directions: ['AI 应用工程师'] }
+    });
+    const identity = { profileId: person.profileId, planId: person.planId, sourceResumeVersionId: person.resumeVersionId, mode: 'general' };
+    const salary = saveCandidateEvidence(db, { profileId: person.profileId, subject: '求职补充', text: '目前期望薪资20K',
+      sourceKind: 'manual', sourceId: 'salary', sourceItemKey: 'salary', sourceQuote: '用户已确认', scope: { kind: 'global' } });
+    for (let index = 0; index < 12; index++) saveCandidateEvidence(db, {
+      profileId: person.profileId, subject: '参与企业知识库开发', text: '参与企业知识库开发，完成项目交付。',
+      sourceKind: 'manual', sourceId: `project-${index}`, sourceItemKey: 'project', sourceQuote: '用户已确认', scope: { kind: 'global' }
+    });
+    const current = createResumeOptimizationService({ db, adapter: { async generateResumeOptimization(input) {
+      assert.equal(input.candidateEvidence.length, 12);
+      assert(!input.candidateEvidence.some(item => item.text.includes('20K')));
+      const fact = input.evidenceCatalog.find(item => item.kind === 'fact' && item.text.includes('20K'));
+      assert(fact, 'all current facts must remain available beyond the selected material budget');
+      return { headline: '补充已确认求职信息', suggestions: [{ id: 'S1', operation: 'replace', originalText: '参与企业知识库开发',
+        proposedText: '参与企业知识库开发\n期望薪资：20K', reason: '补充确认信息', evidenceIds: [fact.id], editingPrinciple: 'contribution_clarity' }] };
+    } } });
+    const generated = await current.createDraft(identity);
+    if (change === 'withdraw') withdrawCandidateEvidence(db, { profileId: person.profileId, id: salary.id });
+    if (change === 'delete') deleteCandidateFact(db, { profileId: person.profileId, factKey: 'expected_salary', recordIfMissing: true });
+    if (change === 'correct') recordCandidateFactValue(db, { profileId: person.profileId, factKey: 'expected_salary', factValue: '25K' });
+    if (change === 'scope') saveCandidateEvidence(db, { ...salary, scope: { kind: 'job', key: String(validJobId) } });
+    const versions = storage.listCandidateResumeVersions(db, person.profileId).length;
+    const activate = () => current.activateDraft({ ...identity, draftId: generated.id, finalText: generated.finalText });
+    if (change === 'unchanged') {
+      const enabled = activate();
+      assert.equal(enabled.status, 'activated');
+      assert.equal(activate().resultResumeVersionId, enabled.resultResumeVersionId);
+      assert.equal(require('../src/storage/candidate_store').getCandidateResumeDocument(db, { profileId: person.profileId, resumeVersionId: person.resumeVersionId }).text,
+        document(`current-material-${change}`, '资料测试').text);
+    } else {
+      assert.throws(activate, error => error.code === 'RESUME_ACTIVATION_INTEGRITY_FAILED'
+        && error.issues.some(item => item.code === 'RESUME_FACT_UNSUPPORTED'), change);
+      assert.equal(storage.listCandidateResumeVersions(db, person.profileId).length, versions, change);
+      // Make the old salary relevant to ensure the raw material cannot bypass a deletion or correction.
+      if (['delete', 'correct'].includes(change)) {
+        reviseCandidateEvidence(db, { profileId: person.profileId, id: salary.id, subject: '参与企业知识库开发', text: salary.text });
+        // Preserve its confirmation time; revising the subject must not reconfirm the deleted salary.
+        db.prepare('UPDATE candidate_evidence_entries SET updated_at = ? WHERE id = ?').run(salary.updatedAt, salary.id);
+        assert.throws(activate, error => error.code === 'RESUME_ACTIVATION_INTEGRITY_FAILED', `${change} relevant evidence`);
+      }
+    }
+  }
+
+  const currentSource = '当前测试\n计算机本科\n参与企业知识库接口开发，使用Node.js与SQL进行接口联调及异常场景测试。\n我目前在职，下周可以到岗。';
+  const correctedOwner = storage.saveProfileAnalysis(db, { profile: profile('当前测试'),
+    document: { text: currentSource, contentHash: 'resume-current-correction', format: 'text', originalFileName: 'current.txt' },
+    searchPlan: { name: '更正测试', directions: ['AI 应用工程师'] } });
+  const correctionService = createResumeOptimizationService({ db, adapter: new MockModelAdapter() });
+  const correctionIdentity = { profileId: correctedOwner.profileId, planId: correctedOwner.planId, sourceResumeVersionId: correctedOwner.resumeVersionId, mode: 'general' };
+  const correctionDraft = await correctionService.createDraft(correctionIdentity);
+  recordCandidateFactValue(db, { profileId: correctedOwner.profileId, factKey: 'employment_status', factValue: '已离职' });
+  recordCandidateFactValue(db, { profileId: correctedOwner.profileId, factKey: 'availability_date', factValue: '我无法下周到岗' });
+  assert.throws(() => correctionService.activateDraft({ ...correctionIdentity, draftId: correctionDraft.id, finalText: correctionDraft.finalText }),
+    error => error.code === 'RESUME_ACTIVATION_INTEGRITY_FAILED');
+  const correctedText = correctionDraft.finalText.replace('我目前在职，下周可以到岗。', '我已离职，我无法下周到岗。');
+  assert.equal(correctionService.activateDraft({ ...correctionIdentity, draftId: correctionDraft.id, finalText: correctedText }).status, 'activated');
+  assert.equal(require('../src/storage/candidate_store').getCandidateResumeDocument(db, {
+    profileId: correctedOwner.profileId, resumeVersionId: correctedOwner.resumeVersionId }).text, currentSource);
 
   console.log("resume_optimization_service_smoke ok");
 } finally {

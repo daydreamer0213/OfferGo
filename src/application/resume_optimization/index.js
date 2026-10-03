@@ -3,7 +3,7 @@ const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, listCan
 const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
 const { listCandidateEvidence } = require('../../storage/candidate_evidence_store');
 const { selectRelevantCandidateMaterial } = require('../../core/candidate_evidence');
-const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
+const { mergeCandidateFacts, currentCandidateMaterial, factStatus } = require('../../core/candidate_fact_policy');
 const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
 const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
   saveResumeOptimizationDraft, activateResumeOptimization } = require("../../storage/resume_optimization_store");
@@ -66,18 +66,17 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       originalFileName: source.fileName,
       strict: true
     });
-    const allEvidence = listCandidateEvidence(db, { profileId });
-    const facts = mergeCandidateFacts(listCandidateFacts(db, profileId, { job: jobs[0] || {} }), allEvidence, { job: jobs[0] || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) });
+    const { facts, evidence, materialPolicy } = currentMaterial(profileId, jobs[0] || {});
     const query = jobs.map(job => job.description).join('\n') || prepared.text;
-    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, {
+    const candidateEvidence = selectRelevantCandidateMaterial(evidence, {
       query, job: jobs[0] || {}, limit: 12, maxChars: 16000
     });
-    const answers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
+    const answers = selectRelevantCandidateMaterial(currentCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: true,
       source: "user_edited_reply",
       limit: 500
-    }), jobs), { query, job: jobs[0] || {}, limit: 12, maxChars: 16000 });
+    }), jobs), materialPolicy), { query, job: jobs[0] || {}, limit: 12, maxChars: 16000 });
     const funnelDiagnosis = compactDiagnosis(funnelAnalysis.getDashboard({ profileId, planId: plan.id }));
     const evidenceCatalog = buildResumeEvidenceCatalog({
       sourceText: prepared.text,
@@ -220,26 +219,40 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
   function integrityFor(draft, finalText) {
     const source = ownedSource(draft.profileId, draft.sourceResumeVersionId);
     const profile = getCandidateProfile(db, draft.profileId);
-    const answers = applicableAnswers(listCandidateAnswerMemories(db, {
+    const jobs = integrityJobs(draft.targetJobIds);
+    const job = jobs[0] || {};
+    const { facts, evidence, materialPolicy } = currentMaterial(draft.profileId, job);
+    const answers = currentCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
       profileId: draft.profileId,
       activeOnly: true,
       source: "user_edited_reply",
       limit: 500
-    }), integrityJobs(draft.targetJobIds));
+    }), jobs), materialPolicy);
     return validateResumeActivationText({
       sourceText: source.text,
+      sourceEvidenceText: currentCandidateMaterial([{ text: source.text, source: 'active_resume' }], materialPolicy)
+        .map(item => item.text).join('\n'),
       generatedText: draft.generatedText,
       finalText,
       candidateName: profile?.profile?.candidate?.name || profile?.displayName || "",
-      facts: listCandidateFacts(db, draft.profileId, { job: integrityJobs(draft.targetJobIds)[0] || {} }),
-      candidateEvidence: selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: draft.profileId }), {
-        query: finalText, job: integrityJobs(draft.targetJobIds)[0] || {}, limit: 12, maxChars: 16000
+      facts,
+      candidateEvidence: selectRelevantCandidateMaterial(evidence, {
+        query: finalText, job, limit: 12, maxChars: 16000
       }),
       answerMemories: answers,
       suggestions: draft.changeLedger
     });
   }
 
+  function currentMaterial(profileId, job) {
+    const allEvidence = listCandidateEvidence(db, { profileId });
+    const factRevisions = listCandidateFactRevisions(db, { profileId, limit: 2000 });
+    const now = new Date().toISOString();
+    const facts = mergeCandidateFacts(listCandidateFacts(db, profileId, { job }), allEvidence, { job, factRevisions })
+      .filter(fact => factStatus(now, { ...fact, key: fact.factKey || fact.key }).status === 'valid');
+    const materialPolicy = { now, facts, factRevisions };
+    return { facts, evidence: currentCandidateMaterial(allEvidence, materialPolicy), materialPolicy };
+  }
   function integrityJobs(ids) {
     return Array.isArray(ids) ? listJobIdentities(db, ids) : [];
   }

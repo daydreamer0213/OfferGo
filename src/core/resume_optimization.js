@@ -270,6 +270,7 @@ function selectRepresentativeResumeJobs(jobs, { targetDirection, limit = 5 } = {
 
 function validateResumeActivationText({
   sourceText = "",
+  sourceEvidenceText = sourceText,
   generatedText = "",
   finalText = "",
   candidateName = "",
@@ -299,7 +300,7 @@ function validateResumeActivationText({
     errors.push(issue("RESUME_CONTACT_REMOVED"));
   }
 
-  const evidenceTexts = [source]
+  const evidenceTexts = [String(sourceEvidenceText || '').trim()]
     .concat(candidateEvidence.filter(item => !item.withdrawnAt).map(item => item.text))
     .concat((Array.isArray(facts) ? facts : []).filter(candidateEvidenceItem).map(factEvidenceText))
     .concat((Array.isArray(answerMemories) ? answerMemories : [])
