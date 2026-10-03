@@ -1,4 +1,5 @@
 const coreDiscovery = require("../../core/message_discovery");
+const { candidateReplyMaterial } = require('./materials');
 const messageInbox = require("../message_inbox");
 const messageTimeline = require("../../storage/message_timeline_store");
 const { getJob } = require("../../storage/job_store");
@@ -23,6 +24,9 @@ function isClearlyUnmatchedMessageCard(db, { profileId, cardId, jobId } = {}) {
 async function runBossMessageDiscovery(options = {}) {
   return coreDiscovery.runBossMessageDiscovery({
     ...options,
+    classifyMessageGroup: typeof options.classifyMessageGroup === 'function'
+      ? (input, runtime) => options.classifyMessageGroup({ ...input, ...candidateReplyMaterial(options.db, options.profileId) }, runtime)
+      : options.classifyMessageGroup,
     messageInbox: options.messageInbox || messageInbox,
     messageTimeline: options.messageTimeline || messageTimeline,
     isUnmatchedCard: options.isUnmatchedCard || isClearlyUnmatchedMessageCard,

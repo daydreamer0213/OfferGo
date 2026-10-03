@@ -1401,8 +1401,6 @@ function safeManualActionReason(result, missingFactKey, messages) {
   }
   if (messages.length) return "";
   const categoryReason = {
-    salary: "薪资问题需要人工确认口径",
-    sensitive: "消息涉及敏感信息，需要人工处理",
     identity_uncertain: "岗位或会话身份仍需人工核对"
   }[String(result.messageCategory || "")];
   return categoryReason || "当前结果需要人工处理";

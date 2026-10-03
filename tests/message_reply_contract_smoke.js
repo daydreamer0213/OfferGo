@@ -160,7 +160,7 @@ async function main() {
     coverage: [],
     messages: ["您好，我确认明天下午三点参加视频面试。"]
   }), { facts: validFacts, now: NOW });
-  assert.deepStrictEqual(interview.messages, ["您好，感谢邀请，请问面试时间和形式如何安排？"]);
+  assert.deepStrictEqual(interview.messages, ["您好，我确认明天下午三点参加视频面试。"]);
   assert.strictEqual(interview.progressUpdate.stage, "interview_invited");
   const rejection = validateMessageReply(safeReply({
     messageIntent: "rejection",
@@ -312,7 +312,7 @@ async function main() {
       (error) => error.code === "MESSAGE_REPLY_SUMMARY_INVALID"
     );
   }
-  for (const messageCategory of ["salary", "sensitive", "identity_uncertain"]) {
+  for (const messageCategory of ["identity_uncertain"]) {
     assert.throws(
       () => validateMessageReply(safeReply({ messageCategory, messages: ["must not escape"] }), { facts: validFacts, now: NOW }),
       (error) => error.code === "MESSAGE_REPLY_MANUAL_ONLY"
@@ -463,8 +463,6 @@ async function main() {
   assert.strictEqual(semanticMessages[0].text, "");
 
   for (const [text, messageCategory] of [
-    ["薪资还可以再谈吗？", "salary"],
-    ["请提供身份证和家庭情况", "sensitive"],
     ["这是哪个岗位？", "identity_uncertain"]
   ]) {
     const manual = await analyzer({
@@ -489,8 +487,8 @@ async function main() {
     facts: validFacts,
     now: NOW
   });
-  assert.strictEqual(mixedSalary.messageCategory, "salary", "any salary question must keep the whole group manual-only");
-  assert.deepStrictEqual(mixedSalary.messages, []);
+  assert.strictEqual(mixedSalary.messageCategory, "salary", "salary classification must preserve the recruiter topic");
+  assert(mixedSalary.messages.length || mixedSalary.missingFact, "salary questions must draft or ask for the missing fact");
   assert.strictEqual(mixedSalary.progressUpdate.stage, "needs_user_action");
 
   const storedShapeAnalyzer = createMessageReplyAnalyzer({ adapter: new MockModelAdapter() });
@@ -652,8 +650,8 @@ async function main() {
     ],
     now: NOW
   });
-  assert.deepStrictEqual(scopedMemoryResult.usedMemoryIds, [20, 21, 23]);
-  assert.deepStrictEqual(scopedMemoryAdapterInput.answerMemories.map((memory) => memory.id), [20, 21, 23], "answer memories must stay inside their saved scope");
+  assert.deepStrictEqual(scopedMemoryResult.usedMemoryIds, [21, 20, 23]);
+  assert.deepStrictEqual(scopedMemoryAdapterInput.answerMemories.map((memory) => memory.id), [21, 20, 23], "answer memories must stay inside their saved scope");
 
   await scopedMemoryAnalyzer({
     profile: { id: 1 }, job: { id: 2, title: "Java Engineer" },

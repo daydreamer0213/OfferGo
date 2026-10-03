@@ -2812,8 +2812,6 @@ async function classificationOutcomeSmoke() {
   }
 
   for (const [suffix, messageCategory, reason] of [
-    ["salary-manual", "salary", "薪资问题需要人工确认口径"],
-    ["sensitive-manual", "sensitive", "消息涉及敏感信息，需要人工处理"],
     ["identity-manual", "identity_uncertain", "岗位或会话身份仍需人工核对"]
   ]) {
     const manual = createFixture({ suffix, title: `${suffix} Engineer` });

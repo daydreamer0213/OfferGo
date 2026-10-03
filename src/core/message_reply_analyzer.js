@@ -1,12 +1,13 @@
 const { validateMessageReply } = require("./message_reply_contract");
 const { VOLATILE_FACT_MAX_AGE_DAYS } = require("./candidate_fact_policy");
+const { selectRelevantCandidateMaterial } = require('./candidate_evidence');
 
 function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
   if (!adapter || typeof adapter.draftMessageGroup !== "function") {
     throw new Error("message reply analyzer requires adapter.draftMessageGroup");
   }
   return async function analyzeMessageGroup(
-    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], answerMemories = [], draftQualityRevision, now } = {},
+    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
     { signal = null } = {}
   ) {
     const normalizedFacts = (facts || []).map((fact) => ({
@@ -17,9 +18,11 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     }));
     const requestedSubjectKeys = deriveRequestedSubjectKeys(messages, normalizedFacts);
     const scopedFacts = normalizedFacts.filter((fact) => factMatchesRequestedScope(fact, requestedSubjectKeys));
-    const activeMemories = normalizeAnswerMemories((Array.isArray(answerMemories) ? answerMemories : [])
+    const query = messages.map(message => String(message.text || '')).join('\n');
+    const relevantEvidence = selectRelevantCandidateMaterial(candidateEvidence, { query, job, limit: 12, maxChars: 12000 });
+    const activeMemories = normalizeAnswerMemories(selectRelevantCandidateMaterial((Array.isArray(answerMemories) ? answerMemories : [])
       .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys)
-        && memoryIsCurrent(memory, now)));
+        && memoryIsCurrent(memory, now)), { query, job, limit: 12, maxChars: 8000 }));
     const input = {
       profile,
       job,
@@ -33,6 +36,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
       })),
       facts: scopedFacts,
       answerMemories: activeMemories,
+      candidateEvidence: relevantEvidence,
       requestedSubjectKeys,
       ...(draftQualityRevision ? { draftQualityRevision } : {})
     };
@@ -41,6 +45,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
       return validateMessageReply(result, {
         facts: input.facts,
         answerMemories: input.answerMemories,
+        candidateEvidence: input.candidateEvidence,
         now,
         requestedSubjectKeys: input.requestedSubjectKeys,
         platform: input.platform,

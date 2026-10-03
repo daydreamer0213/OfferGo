@@ -19,8 +19,6 @@ const MESSAGE_INTENTS = new Set([
   "manual_review"
 ]);
 const MANUAL_ONLY_CATEGORIES = new Set([
-  "salary",
-  "sensitive",
   "identity_uncertain"
 ]);
 const STABLE_FACT_PREFIXES = ["gap.", "leaving_reason.", "short_project."];
@@ -74,12 +72,17 @@ function validateMessageReply(value, context = {}) {
       throw contractError("MESSAGE_REPLY_MEMORY_NOT_SUPPLIED", `used answer memory ${memoryId} is not in the supplied active memory set`);
     }
   }
+  const evidenceIds = new Set((context.candidateEvidence || []).filter(item => !item.withdrawnAt).map(item => Number(item.id)));
+  for (const evidenceId of normalized.usedEvidenceIds) {
+    if (!evidenceIds.has(evidenceId)) throw contractError('MESSAGE_REPLY_EVIDENCE_NOT_SUPPLIED', 'reply cited unavailable candidate evidence');
+  }
   const safeStage = safeReplyStage(normalized);
   const messages = MANUAL_ONLY_CATEGORIES.has(normalized.messageCategory)
     || normalized.messageIntent === "manual_review"
     || normalized.messageIntent === "rejection"
     ? []
-    : normalized.messageIntent === "interview_invitation"
+    : normalized.messageIntent === "interview_invitation" && !normalized.messages.length && !normalized.missingFact
+      && !unverified.length && normalized.messageCategory === 'other' && !normalized.responseItems.length
       ? [SAFE_INTERVIEW_DRAFT]
       : normalized.messages;
   return {
@@ -145,6 +148,11 @@ function normalizeReply(value) {
     requiredFactKeys,
     usedFactKeys,
     usedMemoryIds,
+    usedEvidenceIds: value.usedEvidenceIds == null ? [] : arrayValue(value.usedEvidenceIds, 'usedEvidenceIds').map(Number),
+    ...(value.responseStrategy && typeof value.responseStrategy === 'object' ? { responseStrategy: {
+      concern: String(value.responseStrategy.concern || '').trim().slice(0, 300),
+      focus: String(value.responseStrategy.focus || '').trim().slice(0, 300)
+    } } : {}),
     responseItems,
     coverage,
     missingFact,

@@ -542,6 +542,10 @@ MockModelAdapter.prototype.draftMessageGroup = async function draftMessageGroup(
   const required = messageIntent === "information_request" && messageCategory === "availability"
     ? ["employment_status", "availability_date"]
     : [];
+  if (messageIntent === 'information_request' && messageCategory === 'salary') {
+    required.push('expected_salary');
+    if (/到岗|入职|什么时候/.test(text)) required.push('availability_date');
+  }
   const missing = required.find((key) => !factMap.has(key));
   const topicSummary = {
     project_fact: "对方正在确认候选人的项目经历。",
@@ -559,7 +563,7 @@ MockModelAdapter.prototype.draftMessageGroup = async function draftMessageGroup(
     information_update: "对方正在补充当前岗位、项目或流程信息。",
     general_communication: "对方正在进行普通沟通。"
   }[messageIntent];
-  const manualOnly = ["salary", "sensitive", "identity_uncertain"].includes(messageCategory);
+  const manualOnly = ["identity_uncertain"].includes(messageCategory);
   const matchingMemory = (answerMemories || []).find((memory) =>
     Number.isSafeInteger(Number(memory?.id))
     && String(memory?.finalAnswer || "").trim()

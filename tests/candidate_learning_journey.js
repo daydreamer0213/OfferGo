@@ -3,6 +3,8 @@ const storage = require('../src/core/storage');
 const { MockModelAdapter } = require('../src/adapters/models/mock');
 const { createMockInterviewService } = require('../src/application/mock_interview');
 const evidenceStore = require('../src/storage/candidate_evidence_store');
+const { validateMessageReply } = require('../src/core/message_reply_contract');
+const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
 
 const db = storage.openDb(':memory:');
 const answer = '我参与企业知识库开发，主要做接口联调和检索测试，没有主导架构。';
@@ -42,6 +44,18 @@ class InterviewAdapter extends MockModelAdapter {
     const saved = service.confirmEvidence(input);
     assert.equal(service.confirmEvidence(input).id, saved.id);
     assert.equal((await service.startSession(context)).context.candidateEvidence[0].text, answer);
+    const now = new Date().toISOString();
+    const salaryReply = { messageIntent: 'information_request', messageCategory: 'salary', messageSummary: 'HR 询问薪资与到岗',
+      requiredFactKeys: ['expected_salary', 'availability_date'], usedFactKeys: ['expected_salary', 'availability_date'], usedMemoryIds: [],
+      responseItems: [{ id: 'expected_salary', kind: 'question', required: true }, { id: 'availability_date', kind: 'question', required: true }],
+      coverage: [{ responseItemId: 'expected_salary', covered: true }, { responseItemId: 'availability_date', covered: true }],
+      missingFact: null, messages: ['期望 15–20K，下周可以到岗。'] };
+    assert.equal(validateMessageReply(salaryReply, { now, facts: [{ key: 'expected_salary', value: '15–20K', updatedAt: now }, { key: 'availability_date', value: '下周', updatedAt: now }] }).messages.length, 1);
+    const analyzer = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+      assert.equal(input.candidateEvidence[0].text, answer);
+      return { ...salaryReply, messageCategory: 'project_fact', requiredFactKeys: [], usedFactKeys: [], responseItems: [], coverage: [], usedEvidenceIds: [saved.id], messages: [answer] };
+    } } });
+    assert.equal((await analyzer({ messages: [{ text: '你做过知识库接口联调吗？' }], candidateEvidence: evidenceStore.listCandidateEvidence(db, { profileId: profile.profileId }), now })).usedEvidenceIds[0], saved.id);
     for (const turnNumber of [2, 3]) session = await service.answerTurn({ ...context, sessionId: session.id, turnNumber, answerText: answer });
     session = await service.finishSession({ ...context, sessionId: session.id });
     assert.equal(session.report.evidenceCandidates.length, 1, 'bad evidence suggestion must not discard the entire report');

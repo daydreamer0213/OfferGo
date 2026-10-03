@@ -1,7 +1,6 @@
 const { getCandidateProfile, listCandidateFacts } = require("../../storage/candidate_store");
 const {
-  recordMessageReplyDrafts,
-  listCandidateAnswerMemories
+  recordMessageReplyDrafts
 } = require("../../storage/message_learning_store");
 const {
   getMessageInboundContext
@@ -11,6 +10,7 @@ const {
   getMessageGroupClassification
 } = require("../../storage/message_discovery_store");
 const { messageReplyProfile } = require("../../core/message_discovery");
+const { candidateReplyMaterial } = require('./materials');
 
 async function answerMissingMessageFact({
   db,
@@ -54,16 +54,11 @@ async function answerMissingMessageFact({
   const facts = listCandidateFacts(db, profile)
     .filter((fact) => fact.factKey !== key)
     .concat([{ factKey: key, factValue: answer, source: "user_provided", updatedAt: answeredAt }]);
-  const answerMemories = listCandidateAnswerMemories(db, {
-    profileId: profile,
-    activeOnly: true,
-    source: "user_edited_reply",
-    limit: 100
-  });
   const messages = context.inboundMessages
     .filter((message) => message.kind === "text" && String(message.text || "").trim())
     .map((message, index) => ({ messageKey: `${groupKey}:${index}`, text: String(message.text) }));
   const result = await classifyMessageGroup({
+    ...candidateReplyMaterial(db, profile),
     profile: messageReplyProfile(candidate.profile),
     job: {
       id: Number(jobRow.job_id),
@@ -77,7 +72,6 @@ async function answerMissingMessageFact({
     },
     messages,
     facts,
-    answerMemories,
     now: answeredAt
   }, { signal });
   const drafts = result?.missingFact || !Array.isArray(result?.messages) || !result.messages.length

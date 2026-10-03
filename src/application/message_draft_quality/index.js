@@ -3,6 +3,8 @@
 const { assessMessageDraftQuality } = require("../../core/message_draft_quality");
 const { listCandidateFacts, getActiveResumeText } = require("../../storage/candidate_store");
 const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
+const { listCandidateEvidence } = require('../../storage/candidate_evidence_store');
+const { selectRelevantCandidateMaterial } = require('../../core/candidate_evidence');
 
 async function generateQualityCheckedDraft({
   generate,
@@ -45,6 +47,9 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     limit: 100
   });
   const evidenceTexts = [activeResumeText.trim()]
+    .concat(selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: profile }), {
+      query: messageTexts.join('\n'), job, limit: 12, maxChars: 12000
+    }).map(item => item.text))
     .concat(facts.map(factEvidenceText))
     .concat(activeMemories
       .filter((memory) => memoryMatchesQualityContext(memory, job, messageTexts))

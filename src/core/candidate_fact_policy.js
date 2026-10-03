@@ -1,6 +1,7 @@
 const VOLATILE_FACT_MAX_AGE_DAYS = Object.freeze({
   employment_status: 7,
   availability_date: 7,
+  interview_availability: 7,
   current_city: 30,
   expected_salary: 30,
   accepts_travel: 90,
