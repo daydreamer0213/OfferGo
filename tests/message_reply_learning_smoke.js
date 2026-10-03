@@ -69,6 +69,9 @@ const db = openDb(":memory:");
 
 for (const [quote, expectedCount] of [
   ['我负责薪资结算系统的测试，发现计算精度问题并修复。', 1],
+  ['我愿意每周去你们办公室两天。', 0],
+  ['我能进行日常英文交流，我愿意每周去你们办公室两天。', 0],
+  ['我使用办公软件整理数据并完成报表。', 1],
   ['针对这家公司我每周到北京办公三天。', 0]
 ]) {
   const result = validateReplyEditFactExtraction({ facts: [], experiences: [{ subject: '用户补充', sourceQuote: quote }] }, { changedText: quote, finalText: quote });
@@ -278,6 +281,7 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
     assert.strictEqual(currentFacts(db, fixture.profileId).employment_status, undefined);
 
     await reusableExperienceSmoke(db, fixture);
+    await reusablePersonalInformationSmoke();
     await delayedRevisionSmoke();
     await factsLifecycleSmoke();
     await recoveryLifecycleSmoke();
@@ -290,6 +294,61 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
   console.error(error);
   process.exitCode = 1;
 });
+
+async function reusablePersonalInformationSmoke() {
+  const database = openDb(':memory:');
+  try {
+    const fixture = createFixture(database);
+    const { candidateReplyMaterial } = require('../src/application/message_discovery/materials');
+    const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
+    let quote = '我能进行日常英文交流。';
+    const commitment = '我愿意每周去你们办公室两天。';
+    const draft = seedDraft(database, fixture, 'personal-information', '请介绍自己的能力。', 'qualification');
+    const service = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+      return { facts: [], experiences: [
+        { subject: '英语沟通能力', sourceQuote: quote },
+        { subject: '办公安排', sourceQuote: commitment },
+        { subject: '混合回答', sourceQuote: quote + commitment }
+      ] };
+    } } });
+    service.saveDraft({ profileId: fixture.profileId, draftId: draft.id, text: quote + commitment });
+    assert.equal(candidateReplyMaterial(database, fixture.profileId).candidateEvidence.length, 0, 'unadopted personal edits must not be learned');
+    const completed = await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id,
+      finalText: quote + commitment, completionKind: 'copied' });
+    async function nextJobReply(expectedQuote) {
+      const material = candidateReplyMaterial(database, fixture.profileId);
+      const analyze = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+        assert.equal(input.answerMemories.length, 0, 'the whole adopted answer stays in the original job');
+        assert.deepEqual(input.candidateEvidence.map(entry => entry.text), expectedQuote ? [expectedQuote] : []);
+        return { messageIntent: 'information_request', messageCategory: 'qualification', messageSummary: '询问英文能力',
+          requiredFactKeys: [], usedFactKeys: [], usedMemoryIds: [], usedEvidenceIds: input.candidateEvidence.map(entry => entry.id),
+          responseItems: [], coverage: [], missingFact: null, messages: [expectedQuote || '感谢沟通。'] };
+      } } });
+      const result = await analyze({ ...material, job: { id: fixture.jobId + 100, company: '另一家公司' },
+        messages: [{ text: '英文交流能力如何？' }] });
+      assert.deepEqual(result.usedEvidenceIds, material.candidateEvidence.map(entry => entry.id));
+      assert.deepEqual(result.messages, [expectedQuote || '感谢沟通。'], 'cross-job reply must actually use the adopted personal information');
+    }
+    await nextJobReply(quote);
+    quote = '我只能阅读英文文档。';
+    const revised = await service.reviseMemory({ profileId: fixture.profileId, memoryId: completed.memoryId,
+      finalText: quote + commitment });
+    await nextJobReply(quote);
+    const entry = candidateReplyMaterial(database, fixture.profileId).candidateEvidence[0];
+    service.withdrawEvidence({ profileId: fixture.profileId, id: entry.id });
+    await service.retryLearning({ profileId: fixture.profileId, memoryId: revised.memoryId });
+    await nextJobReply(null);
+    service.withdrawMemory({ profileId: fixture.profileId, memoryId: revised.memoryId });
+    await nextJobReply(null);
+    quote = '我熟练使用Excel制作报表，已取得大学英语六级资格。';
+    const additionalDraft = seedDraft(database, fixture, 'personal-tools-qualification', '请补充个人技能。', 'qualification');
+    const additional = await service.completeDraft({ profileId: fixture.profileId, draftId: additionalDraft.id,
+      finalText: quote + commitment, completionKind: 'copied' });
+    await nextJobReply(quote);
+    service.withdrawMemory({ profileId: fixture.profileId, memoryId: additional.memoryId });
+    await nextJobReply(null);
+  } finally { database.close(); }
+}
 
 async function reusableExperienceSmoke(database, fixture) {
   const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');

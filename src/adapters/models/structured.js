@@ -562,7 +562,8 @@ StructuredModelAdapter.prototype.extractReplyEditFacts = async function extractR
     "每个事实输出 factKey、factValue、evidenceText；evidenceText 必须逐字来自 changedText。",
     "scope.kind 只能是 global/job/company/experience，并保留 supplied scope 能支持的最窄范围。",
     "无法归类时返回空 facts，不要猜测，不要补全用户没写的内容。",
-    "同时从用户改写中整理最多三段可跨岗位参考的真实个人经历，experiences 每条为 {subject,sourceQuote}，sourceQuote 必须逐字来自 finalText 并包含本次 changedText 中新增或纠正的经历。没有明确经历时为空数组。只截取个人行动、方法和结果，不包含针对当前公司的薪资、到岗、时间安排或其他承诺。不得提取未改动的模型原稿，不推测身份、数字或扩大职责。",
+    "同时从用户改写中整理最多三段可跨岗位参考的稳定真实个人信息或经历，例如英语能力、工具掌握、已取得的资格，以及个人行动、方法和结果；统一使用 experiences，每条为 {subject,sourceQuote}。sourceQuote 必须逐字来自 finalText 并包含本次 changedText 中新增或纠正的个人信息。没有明确个人信息时为空数组。",
+    "只截取可独立复用的个人信息原句；针对当前岗位或公司的薪资待遇、到岗或面试时间、出差、加班、办公、搬迁安排等承诺，只保留在原范围的 facts 或回答中，不进入 experiences。混合回答仅提取能独立分离的个人事实原句，不能安全分离则不提取。不得提取未改动的模型原稿，不推测身份、数字或扩大职责。",
     "confirmedExperiences 是用户此前已采用的真实经历；用户只改了其中一两个字时，仍可返回 finalText 中对应的完整更正段落。只修改薪资或安排时，不重新改写未变的经历。",
     "输出 JSON：{scope:{kind,key},facts:[{factKey,factValue,evidenceText}],experiences:[{subject,sourceQuote}]}。",
     "只输出 JSON，不输出 Markdown。"

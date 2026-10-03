@@ -71,6 +71,7 @@ function validateReplyEditFactExtraction(value, options = {}) {
       || (evidenceSource.length > 0 && finalText.includes(quote) && (options.confirmedExperiences || []).some(entry =>
         deriveUserChangedText(entry.sourceQuote, quote) === evidenceSource));
     if (!subject || subject.length > 160 || quote.length < 8 || quote.length > 2000 || !overlapsEdit) return [];
+    if (/(?:愿意|可以|接受|承诺|每周).{0,20}(?:你们|贵司|贵公司|这家|该公司).{0,12}(?:办公室|办公|现场|坐班)|(?:你们|贵司|贵公司|这家|该公司).{0,12}(?:办公室|办公|现场|坐班).{0,12}(?:每周|每天|天|愿意|可以|接受|承诺)/.test(quote)) return [];
     if (/(?:期望|预期|希望|要求).{0,8}(?:薪资|薪酬|工资|待遇)|(?:薪资|薪酬|工资|待遇).{0,6}(?:期望|预期|接受|希望)|(?:何时|什么时候|下周|随时|一个月内|两周后|\d+月\d+日).{0,6}(?:到岗|入职)|(?:接受|愿意|可以|能).{0,10}(?:出差|加班|搬迁|异地)|(?:贵司|贵公司|这份岗位|该岗位|这家公司|该公司).{0,15}(?:接受|愿意|可以|能|承诺|每周|办公)/.test(quote)) return [];
     return [{ subject, text: quote, sourceQuote: quote }];
   });
