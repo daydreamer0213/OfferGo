@@ -3,6 +3,7 @@ const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDra
   setCandidateAnswerMemoryScope,
   listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
 const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
+const { listCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const {
   replyDraftDigest,
   replyDraftWasEdited,
@@ -26,7 +27,9 @@ function createMessageReplyLearningService({
     setMemoryScope,
     withdrawMemory,
     saveFact,
-    deleteFact
+    deleteFact,
+    reviseEvidence: input => reviseCandidateEvidence(db, input),
+    withdrawEvidence: input => withdrawCandidateEvidence(db, input)
   };
 
   function saveDraft({ profileId, draftId, text }) {
@@ -89,6 +92,7 @@ function createMessageReplyLearningService({
   function listCommunicationProfile({ profileId }) {
     return {
       facts: listCandidateFacts(db, profileId),
+      evidence: listCandidateEvidence(db, { profileId }),
       answers: listCandidateAnswerMemories(db, {
         profileId,
         activeOnly: true,

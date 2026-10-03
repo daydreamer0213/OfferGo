@@ -29,6 +29,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
     || '<p class="line">目前还没有额外记录。你改写回复后，OfferGo 会把明确的新信息补到这里。</p>';
   const answers = data.answers.map((answer) => renderAnswer(answer, { profileId, escapeHtml, escapeAttr })).join("")
     || '<p class="line">目前还没有你改过并采用的回答。</p>';
+  const evidence = (data.evidence || []).map(item => `<article class="message-draft"><h3>${escapeHtml(item.subject)}</h3><p class="line">从面试回答确认 · 更新于 ${escapeHtml(formatTime(item.updatedAt))}</p><form class="form-stack" method="post" action="/api/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="revise_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><label>主题<input name="subject" maxlength="160" value="${escapeAttr(item.subject)}" required></label><label>我确认的经历<textarea name="text" maxlength="8000" required>${escapeHtml(item.text)}</textarea></label><button>保存修改</button></form><details><summary>查看当时的原话</summary><p>${escapeHtml(item.sourceQuote)}</p></details><form method="post" action="/api/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="withdraw_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><button class="secondary">不再使用这段经历</button></form></article>`).join('') || '<p>面试练习里确认保存的真实经历会出现在这里。</p>';
   const history = data.revisions.map((revision) => {
     const action = revision.operation === "delete" ? "已删除" : "更新为";
     const value = revision.operation === "delete" ? "" : `：${escapeHtml(revision.factValue)}`;
@@ -42,7 +43,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
     planId: plan?.id || "",
     stage: "消息",
     brandHref: plan?.id ? `/plan?planId=${plan.id}` : "/onboarding",
-    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。回答默认只用于原岗位；你也可以选择让其他岗位的类似问题参考。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel"><h2>我改过并让 OfferGo 记住的回答</h2>${answers}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
+    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。回答默认只用于原岗位；你也可以选择让其他岗位的类似问题参考。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel"><h2>我改过并让 OfferGo 记住的回答</h2>${answers}</section><section class="panel"><h2>我确认过的真实经历</h2>${evidence}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
   });
 }
 

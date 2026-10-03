@@ -1577,6 +1577,12 @@ function createDashboardServer({
         db,
         mockInterview: getMockInterviewService()
       });
+      if (req.method === "POST" && url.pathname === "/api/interview/evidence") {
+        const params = parseBody(await readBody(req), req.headers["content-type"] || "");
+        const plan = requiredMockInterviewPlan(db, params.planId);
+        getMockInterviewService().confirmEvidence({ ...params, profileId: plan.profileId, planId: plan.id });
+        return redirect(res, `/interview?planId=${plan.id}&sessionId=${encodeURIComponent(params.sessionId)}#interview-evidence`);
+      }
       if (req.method === "POST" && url.pathname === "/api/message-discovery") return handleMessageDiscovery(req, res, messageDiscovery);
       if (req.method === "POST" && url.pathname === "/api/message-discovery-unresolved") return handleInboundOpportunityResolution(req, res, db);
       if (req.method === "POST" && url.pathname === "/api/analyze-job") return handleJobAnalysisRetry(req, res, { db, root, modelConfig: getRuntimeModel("batch_screening"), modelReady: modelReady("batch_screening"), logger, requestId, analysisRetryRunnerFactory });
@@ -4296,6 +4302,10 @@ async function handleCommunicationProfile(req, res, service) {
       service.saveFact({ profileId, factKey: params.factKey, factValue: params.factValue });
     } else if (action === "delete_fact") {
       service.deleteFact({ profileId, factKey: params.factKey });
+    } else if (action === "revise_evidence") {
+      service.reviseEvidence({ profileId, id: params.evidenceId, subject: params.subject, text: params.text });
+    } else if (action === "withdraw_evidence") {
+      service.withdrawEvidence({ profileId, id: params.evidenceId });
     } else {
       throw Object.assign(new Error("communication profile action is invalid"), {
         code: "COMMUNICATION_PROFILE_ACTION_INVALID"

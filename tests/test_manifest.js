@@ -1,4 +1,5 @@
 const all = Object.freeze([
+  "candidate_learning_journey.js",
   "candidate_evidence_smoke.js",
   "self_check.js",
   "windows_installer_smoke.js",
@@ -227,6 +228,7 @@ const groups = Object.freeze({
   "activity_status_smoke.js"
 ]),
   integration: Object.freeze([
+  "candidate_learning_journey.js",
   "browser_transport_smoke.js",
   "cdp_focus_scope_smoke.js",
   "browser_supervisor_smoke.js",

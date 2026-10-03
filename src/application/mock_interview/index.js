@@ -1,11 +1,14 @@
 const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCandidateResumeDocument } = require("../../storage/candidate_store");
 const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
+const { listCandidateEvidence, saveCandidateEvidence } = require("../../storage/candidate_evidence_store");
+const { selectRelevantCandidateMaterial } = require("../../core/candidate_evidence");
 const { listDecisionPool } = require("../../storage/job_store");
 const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
   answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry } = require("../../storage/mock_interview_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   normalizeInterviewSettings,
+  buildInterviewBrief,
   buildResumeInterviewEvidenceCatalog,
   projectInterviewFacts,
   validateInterviewStep,
@@ -22,6 +25,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     answerTurn,
     finishSession,
     retryTurn,
+    confirmEvidence,
     getSession,
     listSessions,
     dashboard
@@ -43,6 +47,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const step = validateInterviewStep(rawStep, {
       turns: [],
       resumeEvidenceCatalog: context.resumeEvidenceCatalog,
+      interviewBrief: context.interviewBrief,
       sessionKind: context.sessionKind
     });
     const session = createMockInterviewSession(db, {
@@ -90,6 +95,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const step = validateInterviewStep(rawStep, {
       turns,
       resumeEvidenceCatalog: session.context.resumeEvidenceCatalog,
+      interviewBrief: session.context.interviewBrief,
       sessionKind: session.context.sessionKind
     });
     const plannedQuestions = Number(session.settings.plannedQuestions);
@@ -176,6 +182,22 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     return recordMockInterviewRetry(db, { profileId, planId, sessionId, turnNumber, answerText, review });
   }
 
+  function confirmEvidence(input = {}) {
+    const session = getSession(input);
+    if (!session) throw serviceError("MOCK_INTERVIEW_NOT_FOUND", "面试会话不存在");
+    const turn = session.turns.find(turn => turn.turnNumber === Number(input.turnNumber));
+    const retry = input.retryId ? turn?.retries.find(retry => retry.id === Number(input.retryId)) : null;
+    const sourceAnswer = input.retryId ? retry?.answerText : turn?.answerText;
+    const quote = requiredText(input.sourceQuote, "来源原话", 20_000);
+    if (!sourceAnswer || !sourceAnswer.includes(quote)) throw serviceError("MOCK_INTERVIEW_EVIDENCE_INVALID", "请从这道题的真实回答中选择来源原话");
+    return saveCandidateEvidence(db, {
+      profileId: session.profileId, subject: requiredText(input.subject, "经历主题", 160),
+      text: requiredText(input.text, "真实经历", 8000), sourceKind: 'interview_turn', sourceId: String(session.id),
+      sourceItemKey: retry ? `retry:${retry.id}` : `turn:${turn.turnNumber}`, sourceQuote: quote,
+      scope: { kind: 'global', key: '' }
+    });
+  }
+
   function getSession({ profileId, planId, sessionId } = {}) {
     return hydrateSessionContext(getMockInterviewSession(db, {
       profileId: requiredId(profileId, "profileId"),
@@ -200,6 +222,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       .map(hydrateSessionContext);
     return {
       profile: getCandidateProfile(db, profile),
+      candidateEvidence: listCandidateEvidence(db, { profileId: profile }),
       plan,
       jobs: listDecisionPool(db, { planId: plan.id }).filter(isCompleteJob),
       resumes: listCandidateResumeVersions(db, profile).filter((resume) => resume.isActive),
@@ -241,8 +264,15 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         ...(session.report.improvements || []),
         ...(session.report.retryRecommendations || []).map((item) => item.reason)
       ]).filter(Boolean).slice(0, 8);
+    const candidateEvidence = selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId }), {
+      query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000
+    });
+    const resumeEvidenceCatalog = buildResumeInterviewEvidenceCatalog(prepared.text);
+    const interviewBrief = buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog, candidateEvidence, priorWeaknesses });
     return {
       sessionKind,
+      candidateEvidence,
+      interviewBrief,
       job: job ? {
         id: Number(job.id),
         title: String(job.title || ""),
@@ -256,7 +286,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         contentHash: resume.contentHash,
         text: prepared.text
       },
-      resumeEvidenceCatalog: buildResumeInterviewEvidenceCatalog(prepared.text),
+      resumeEvidenceCatalog,
       candidateFacts: projectInterviewFacts({
         factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }),
         answerMemories: factMemories,

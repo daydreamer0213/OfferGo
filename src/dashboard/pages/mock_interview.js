@@ -74,6 +74,7 @@ function renderSession(dashboard, session) {
     <div class="interview-session-head"><div><p class="section-label">${completed ? "本轮训练已完成" : "训练进行中"}</p><h2 id="interview-session-title">${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p></div><span class="status ${completed ? "good" : "waiting"}">${completed ? "可复盘和重练" : `第 ${(session.turns || []).length} / ${escapeHtml(session.settings?.plannedQuestions || "-")} 题`}</span></div>
     ${renderBinding(session)}
     ${completed ? renderReport(session) : renderCurrentQuestion(dashboard, session)}
+    ${renderEvidencePanel(dashboard, session)}
     ${pastAnswers}
     ${pastSessions}
   </section>`;
@@ -118,6 +119,15 @@ function renderTranscript(dashboard, session) {
   const planId = dashboard.plan?.id || "";
   if (!turns.length) return "";
   return `<section class="interview-transcript" aria-labelledby="interview-transcript-title"><div class="interview-section-head"><div><p class="section-label">逐题记录</p><h3 id="interview-transcript-title">问题、原回答与复盘</h3></div><span>${turns.length} 题已答</span></div><div class="interview-turn-list">${turns.map((turn) => `<article id="interview-turn-${escapeAttr(turn.turnNumber)}" class="interview-turn"><header><span>Q${escapeHtml(turn.turnNumber)}</span><div><p>${escapeHtml(focusLabel(turn.questionFocus))}</p><h4>${escapeHtml(turn.questionText)}</h4>${renderQuestionEvidence(session, turn)}</div></header><div class="interview-answer"><strong>原回答</strong><p>${escapeHtml(turn.answerText)}</p></div>${renderAnswerReview(turn.answerReview)}${renderRetries(turn.retries)}${session.status === "completed" ? `<form class="interview-retry-form" method="post" action="/api/interview/retry" data-interview-submit data-interview-draft="retry" data-interview-success-target="interview-turn-${escapeAttr(turn.turnNumber)}"><input type="hidden" name="planId" value="${escapeAttr(planId)}"><input type="hidden" name="sessionId" value="${escapeAttr(session.id)}"><input type="hidden" name="turnNumber" value="${escapeAttr(turn.turnNumber)}"><label>重答这题<textarea name="answerText" rows="5" maxlength="20000" required></textarea><small>新回答会与原回答并列保存，不覆盖历史。</small></label><button class="secondary">保存重答并比较</button><p class="alert" data-interview-error role="alert"></p></form>` : ""}</article>`).join("")}</div></section>`;
+}
+
+function renderEvidencePanel(dashboard, session) {
+  const candidates = session.report?.evidenceCandidates || [];
+  const saved = (dashboard.candidateEvidence || []).filter(item => item.sourceKind === 'interview_turn' && item.sourceId === String(session.id));
+  const turns = (session.turns || []).filter(turn => turn.answerText);
+  if (!turns.length) return '';
+  const form = (item, retryId = null) => `<form class="form-stack" method="post" action="/api/interview/evidence" data-interview-submit data-interview-success-target="interview-evidence"><input type="hidden" name="planId" value="${escapeAttr(dashboard.plan.id)}"><input type="hidden" name="sessionId" value="${session.id}"><input type="hidden" name="turnNumber" value="${item.turnNumber}">${retryId ? `<input type="hidden" name="retryId" value="${retryId}">` : ''}<input type="hidden" name="sourceQuote" value="${escapeAttr(item.sourceQuote)}"><label>经历主题<input name="subject" maxlength="160" value="${escapeAttr(item.subject)}" required></label><label>我的真实经历<textarea name="text" maxlength="8000" rows="4" required>${escapeHtml(item.text)}</textarea></label><button>确认并保存这段经历</button><p class="alert" data-interview-error role="alert"></p></form>`;
+  return `<section class="card pad" id="interview-evidence"><h3>把真实经历留给以后的求职沟通</h3><p>确认后，OfferGo 可以在相关的 HR 回复、简历优化和面试训练中参考。练习示范不会自动保存为你的经历。</p>${saved.length ? `<p class="status good">已保存 ${saved.length} 条经历。<a href="/communication-profile?profileId=${session.profileId}">查看、修改或停止使用</a></p>` : ''}${candidates.map(item => `<article class="interview-turn"><p>从第 ${item.turnNumber} 题整理：${escapeHtml(item.sourceQuote)}</p>${form(item)}</article>`).join('')}<details><summary>从已回答的题目中保存其他经历</summary>${turns.map(turn => `<details><summary>第 ${turn.turnNumber} 题：${escapeHtml(turn.questionText)}</summary>${form({ turnNumber: turn.turnNumber, subject: turn.questionFocus || '我的项目经历', sourceQuote: turn.answerText.slice(0, 8000), text: turn.answerText.slice(0, 8000) })}${turn.retries.map(retry => `<details><summary>保存第 ${retry.retryIndex} 次重答中的经历</summary>${form({ turnNumber: turn.turnNumber, subject: turn.questionFocus || '我的项目经历', sourceQuote: retry.answerText.slice(0, 8000), text: retry.answerText.slice(0, 8000) }, retry.id)}</details>`).join('')}</details>`).join('')}</details></section>`;
 }
 
 function renderAnswerReview(review) {

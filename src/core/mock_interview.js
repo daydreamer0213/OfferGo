@@ -103,6 +103,7 @@ function normalizeQuestion(value, evidenceById) {
   const citedEvidence = resumeEvidenceIds.map((evidenceId) => evidenceById.get(evidenceId));
   assertQuestionResponsibilityBoundary(text, citedEvidence);
   return {
+    ...(value.questionKind ? { questionKind: cleanText(value.questionKind, 30, "题目类型") } : {}),
     text,
     focus: cleanText(value.focus, 120, "问题重点"),
     resumeEvidenceIds,
@@ -151,7 +152,14 @@ function validateInterviewStep(raw, context = {}) {
     if (turns.length === 0 && nextQuestion.answerEvidence) {
       throw new Error("首题不能包含上一回答片段");
     }
-    if (turns.length > 0) {
+    if (nextQuestion.questionKind && !["follow_up", "topic_transition"].includes(nextQuestion.questionKind)) {
+      throw new Error("题目类型无效");
+    }
+    const transition = nextQuestion.questionKind === "topic_transition" && context.interviewBrief;
+    if (transition && (nextQuestion.basedOnTurnNumber !== null || nextQuestion.answerEvidence)) {
+      throw new Error("转换主题不能伪造上一回答引用");
+    }
+    if (turns.length > 0 && !transition) {
       const previousTurnNumber = Number(turns[turns.length - 1].turnNumber);
       if (nextQuestion.basedOnTurnNumber !== previousTurnNumber) {
         throw new Error("追问必须引用上一题回答");
@@ -202,6 +210,15 @@ function validateInterviewReport(raw, context = {}) {
   }) : (() => { throw new Error("回答结构格式无效"); })();
   if (answerStructures.length > 12) throw new Error("回答结构过多");
   return {
+    ...(Array.isArray(raw.evidenceCandidates) ? { evidenceCandidates: raw.evidenceCandidates.slice(0, 3).flatMap(item => {
+      const turn = (context.turns || []).find(turn => Number(turn.turnNumber) === Number(item?.turnNumber));
+      const sourceQuote = String(item?.sourceQuote || '').trim();
+      const subject = String(item?.subject || '').trim();
+      const text = String(item?.text || '').trim();
+      if (!turn || !sourceQuote || !String(turn.answerText || turn.answer || '').includes(sourceQuote)
+        || !subject || subject.length > 160 || !text || text.length > 8000) return [];
+      return [{ turnNumber: Number(item.turnNumber), subject, text, sourceQuote }];
+    }) } : {}),
     conclusion: cleanText(raw.conclusion, 3_000, "复盘结论"),
     strengths: boundedTextArray(raw.strengths, "最强项", { maxItems: 3 }),
     improvements: boundedTextArray(raw.improvements, "改进项", { maxItems: 3 }),
@@ -227,7 +244,21 @@ function validateRetryReview(raw, context = {}) {
   };
 }
 
+function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], candidateEvidence = [], priorWeaknesses = [] }) {
+  const generalThemes = ['经历与求职方向', '实际承担的工作', '解决问题与取舍', '协作与沟通', '成果与复盘'];
+  const understanding = job?.analysis?.jobUnderstanding || job?.analysis || {};
+  const jobFocus = job ? {
+    role: understanding.roleSummary || job.analysis?.roleSummary || '',
+    description: job.description,
+    requirements: understanding.requirements || job.analysis?.requirementAssessments || [],
+    matchingEvidence: job.analysis?.evidence || {}
+  } : null;
+  return { sessionKind, generalThemes, jobFocus, resumeEvidenceCatalog, candidateEvidence, priorWeaknesses,
+    coverageRule: '先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。' };
+}
+
 module.exports = {
+  buildInterviewBrief,
   normalizeInterviewSettings,
   buildResumeInterviewEvidenceCatalog,
   projectInterviewFacts,

@@ -27,6 +27,7 @@ function questionInput(value = {}) {
   }
   return {
     text: requiredText(value.text, "问题", 4_000),
+    questionKind: value.questionKind || 'follow_up',
     focus: requiredText(value.focus, "问题重点", 120),
     resumeEvidenceIds,
     basedOnTurnNumber: basedOn == null || basedOn === "" ? null : Number(basedOn),
@@ -191,14 +192,16 @@ function insertQuestionRow(db, sessionId, question, now = nowIso()) {
     WHERE session_id = ? ORDER BY turn_number DESC, id DESC LIMIT 1`).get(sessionId);
   if (previous && !String(previous.answer_text || "").trim()) throw new Error("请先回答当前问题");
   const turnNumber = previous ? Number(previous.turn_number) + 1 : 1;
-  const session = db.prepare("SELECT settings_json FROM mock_interview_sessions WHERE id = ?").get(sessionId);
+  const session = db.prepare("SELECT settings_json, context_json FROM mock_interview_sessions WHERE id = ?").get(sessionId);
   const plannedQuestions = Number(parseJson(session?.settings_json, {})?.plannedQuestions);
   if (!Number.isInteger(plannedQuestions) || turnNumber > plannedQuestions) {
     throw new Error("问题数量不能超过本轮计划题数");
   }
   const expectedBasedOn = previous ? Number(previous.turn_number) : null;
-  if (question.basedOnTurnNumber !== expectedBasedOn) throw new Error("下一题必须承接上一题");
-  if (previous && (!question.answerEvidence
+  const transition = question.questionKind === 'topic_transition' && parseJson(session?.context_json, {}).interviewBrief;
+  if (transition && (question.basedOnTurnNumber !== null || question.answerEvidence)) throw new Error('转换主题不能伪造回答引用');
+  if (!transition && question.basedOnTurnNumber !== expectedBasedOn) throw new Error("下一题必须承接上一题");
+  if (previous && !transition && (!question.answerEvidence
     || !String(previous.answer_text).includes(question.answerEvidence)
     || !question.text.includes(question.answerEvidence))) {
     throw new Error("下一题必须包含上一回答的真实片段");
