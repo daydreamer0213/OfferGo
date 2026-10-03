@@ -82,7 +82,9 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       answer: item.turnNumber === turnNumber ? answerText : item.answerText,
       answerReview: item.answerReview
     }));
-    const step = await generateStep(refreshSupplementalContext(session), session.settings, turns);
+    const step = await generateStep(refreshSupplementalContext(session, {
+      query: `${turn.questionText}\n${answerText}`
+    }), session.settings, turns);
     const plannedQuestions = Number(session.settings.plannedQuestions);
     if (turns.length < plannedQuestions && step.complete) {
       throw serviceError("MOCK_INTERVIEW_STEP_TOO_EARLY", "模型在达到计划题数前结束了面试，本次回答未保存");
@@ -121,7 +123,9 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         throw serviceError("MOCK_INTERVIEW_INCOMPLETE", "当前训练还没有达到计划题数");
       }
       const rawReport = await adapter.reviewMockInterview({
-        context: refreshSupplementalContext(session),
+        context: refreshSupplementalContext(session, {
+          query: session.turns.map((turn) => `${turn.questionText}\n${turn.answerText}`).join('\n')
+        }),
         settings: session.settings,
         turns: modelTurns(session.turns)
       });
@@ -152,7 +156,9 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     if (existingRetry?.answerText === answerText) return existingRetry;
     requireAdapterMethod("reviewMockInterviewRetry");
     const rawReview = await adapter.reviewMockInterviewRetry({
-      context: refreshSupplementalContext(session),
+      context: refreshSupplementalContext(session, {
+        query: `${turn.questionText}\n${answerText}`
+      }),
       settings: session.settings,
       turn: {
         turnNumber: turn.turnNumber,
@@ -272,10 +278,10 @@ function createMockInterviewService({ db, adapter = null } = {}) {
   }
 
   // Keep this interview's resume/JD stable without freezing records the user can revoke.
-  function refreshSupplementalContext(session) {
+  function refreshSupplementalContext(session, { query } = {}) {
     const context = session.context;
     const job = context.job || {};
-    const query = job.description || context.resume?.text;
+    query = query || job.description || context.resume?.text;
     const allEvidence = listCandidateEvidence(db, { profileId: session.profileId });
     const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, { query, job, limit: 12, maxChars: 12000 });
     return {

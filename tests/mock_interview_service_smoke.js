@@ -570,6 +570,69 @@ const db = storage.openDb(":memory:");
       assert(!JSON.stringify(input.context.interviewBrief).includes('通过日志定位知识库接口超时'));
     }
     assert.strictEqual(db.prepare('SELECT context_json FROM mock_interview_sessions WHERE id = ?').get(live.id).context_json, frozenRow);
+
+    // An older collaboration story must return when the actual answer changes the interview topic.
+    const collaboration = evidenceStore.saveCandidateEvidence(db, { profileId: owner.profileId,
+      subject: '跨团队协作', text: '我和设计同事协作分工，每天同步进度，一起完成客户演示。',
+      sourceKind: 'manual', sourceId: 'topic-context', sourceItemKey: 'collaboration',
+      sourceQuote: '和设计同事协作分工并同步进度', scope: { kind: 'global', key: '' } });
+    for (let index = 0; index < 13; index += 1) {
+      evidenceStore.saveCandidateEvidence(db, { profileId: owner.profileId,
+        subject: `Node.js 知识库技术经历 ${index}`, text: `负责 Node.js 企业知识库应用开发、检索评估和接口交付 ${index}。`,
+        sourceKind: 'manual', sourceId: 'topic-context', sourceItemKey: `technical-${index}`,
+        sourceQuote: `知识库检索评估 ${index}`, scope: { kind: 'global', key: '' } });
+    }
+    const topicCalls = [];
+    const topicService = createMockInterviewService({ db, adapter: { ...adapter,
+      async generateMockInterviewStep(input) {
+        topicCalls.push({ kind: 'step', input: JSON.parse(JSON.stringify(input)) });
+        const step = await adapter.generateMockInterviewStep(input);
+        if (!input.turns.length) {
+          step.nextQuestion.text = '请讲一次你与同事协作完成任务的经历。';
+          step.nextQuestion.focus = 'collaboration';
+        }
+        return step;
+      },
+      async reviewMockInterview(input) {
+        topicCalls.push({ kind: 'report', input: JSON.parse(JSON.stringify(input)) });
+        return adapter.reviewMockInterview(input);
+      },
+      async reviewMockInterviewRetry(input) {
+        topicCalls.push({ kind: 'retry', input: JSON.parse(JSON.stringify(input)) });
+        return adapter.reviewMockInterviewRetry(input);
+      }
+    } });
+    const topicSession = await topicService.startSession({ profileId: owner.profileId, planId: owner.planId,
+      resumeVersionId: owner.resumeVersionId, sessionKind: 'job_specific', jobId, settings: { plannedQuestions: 3 } });
+    const topicInput = { profileId: owner.profileId, planId: owner.planId, sessionId: topicSession.id };
+    assert(!topicCalls[0].input.context.candidateEvidence.some(item => item.id === collaboration.id),
+      'frozen JD alone leaves the older collaboration story outside the twelve selected records');
+    await topicService.answerTurn({ ...topicInput, turnNumber: 1,
+      answerText: '我与设计同事协作分工，每天同步进度，共同完成客户演示。' });
+    const collaborationStep = topicCalls.filter(call => call.kind === 'step').at(-1).input;
+    assert(collaborationStep.context.candidateEvidence.some(item => item.id === collaboration.id),
+      'the next model input must include the older story relevant to the current collaboration answer');
+    assert(collaborationStep.context.job.description.includes('检索评估'), 'the complete JD remains available');
+    assert.deepStrictEqual(collaborationStep.context.resume, topicSession.context.resume, 'the frozen resume remains available');
+    assert(collaborationStep.context.candidateEvidence.length <= 12);
+    await topicService.answerTurn({ ...topicInput, turnNumber: 2, answerText: '我继续说明了跨团队协作的分工过程。' });
+    await topicService.answerTurn({ ...topicInput, turnNumber: 3, answerText: '我回顾了与同事沟通并完成演示的结果。' });
+    await topicService.finishSession(topicInput);
+    const topicReport = topicCalls.find(call => call.kind === 'report').input;
+    assert(topicReport.context.candidateEvidence.some(item => item.id === collaboration.id),
+      'round review must select material from the answered questions and answers');
+    assert(topicReport.context.job.description.includes('检索评估'));
+
+    const retryStory = evidenceStore.saveCandidateEvidence(db, { profileId: owner.profileId,
+      subject: '用户培训', text: '我给客户做了系统操作培训，现场回答使用问题。',
+      sourceKind: 'manual', sourceId: 'topic-context', sourceItemKey: 'retry',
+      sourceQuote: '客户操作培训', scope: { kind: 'global', key: '' } });
+    await topicService.retryTurn({ ...topicInput, turnNumber: 1,
+      answerText: '我与设计同事协作演示，还给客户做了系统操作培训。' });
+    const topicRetry = topicCalls.find(call => call.kind === 'retry').input;
+    assert(topicRetry.context.candidateEvidence.some(item => item.id === retryStory.id),
+      'retry review must use the new answer to select relevant material');
+    assert.deepStrictEqual(topicRetry.context.resume, topicSession.context.resume);
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();
