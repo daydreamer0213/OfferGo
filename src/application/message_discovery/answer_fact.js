@@ -1,4 +1,4 @@
-const { getCandidateProfile, listCandidateFacts } = require("../../storage/candidate_store");
+const { getCandidateProfile, listCandidateFacts, saveCandidateFact } = require("../../storage/candidate_store");
 const {
   recordMessageReplyDrafts
 } = require("../../storage/message_learning_store");
@@ -7,7 +7,8 @@ const {
 } = require("../../storage/message_reply_send_store");
 const {
   getDurableMessageDraftContext,
-  getMessageGroupClassification
+  getMessageGroupClassification,
+  updateMessageGroupFactRequest
 } = require("../../storage/message_discovery_store");
 const { messageReplyProfile } = require("../../core/message_discovery");
 const { candidateReplyMaterial } = require('./materials');
@@ -51,6 +52,7 @@ async function answerMissingMessageFact({
     throw answerFactError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "message fact context is unavailable", 409);
   }
   const answeredAt = now();
+  saveCandidateFact(db, { profileId: profile, factKey: key, factValue: answer, source: "user_provided" });
   const facts = listCandidateFacts(db, profile)
     .filter((fact) => fact.factKey !== key)
     .concat([{ factKey: key, factValue: answer, source: "user_provided", updatedAt: answeredAt }]);
@@ -74,6 +76,10 @@ async function answerMissingMessageFact({
     facts,
     now: answeredAt
   }, { signal });
+  if (result?.missingFact?.key && result.missingFact.question) {
+    updateMessageGroupFactRequest(db, { profileId: profile, cardId: card, messageGroupKey: groupKey, missingFact: result.missingFact });
+    return { drafts: [], missingFact: result.missingFact };
+  }
   const drafts = result?.missingFact || !Array.isArray(result?.messages) || !result.messages.length
     ? []
     : recordMessageReplyDrafts(db, {
@@ -90,6 +96,7 @@ async function answerMissingMessageFact({
   if (!drafts.length) {
     throw answerFactError("MESSAGE_DISCOVERY_DRAFT_NOT_GENERATED", "reply draft was not generated after saving the fact", 409);
   }
+  updateMessageGroupFactRequest(db, { profileId: profile, cardId: card, messageGroupKey: groupKey });
   return { drafts };
 }
 

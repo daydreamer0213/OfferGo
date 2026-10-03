@@ -685,6 +685,16 @@ const MIGRATIONS = [
     version: 36,
     name: "confirmed_candidate_evidence_v1",
     apply(db) { db.exec(CANDIDATE_EVIDENCE_SCHEMA); }
+  },
+  {
+    version: 37,
+    name: 'resume_optimization_modes_v1',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(resume_optimizations)').all();
+      if (!columns.some(column => column.name === 'optimization_mode')) {
+        db.exec("ALTER TABLE resume_optimizations ADD COLUMN optimization_mode TEXT NOT NULL DEFAULT 'direction' CHECK(optimization_mode IN ('general','job_specific','direction'))");
+      }
+    }
   }
 ];
 

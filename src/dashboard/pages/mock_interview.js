@@ -17,8 +17,8 @@ function renderMockInterviewPage({ dashboard = {}, modelReady = true } = {}) {
       <section class="page-heading interview-heading" aria-labelledby="interview-title">
         <p class="eyebrow">阶段四 · 简历通用训练优先</p>
         <h1 id="interview-title">模拟面试训练</h1>
-        <p class="lede">无需面试邀请：默认直接基于当前简历练习每位面试官都可能追问的内容；有合适岗位时，也可以切换到岗位专项面试。追问会承接你的上一条回答，结束后再做具体到题号的复盘和重练。</p>
-        <div class="heading-meta"><span>${escapeHtml(plan.name || "当前筛选方案")}</span><span>本地文字练习</span><span>不会写入候选人事实</span></div>
+        <p class="lede">无需面试邀请：默认直接基于当前简历练习每位面试官都可能追问的内容；有合适岗位时，也可以切换到岗位专项面试。根据回答适当追问，也会切换主题，结束后再做具体到题号的复盘和重练。</p>
+        <div class="heading-meta"><span>${escapeHtml(plan.name || "当前筛选方案")}</span><span>本地文字练习</span><span>真实经历由你确认保存</span></div>
       </section>
       ${selected ? `<details class="interview-new-session"><summary>开始另一轮训练</summary>${renderStartPanel(dashboard, modelReady)}</details>` : renderStartPanel(dashboard, modelReady)}
       ${selected ? renderSession(dashboard, selected) : renderEmptyState()}
@@ -52,7 +52,7 @@ function renderStartPanel(dashboard, modelReady) {
 }
 
 function renderEmptyState() {
-  return `<section class="card pad interview-empty"><p class="section-label">还没有训练记录</p><h2>先从上方开始一轮</h2><p>通用训练的首题会直接使用当前简历；从第二题起，问题会继续承接你刚刚写下的回答。</p></section>`;
+  return `<section class="card pad interview-empty"><p class="section-label">还没有训练记录</p><h2>先从上方开始一轮</h2><p>通用训练的首题会直接使用当前简历；后续会结合回答继续追问或切换到其他重要主题。</p></section>`;
 }
 
 function renderSession(dashboard, session) {
@@ -185,7 +185,7 @@ function difficultyLabel(value) {
 }
 
 function focusLabel(value) {
-  return { intro: "自我介绍", motivation: "岗位动机", project: "项目深挖", technical: "技术 / 业务", behavioral: "行为问题", pressure: "压力追问", questions: "反问" }[value] || value || "岗位问题";
+  return { general: "求职方向与沟通", contribution: "个人贡献", intro: "自我介绍", motivation: "岗位动机", project: "项目深挖", technical: "技术 / 业务", behavioral: "行为问题", pressure: "压力追问", questions: "反问" }[value] || value || "岗位问题";
 }
 
 const MOCK_INTERVIEW_SCRIPT = `<script>(()=>{const reveal=()=>{const target=location.hash&&document.getElementById(location.hash.slice(1));if(target)setTimeout(()=>target.scrollIntoView({block:'start'}),0);};if(document.readyState==='complete')reveal();else addEventListener('load',reveal,{once:true});const start=document.querySelector('.interview-start-form');if(start){const panel=start.querySelector('[data-interview-job-panel]');const job=panel&&panel.querySelector('select[name="jobId"]');const sync=()=>{const selected=start.querySelector('input[name="sessionKind"]:checked');const specific=selected&&selected.value==='job_specific';if(panel)panel.hidden=!specific;if(job){job.disabled=!specific;job.required=!!specific;}};for(const radio of start.querySelectorAll('input[name="sessionKind"]'))radio.addEventListener('change',sync);sync();}const storage={get:(key)=>{try{return localStorage.getItem(key)}catch{return null}},set:(key,value)=>{try{localStorage.setItem(key,value)}catch{}},remove:(key)=>{try{localStorage.removeItem(key)}catch{}}};const navigate=(url,target)=>{const base=String(url||'').split('#')[0];const destination=base+(target?'#'+target:'');if(location.href.split('#')[0]===base){location.hash=target;location.reload();}else location.assign(destination);};for(const form of document.querySelectorAll('[data-interview-submit]')){const field=form.querySelector('textarea[name="answerText"]');const kind=form.dataset.interviewDraft||'';const sessionId=form.elements.sessionId?.value||'';const turnNumber=form.elements.turnNumber?.value||'';const key=field&&kind&&sessionId&&turnNumber?'roleflow:interview-draft:'+sessionId+':'+turnNumber+':'+kind:'';if(key&&!field.value){const saved=storage.get(key);if(saved!==null)field.value=saved;}if(key)field.addEventListener('input',()=>storage.set(key,field.value));form.addEventListener('submit',async(event)=>{event.preventDefault();const button=event.submitter||form.querySelector('button');const label=button?.textContent||'';const error=form.querySelector('[data-interview-error]');if(error)error.textContent='';if(button){button.disabled=true;button.textContent='处理中…';}try{const response=await fetch(form.action,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});if(!response.ok){const text=await response.text();let message='操作失败，请稍后重试。';try{message=JSON.parse(text).error||message}catch{}throw new Error(message);}if(key)storage.remove(key);navigate(response.url||form.action,form.dataset.interviewSuccessTarget||'');}catch(failure){if(error)error.textContent=failure.message||'操作失败，请稍后重试。';if(button){button.disabled=false;button.textContent=label;}}});}})();</script>`;

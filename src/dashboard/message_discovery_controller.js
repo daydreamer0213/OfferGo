@@ -514,7 +514,12 @@ function createMessageDiscoveryController(deps = {}) {
       }),
       now: () => nowDate().toISOString()
     });
-    return { statusCode: 200, body: { status: "completed", draftCount: result.drafts.length } };
+    const run = runs.get(profileId);
+    if (run) run.results = run.results.map(item => Number(item.cardId) === Number(input.cardId)
+      && item.messageGroupKey === input.messageGroupKey
+      ? { ...item, missingFactKey: result.missingFact?.key || "", missingFactQuestion: result.missingFact?.question || "", drafts: result.drafts }
+      : item);
+    return { statusCode: 200, body: { status: result.missingFact ? "needs_fact" : "completed", draftCount: result.drafts.length } };
   }
 
   function clearDraftForCard(profileIdValue, cardIdValue) {

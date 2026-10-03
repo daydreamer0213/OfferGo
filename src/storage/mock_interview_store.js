@@ -203,7 +203,7 @@ function insertQuestionRow(db, sessionId, question, now = nowIso()) {
   if (!transition && question.basedOnTurnNumber !== expectedBasedOn) throw new Error("下一题必须承接上一题");
   if (previous && !transition && (!question.answerEvidence
     || !String(previous.answer_text).includes(question.answerEvidence)
-    || !question.text.includes(question.answerEvidence))) {
+    || (!parseJson(session?.context_json, {}).interviewBrief && !question.text.includes(question.answerEvidence)))) {
     throw new Error("下一题必须包含上一回答的真实片段");
   }
   if (!previous && question.answerEvidence) throw new Error("首题不能包含上一回答片段");

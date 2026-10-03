@@ -167,7 +167,7 @@ function validateInterviewStep(raw, context = {}) {
       const previousAnswer = String(turns[turns.length - 1].answer || "");
       if (!nextQuestion.answerEvidence
         || !previousAnswer.includes(nextQuestion.answerEvidence)
-        || !nextQuestion.text.includes(nextQuestion.answerEvidence)) {
+        || (!context.interviewBrief && !nextQuestion.text.includes(nextQuestion.answerEvidence))) {
         throw new Error("追问必须用上一题回答中的真实回答片段承接");
       }
     }

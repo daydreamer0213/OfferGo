@@ -31,16 +31,16 @@ function renderResumeOptimizationPage({ dashboard = {}, modelReady = true } = {}
     currentPath,
     todayPath,
     planId,
-    stage: "定向简历",
+    stage: "简历优化",
     brandHref: todayPath,
     content: `<main id="main-content" class="resume-opt-main">
       <section class="page-heading" aria-labelledby="resume-opt-title">
         <p class="eyebrow">阶段三 · 本地材料优化</p>
-        <h1 id="resume-opt-title">定向简历优化</h1>
-        <p class="lede">选择源简历和目标投递方向，OfferGo 会从该方向自动选择代表岗位，直接生成一份可以继续修改的完整草稿。</p>
+        <h1 id="resume-opt-title">简历优化</h1>
+        <p class="lede">把经历写得清楚、好读，也可以针对你想投的岗位调整重点。OfferGo 会生成完整草稿，供你继续修改。</p>
         <div class="heading-meta"><span>${escapeHtml(plan.name || "当前筛选方案")}</span><span>原简历永不覆盖</span></div>
       </section>
-      ${selected ? `<details class="resume-new-draft"><summary>生成另一个定向版本</summary>${renderCreatePanel(dashboard, modelReady)}</details>` : renderCreatePanel(dashboard, modelReady)}
+      ${selected ? `<details class="resume-new-draft"><summary>生成另一个版本</summary>${renderCreatePanel(dashboard, modelReady)}</details>` : renderCreatePanel(dashboard, modelReady)}
       ${selected ? renderSelectedDraft(dashboard, selected) : renderEmptyState()}
     </main><p class="footer-note">本页只读写 OfferGo 本地数据；不会访问 BOSS、不会投递、不会填写或发送任何外部内容。</p>`
   });
@@ -50,32 +50,27 @@ function renderCreatePanel(dashboard, modelReady) {
   const plan = dashboard.plan || {};
   const resumes = dashboard.resumes || [];
   const jobs = dashboard.jobs || [];
-  const directions = dashboard.directions || [];
-  const sampleJobsByDirection = dashboard.sampleJobsByDirection || {};
   const activeResume = resumes.find((resume) => resume.isActive) || resumes[0] || null;
-  const ready = modelReady && resumes.length > 0 && jobs.length > 0 && directions.length > 0;
+  const ready = modelReady && resumes.length > 0;
   return `<section class="card pad resume-opt-create" aria-labelledby="resume-opt-create-title">
-    <div class="resume-opt-section-head"><div><p class="section-label">开始一次优化</p><h2 id="resume-opt-create-title">选择简历与投递方向</h2></div><span class="status ${modelReady ? "good" : "waiting"}">${modelReady ? "深度分析可用" : "模型待配置"}</span></div>
+    <div class="resume-opt-section-head"><div><p class="section-label">开始一次优化</p><h2 id="resume-opt-create-title">这次想怎么调整</h2></div><span class="status ${modelReady ? "good" : "waiting"}">${modelReady ? "深度分析可用" : "模型待配置"}</span></div>
     ${modelReady ? "" : '<p class="alert">当前深度分析模型不可用。<a href="/settings">前往模型设置</a>完成连接后再生成草稿。</p>'}
     <form class="resume-opt-create-form" method="post" action="/api/resume-optimization" data-resume-submit data-resume-success-target="resume-opt-draft-title">
       <input type="hidden" name="planId" value="${escapeAttr(plan.id || "")}">
       <label>源简历版本<select name="sourceResumeVersionId" required>${resumes.map((resume) => `<option value="${escapeAttr(resume.id)}"${activeResume?.id === resume.id ? " selected" : ""}>${escapeHtml(resume.name || "简历版本")}${resume.isActive ? " · 当前使用" : ""}</option>`).join("")}</select></label>
-      <label>目标投递方向<select name="targetDirection" required data-resume-direction-picker><option value="">请选择方向</option>${directions.map((direction) => `<option value="${escapeAttr(direction)}">${escapeHtml(direction)}</option>`).join("")}</select><small>系统会从已有的完整岗位中挑选最多 5 个，尽量覆盖不同公司。</small></label>
-      <section class="resume-opt-sample-preview" aria-live="polite"><h3>本次参考岗位</h3><p data-resume-sample-prompt>生成前可查看本次预计参考的岗位；请先选择投递方向。</p>${directions.map((direction) => {
-        const samples = sampleJobsByDirection[direction] || [];
-        return `<div data-resume-sample-direction="${escapeAttr(direction)}" data-resume-sample-count="${samples.length}" hidden><p class="hint">${samples.length ? `当前预计参考 ${samples.length} 个岗位；生成时会按最新完整资料确定。` : "当前方向没有完整的参考岗位，暂时不能生成。"}</p>${samples.length ? `<div class="resume-opt-selected-jobs">${samples.map((job) => `<article><strong>${escapeHtml(job.title || "未命名岗位")}</strong><span>${escapeHtml(job.company || "公司未记录")}</span></article>`).join("")}</div>` : ""}</div>`;
-      }).join("")}</section>
-      ${jobs.length ? "" : '<p class="muted resume-opt-create-note">当前方案还没有可信的完整 JD，暂时不能生成定向版本。</p>'}
-      <div class="button-row"><button data-resume-create-ready="${ready}"${ready ? "" : " disabled"}>生成完整草稿</button><span class="hint">所有修改通过证据校验后才会保存；失败不会留下半成品。</span></div>
+      <label>优化用途<select name="mode" data-resume-mode-picker><option value="general">整理我的简历</option><option value="job_specific"${jobs.length ? "" : " disabled"}>为这份岗位调整</option></select><small>先把工作内容、个人贡献和结果写清楚；选择岗位后，再突出与它相关的经历。</small></label>
+      <div data-resume-job-panel hidden><label>想投的岗位<select name="jobId" disabled><option value="">请选择岗位</option>${jobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.title || "未命名岗位")} · ${escapeHtml(job.company || "公司未记录")}${job.platform ? ` · ${escapeHtml(job.platform === "boss" ? "BOSS" : job.platform === "zhaopin" ? "智联" : job.platform)}` : ""}</option>`).join("")}</select><small>只参考你选的这份岗位，不混入其他岗位的要求。</small></label></div>
+      ${jobs.length ? "" : '<p class="muted resume-opt-create-note">现在可以直接整理简历。发现完整岗位后，也可以为某一份岗位调整。</p>'}
+      <div class="button-row"><button data-resume-create-ready="${ready}"${ready ? "" : " disabled"}>生成完整草稿</button><span class="hint">生成后可以编辑全文，再启用为新的简历版本。</span></div>
       <p class="alert" data-resume-error role="alert"></p>
     </form>
   </section>${RESUME_SAMPLE_PREVIEW_SCRIPT}`;
 }
 
-const RESUME_SAMPLE_PREVIEW_SCRIPT = `<script>(()=>{const picker=document.querySelector('[data-resume-direction-picker]');const groups=[...document.querySelectorAll('[data-resume-sample-direction]')];const prompt=document.querySelector('[data-resume-sample-prompt]');const button=picker?.form?.querySelector('[data-resume-create-ready]');if(!picker)return;const update=()=>{const selected=groups.find((group)=>group.dataset.resumeSampleDirection===picker.value);for(const group of groups)group.hidden=group!==selected;if(prompt)prompt.hidden=Boolean(selected);if(button)button.disabled=button.dataset.resumeCreateReady!=='true'||!selected||Number(selected.dataset.resumeSampleCount)<1;};picker.addEventListener('change',update);update();})();</script>`;
+const RESUME_SAMPLE_PREVIEW_SCRIPT = `<script>(()=>{const picker=document.querySelector('[data-resume-mode-picker]');if(!picker)return;const form=picker.form;const panel=form.querySelector('[data-resume-job-panel]');const job=form.querySelector('select[name="jobId"]');const button=form.querySelector('[data-resume-create-ready]');const update=()=>{const specific=picker.value==='job_specific';panel.hidden=!specific;job.disabled=!specific;job.required=specific;button.disabled=button.dataset.resumeCreateReady!=='true'||(specific&&!job.value);};picker.addEventListener('change',update);job.addEventListener('change',update);update();})();</script>`;
 
 function renderEmptyState() {
-  return `<section class="card pad resume-opt-empty"><p class="section-label">尚未生成草稿</p><h2>先选择简历和方向</h2><p>OfferGo 会生成一份完整版本，你可以直接在全文上继续修改，不需要逐条确认建议。</p></section>`;
+  return `<section class="card pad resume-opt-empty"><p class="section-label">尚未生成草稿</p><h2>先选择想调整的简历</h2><p>OfferGo 会生成一份完整版本，你可以直接在全文上继续修改，不需要逐条确认建议。</p></section>`;
 }
 
 function renderSelectedDraft(dashboard, draft) {
@@ -85,16 +80,16 @@ function renderSelectedDraft(dashboard, draft) {
   const activated = draft.status === "activated";
   return `<section class="resume-opt-workspace resume-workbench" aria-labelledby="resume-opt-draft-title">
     <div class="resume-opt-conclusion"><div><p class="section-label">当前优化结论</p><h2 id="resume-opt-draft-title">${escapeHtml(draft.headline || "完整定向简历草稿")}</h2></div><span class="status ${activated ? "good" : "waiting"}">${activated ? "已启用新版本" : "可以继续编辑"}</span></div>
-    <dl class="resume-opt-binding"><div><dt>冻结源简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>目标投递方向</dt><dd>${escapeHtml(draft.targetDirection || "历史草稿未记录")}</dd></div><div><dt>模型来源</dt><dd>${escapeHtml([draft.modelIdentity?.provider, draft.modelIdentity?.model].filter(Boolean).join(" · ") || "本地记录")}</dd></div></dl>
+    <dl class="resume-opt-binding"><div><dt>冻结源简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>目标投递方向</dt><dd>${escapeHtml(draft.mode === "general" ? "通用整理" : draft.targetDirection || "历史草稿未记录")}</dd></div><div><dt>模型来源</dt><dd>${escapeHtml([draft.modelIdentity?.provider, draft.modelIdentity?.model].filter(Boolean).join(" · ") || "本地记录")}</dd></div></dl>
     ${draft.draftFormat === "whole_draft" ? renderWholeDraft(dashboard, draft, evidence) : renderLegacyDraft(draft, evidence)}
-    ${renderSelectedJobs(jobs)}
+    ${draft.mode === "general" ? "" : renderSelectedJobs(jobs, draft)}
     ${activated ? renderActivatedNotice(dashboard, draft) : ""}
     ${renderHistory(dashboard, draft)}
   </section>`;
 }
 
-function renderSelectedJobs(jobs) {
-  return `<section class="card pad resume-opt-jobs" aria-labelledby="resume-opt-jobs-title"><p class="section-label">本次参考岗位</p><h2 id="resume-opt-jobs-title">系统自动选择的代表样本</h2><div class="resume-opt-selected-jobs">${jobs.length ? jobs.map((job) => `<article><strong>${escapeHtml(job.title || "未命名岗位")}</strong><span>${escapeHtml(job.company || "公司未记录")}</span></article>`).join("") : '<p class="muted">历史草稿的岗位记录仍保留在本地。</p>'}</div></section>`;
+function renderSelectedJobs(jobs, draft = {}) {
+  return `<section class="card pad resume-opt-jobs" aria-labelledby="resume-opt-jobs-title"><p class="section-label">本次参考岗位</p><h2 id="resume-opt-jobs-title">${draft.mode === "job_specific" ? "你选择的岗位" : "系统自动选择的代表样本"}</h2><div class="resume-opt-selected-jobs">${jobs.length ? jobs.map((job) => `<article><strong>${escapeHtml(job.title || "未命名岗位")}</strong><span>${escapeHtml(job.company || "公司未记录")}</span></article>`).join("") : '<p class="muted">历史草稿的岗位记录仍保留在本地。</p>'}</div></section>`;
 }
 
 function renderWholeDraft(dashboard, draft, evidence) {
@@ -110,6 +105,7 @@ function renderWholeDraft(dashboard, draft, evidence) {
 }
 
 function publicResumeIntegrityIssues(integrity = {}) {
+  integrity = integrity || {};
   const result = [];
   const seen = new Set();
   for (const [level, items] of [["error", integrity.errors], ["warning", integrity.warnings]]) {

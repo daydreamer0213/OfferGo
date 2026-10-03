@@ -1,6 +1,8 @@
 const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, listCandidateFacts,
   getCandidateResumeDocument } = require("../../storage/candidate_store");
 const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
+const { listCandidateEvidence } = require('../../storage/candidate_evidence_store');
+const { selectRelevantCandidateMaterial } = require('../../core/candidate_evidence');
 const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
 const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
   saveResumeOptimizationDraft, activateResumeOptimization } = require("../../storage/resume_optimization_store");
@@ -31,12 +33,23 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     const profileId = requiredId(input.profileId, "profileId");
     const plan = ownedPlan(profileId, input.planId);
     const source = ownedSource(profileId, input.sourceResumeVersionId);
-    const targetDirection = ownedDirection(plan, input.targetDirection);
-    const jobs = selectRepresentativeResumeJobs(
-      listDecisionPool(db, { planId: plan.id }).filter(isCompleteJob),
-      { targetDirection, limit: 5 }
-    );
-    if (!jobs.length) {
+    const mode = input.mode || 'direction';
+    if (!['general', 'job_specific', 'direction'].includes(mode)) throw serviceError('RESUME_OPTIMIZATION_MODE_INVALID', '请选择简历优化方式');
+    let targetDirection = '';
+    let jobs = [];
+    if (mode !== 'general') {
+      const pool = listDecisionPool(db, { planId: plan.id }).filter(isCompleteJob);
+      if (mode === 'job_specific') {
+        const selected = pool.find(job => job.id === requiredId(input.jobId, 'jobId'));
+        if (!selected) throw serviceError('RESUME_OPTIMIZATION_JOB_NOT_OWNED', '请选择当前方案中资料完整的岗位');
+        jobs = [selected];
+        targetDirection = selected.title;
+      } else {
+        targetDirection = ownedDirection(plan, input.targetDirection);
+        jobs = selectRepresentativeResumeJobs(pool, { targetDirection, limit: 5 });
+      }
+    }
+    if (mode !== 'general' && !jobs.length) {
       throw serviceError("RESUME_OPTIMIZATION_NO_COMPLETE_JD", "当前方向还没有可核验的完整岗位信息，暂时不能生成定向简历");
     }
     if (!adapter || typeof adapter.generateResumeOptimization !== "function") {
@@ -52,11 +65,15 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       strict: true
     });
     const facts = listCandidateFacts(db, profileId);
+    const query = jobs.map(job => job.description).join('\n') || prepared.text;
+    const candidateEvidence = selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId }), {
+      query, job: jobs[0] || {}, limit: 12, maxChars: 16000
+    });
     const answers = applicableAnswers(listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: true,
       source: "user_edited_reply",
-      limit: 100
+      limit: 500
     }), jobs);
     const funnelDiagnosis = compactDiagnosis(funnelAnalysis.getDashboard({ profileId, planId: plan.id }));
     const evidenceCatalog = buildResumeEvidenceCatalog({
@@ -64,9 +81,12 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       jobs,
       facts,
       answerMemories: answers,
+      candidateEvidence,
       diagnosis: funnelDiagnosis
     });
     const modelInput = {
+      mode,
+      candidateEvidence,
       sourceResume: {
         id: source.id,
         documentId: source.documentId,
@@ -87,6 +107,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     });
     const generatedText = renderOptimizedResume(source.text, validated.suggestions);
     return createResumeOptimization(db, {
+      mode,
       profileId,
       planId: plan.id,
       sourceResumeVersionId: source.id,
@@ -153,7 +174,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       optimizationId: owned.id,
       finalText,
       version: {
-        name: owned.targetDirection ? `${owned.targetDirection}定向版` : "定向简历",
+        name: owned.mode === 'general' ? '通用整理版' : owned.targetDirection ? `${owned.targetDirection}定向版` : "定向简历",
         targetRoles: owned.targetDirection ? [owned.targetDirection] : [],
         summary: owned.headline || "基于目标岗位证据生成并由用户确认的定向版本。"
       }
@@ -199,7 +220,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       profileId: draft.profileId,
       activeOnly: true,
       source: "user_edited_reply",
-      limit: 100
+      limit: 500
     }), integrityJobs(draft.targetJobIds));
     return validateResumeActivationText({
       sourceText: source.text,
@@ -207,6 +228,9 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       finalText,
       candidateName: profile?.profile?.candidate?.name || profile?.displayName || "",
       facts: listCandidateFacts(db, draft.profileId),
+      candidateEvidence: selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: draft.profileId }), {
+        query: finalText, job: integrityJobs(draft.targetJobIds)[0] || {}, limit: 12, maxChars: 16000
+      }),
       answerMemories: answers,
       suggestions: draft.changeLedger
     });

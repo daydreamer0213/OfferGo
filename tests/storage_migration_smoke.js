@@ -94,10 +94,11 @@ try {
       { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1", backup_path: null },
       { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1", backup_path: null },
       { version: MESSAGE_PLATFORM_ACTION_VERSION, name: "message_platform_actions_v1", backup_path: null },
-      { version: 36, name: "confirmed_candidate_evidence_v1", backup_path: null }
+      { version: 36, name: "confirmed_candidate_evidence_v1", backup_path: null },
+      { version: 37, name: "resume_optimization_modes_v1", backup_path: null }
     ]
   );
-  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "confirmed_candidate_evidence_v1");
+  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "resume_optimization_modes_v1");
   assert.strictEqual(freshMigrations[freshMigrations.length - 1].version, SCHEMA_VERSION);
   assert(db.prepare("PRAGMA table_info(resume_optimizations)").all()
     .some((column) => column.name === "plan_id"));
@@ -254,7 +255,7 @@ try {
   assert(SCHEMA_VERSION >= 3);
   assert.strictEqual(SHARED_BOSS_PACING_VERSION, 16);
   assert.strictEqual(MESSAGE_REPLY_LEARNING_VERSION, 17);
-  assert.strictEqual(SCHEMA_VERSION, 36);
+  assert.strictEqual(SCHEMA_VERSION, 37);
   assert.strictEqual(
     db.prepare("SELECT count(*) AS n FROM workspace_platform_preferences").get().n,
     0,
@@ -795,7 +796,8 @@ try {
       { version: MESSAGE_TIMELINE_VERSION, name: "message_timeline_v1" },
       { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1" },
       { version: MESSAGE_PLATFORM_ACTION_VERSION, name: "message_platform_actions_v1" },
-      { version: 36, name: "confirmed_candidate_evidence_v1" }
+      { version: 36, name: "confirmed_candidate_evidence_v1" },
+      { version: 37, name: "resume_optimization_modes_v1" }
     ]
   );
   assert.strictEqual(db.prepare("SELECT source FROM keyword_sources WHERE keyword = 'v1-preserved'").get().source, "migration-smoke");

@@ -2738,6 +2738,7 @@ async function durableMissingFactRecoverySmoke() {
     assert.match(markup, /value="answer_fact"/);
     assert.match(markup, /生成回复草稿/);
     assert.doesNotMatch(markup, /这条消息仍在等待你处理/);
+    let factAttempts = 0;
     const answering = createMessageDiscoveryController({
       db: durableDb,
       modelReady: () => true,
@@ -2745,6 +2746,13 @@ async function durableMissingFactRecoverySmoke() {
       createAnalyzer: () => async (input) => {
         assert(input.facts.some((fact) => fact.factKey === "availability_date"
           && fact.factValue === "本周工作日下午都方便电话沟通"));
+        factAttempts += 1;
+        if (factAttempts === 1) return {
+          messageIntent: "information_request", messageCategory: "salary",
+          messageSummary: "确认薪资和时间", missingFact: { key: "expected_salary", question: "你期望的薪资范围是多少？" },
+          messages: [], progressUpdate: { stage: "needs_user_action" }
+        };
+        assert(input.facts.some(fact => fact.factKey === "expected_salary" && fact.factValue === "15–20K"));
         return {
           messageIntent: "interview_invitation",
           messageCategory: "availability",
@@ -2762,7 +2770,12 @@ async function durableMissingFactRecoverySmoke() {
       factKey: "availability_date",
       factValue: "本周工作日下午都方便电话沟通"
     });
-    assert.strictEqual(answered.body.status, "completed");
+    assert.strictEqual(answered.body.status, 'needs_fact');
+    assert.strictEqual(answering.pageState(profileId).results[0].missingFactKey, 'expected_salary');
+    const facts = require('../src/storage/candidate_store').listCandidateFacts(durableDb, profileId);
+    assert(facts.some(fact => fact.factKey === 'availability_date' && fact.factValue === '本周工作日下午都方便电话沟通'));
+    const second = await answering.answerFact({ profileId, cardId: card.id, messageGroupKey, factKey: 'expected_salary', factValue: '15–20K' });
+    assert.strictEqual(second.body.status, 'completed');
     const answeredResult = answering.pageState(profileId).results[0];
     assert.strictEqual(answeredResult.missingFactKey, "");
     assert.strictEqual(answeredResult.drafts[0].text, "您好，本周工作日下午我都方便电话沟通，请问您哪天合适？");

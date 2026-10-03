@@ -48,6 +48,7 @@ function buildResumeEvidenceCatalog(input = {}) {
   addEvidence(items, "J", "job", input.jobs, (job = {}) => [job.title, job.company, job.description || job.jdText].filter(Boolean).join("｜"));
   addEvidence(items, "F", "fact", input.facts, (fact = {}) => [fact.key || fact.factKey, fact.value || fact.factValue].filter(Boolean).join("："));
   addEvidence(items, "A", "answer", input.answerMemories, (memory = {}) => [memory.questionClass, memory.finalText || memory.final_text].filter(Boolean).join("："));
+  addEvidence(items, "E", "candidate_evidence", input.candidateEvidence, item => [item.subject, item.text].filter(Boolean).join('：'));
   if (input.diagnosis) {
     addEvidence(items, "D", "diagnosis", [input.diagnosis], (diagnosis = {}) => {
       if (typeof diagnosis === "string") return diagnosis;
@@ -70,11 +71,17 @@ function numericTokens(text) {
   return String(text ?? "").match(/\d+(?:\.\d+)?%?/g) || [];
 }
 
+function positiveRoleClaim(text, marker) {
+  return String(text || "").split(/[，。；\n]|但是|但|不过/).some(clause =>
+    clause.includes(marker) && !new RegExp(`(?:没有|并未|从未|未曾|不是|并非|未|没|非|不)[^，。；\\n]{0,10}${marker}`).test(clause));
+}
+
 function validateGrounding(suggestion, evidenceText) {
   const missingNumber = numericTokens(suggestion.proposedText).find((token) => !evidenceText.includes(token));
   if (missingNumber) throw new Error(`建议包含没有证据支持的数字：${missingNumber}`);
 
-  const escalatedMarker = STRONG_ROLE_MARKERS.find((marker) => suggestion.proposedText.includes(marker) && !evidenceText.includes(marker));
+  const escalatedMarker = STRONG_ROLE_MARKERS.find(marker => positiveRoleClaim(suggestion.proposedText, marker)
+    && !positiveRoleClaim(evidenceText, marker));
   if (escalatedMarker) throw new Error(`建议扩大了候选人的职责边界：${escalatedMarker}`);
 }
 
@@ -244,6 +251,7 @@ function validateResumeActivationText({
   candidateName = "",
   facts = [],
   answerMemories = [],
+  candidateEvidence = [],
   suggestions = []
 } = {}) {
   const source = String(sourceText || "").trim();
@@ -268,6 +276,7 @@ function validateResumeActivationText({
   }
 
   const evidenceTexts = [source]
+    .concat(candidateEvidence.filter(item => !item.withdrawnAt).map(item => item.text))
     .concat((Array.isArray(facts) ? facts : []).filter(candidateEvidenceItem).map(factEvidenceText))
     .concat((Array.isArray(answerMemories) ? answerMemories : [])
       .filter(candidateEvidenceItem)
@@ -275,6 +284,10 @@ function validateResumeActivationText({
     .filter(Boolean);
   const unsupported = assessMessageDraftQuality({ text: final, recentTexts: [], evidenceTexts }).errors;
   if (unsupported.length || hasUnsupportedResumeTokens(final, evidenceTexts)) {
+    errors.push(issue("RESUME_FACT_UNSUPPORTED"));
+  }
+  if (STRONG_ROLE_MARKERS.some(marker => positiveRoleClaim(final, marker)
+    && !positiveRoleClaim(evidenceTexts.join("\n"), marker))) {
     errors.push(issue("RESUME_FACT_UNSUPPORTED"));
   }
 

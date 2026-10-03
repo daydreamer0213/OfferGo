@@ -463,7 +463,7 @@ class StructuredModelAdapter {
 
   async generateResumeOptimization(input) {
     const prompt = [
-      "你是 OfferGo 的定向简历编辑模块。只根据输入中的 sourceResume、jobs、candidateFacts、answerMemories、funnelDiagnosis 和 evidenceCatalog 提出修改，不执行外部操作。",
+      "你是 OfferGo 的简历编辑模块。只根据输入中的 sourceResume、jobs、candidateFacts、answerMemories、candidateEvidence、funnelDiagnosis 和 evidenceCatalog 提出修改。mode=general 时无需 JD，改善内容结构、可读性、个人贡献和成果表达；适合讲述具体项目时使用背景/任务/行动/结果（STAR），没有已知结果或数字就不补造，不要求每句套模板。mode=job_specific 时只为 jobs[0] 这份具体岗位调整，先理解 JD 核心职责，再突出用户真正相关的经历与能力。mode=direction 是历史方向版，可参考多个 jobs。",
       "返回 JSON：{headline,suggestions:[{id,operation,originalText,proposedText,reason,evidenceIds,editingPrinciple}]}。suggestions 最多 12 条；operation 只能是 replace、remove、insert_after。",
       "editingPrinciple 只能是 relevance_order、contribution_clarity、result_visibility、jd_vocabulary、concision、structure 之一。",
       "originalText 必须逐字复制 sourceResume.text 中唯一存在的一段；不要改写锚点。每条建议至少引用一个 evidenceCatalog 中存在的 ID。",
@@ -479,7 +479,7 @@ class StructuredModelAdapter {
       "你是 OfferGo 的中文模拟面试官。只能使用输入中冻结的 context、settings 和 turns，不能编造候选人经历，也不能执行外部操作。",
       "返回 JSON：{answerReview,nextQuestion,complete}。首题 answerReview 必须为 null；之后 answerReview 为 {conclusion,strengths,improvements,turnNumbers}，必须引用刚回答的题号。",
       "nextQuestion 为 {text,focus,resumeEvidenceIds,basedOnTurnNumber,answerEvidence,questionKind}。每道题必须引用 context.resumeEvidenceCatalog 中 1-4 个真实 ID。首题 basedOnTurnNumber 为 null 且 answerEvidence 为空；context.interviewBrief 存在时，后续题可以为 follow_up 或 topic_transition：follow_up 引用上一题及其真实短片段，text 自然承接该片段；topic_transition 用新的简历/JD考察点，basedOnTurnNumber=null，answerEvidence为空。不带 interviewBrief 的旧会话后续题继续引用上一题及其原话。",
-      "达到 plannedQuestions 后 complete=true 且 nextQuestion=null；未结束时 complete=false 且必须给下一题。",
+      "达到 plannedQuestions 后 complete=true 且 nextQuestion=null；未结束时 complete=false 且必须给下一题。追问的 basedOnTurnNumber 是上一题题号，answerEvidence 逐字引用真实回答，但新会话的问题正文不必逐字重复该片段。",
       "context.sessionKind 为 resume_general 时没有岗位可用，问题围绕简历时间线、角色与贡献、挑战取舍与结果、技能、空档或转型、简历可支持的行为故事；job_specific 必须结合 JD 核心职责和任职要求，对照简历可证明的能力及缺口安排问题。结合 interviewBrief 和已答题覆盖重点，避免整轮只追问一个细节。问题像真人面试官，不重复套句式或机械粘贴原话；已确认 candidateEvidence 可以补充简历没展开的真实经历。",
       "问题必须保留简历中的职责强度：简历写参与、协助或支持时，不能在问题中把参与改成负责、主导、牵头或独立完成。可以中性追问候选人具体承担了哪些部分，但不能先假定其负责或主导。",
       "不得做公司研究、行业浏览或外部题库检索，不得编造事实；不要输出评分或录用概率。",

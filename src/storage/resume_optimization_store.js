@@ -18,9 +18,10 @@ function stringList(value, limit) {
   return [...new Set(items.map((item) => String(item ?? "").trim()).filter(Boolean))].slice(0, limit);
 }
 
-function jobIds(value) {
+function jobIds(value, mode = 'direction') {
   const ids = [...new Set((Array.isArray(value) ? value : []).map((item) => positiveId(item, "targetJobId")))].sort((a, b) => a - b);
-  if (ids.length < 1 || ids.length > 5) throw new Error("定向简历必须绑定 1-5 个目标岗位");
+  if ((mode === 'general' && ids.length !== 0) || (mode === 'job_specific' && ids.length !== 1)
+    || (mode === 'direction' && (ids.length < 1 || ids.length > 5))) throw new Error('简历优化的参考岗位数量与所选方式不一致');
   return ids;
 }
 
@@ -46,6 +47,7 @@ function optimizationRow(row) {
     sourceContentHash: row.source_content_hash,
     sourceText: row.source_text,
     targetDirection: row.target_direction || "",
+    mode: row.optimization_mode || 'direction',
     targetJobIds: parseJson(row.target_job_ids_json, []),
     contextHash: row.context_hash,
     evidenceCatalog: parseJson(row.evidence_json, []),
@@ -79,8 +81,10 @@ function createResumeOptimization(db, input = {}) {
     WHERE rv.id = ? AND rv.profile_id = ?`).get(sourceResumeVersionId, profileId);
   if (!source) throw storageError("RESUME_OPTIMIZATION_SOURCE_NOT_FOUND", "源简历不存在或不属于当前候选人");
 
-  const targetJobIds = jobIds(input.targetJobIds);
-  const targetDirection = boundedText(input.targetDirection, 160, "目标投递方向").trim();
+  const mode = input.mode || 'direction';
+  if (!['general', 'job_specific', 'direction'].includes(mode)) throw new TypeError('简历优化方式无效');
+  const targetJobIds = jobIds(input.targetJobIds, mode);
+  const targetDirection = mode === 'general' ? '' : boundedText(input.targetDirection, 160, "目标投递方向").trim();
   const generatedText = boundedText(input.generatedText, 200_000, "完整简历草稿");
   const evidenceCatalog = Array.isArray(input.evidenceCatalog) ? input.evidenceCatalog : [];
   const suggestions = Array.isArray(input.suggestions) ? input.suggestions : [];
@@ -92,6 +96,7 @@ function createResumeOptimization(db, input = {}) {
     planId,
     sourceResumeVersionId,
     sourceContentHash,
+    mode,
     targetDirection,
     targetJobIds,
     evidenceCatalog
@@ -102,8 +107,8 @@ function createResumeOptimization(db, input = {}) {
     source_content_hash, source_text, target_direction, target_job_ids_json, context_hash,
     evidence_json, headline, suggestions_json, generated_text, final_text, draft_format, status,
     result_resume_document_id, result_resume_version_id, model_identity_json,
-    strategy_round_id, activated_at, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'whole_draft', 'draft', NULL, NULL, ?, NULL, NULL, ?, ?)`).run(
+    strategy_round_id, activated_at, created_at, updated_at, optimization_mode
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'whole_draft', 'draft', NULL, NULL, ?, NULL, NULL, ?, ?, ?)`).run(
     profileId,
     planId,
     sourceResumeVersionId,
@@ -120,7 +125,8 @@ function createResumeOptimization(db, input = {}) {
     generatedText,
     JSON.stringify(input.modelIdentity || {}),
     now,
-    now
+    now,
+    mode
   );
   return getResumeOptimization(db, { profileId, optimizationId: Number(result.lastInsertRowid) });
 }

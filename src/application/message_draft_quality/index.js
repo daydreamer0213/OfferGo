@@ -44,7 +44,7 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     profileId: profile,
     activeOnly: true,
     source: "user_edited_reply",
-    limit: 100
+    limit: 500
   });
   const evidenceTexts = [activeResumeText.trim()]
     .concat(selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: profile }), {

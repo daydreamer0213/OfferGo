@@ -86,6 +86,23 @@ function getMessageGroupClassification(db, { profileId, cardId, messageGroupKey 
   return null;
 }
 
+function updateMessageGroupFactRequest(db, { profileId, cardId, messageGroupKey, missingFact = null } = {}) {
+  const rows = db.prepare(`SELECT events.id, events.metadata_json
+    FROM candidate_progress_events events JOIN candidate_progress_cards cards ON cards.id = events.card_id
+    WHERE cards.profile_id = ? AND cards.id = ? AND events.type = 'message_group_classified'
+    ORDER BY events.occurred_at DESC, events.id DESC`).all(Number(profileId), Number(cardId));
+  for (const row of rows) {
+    const metadata = JSON.parse(row.metadata_json);
+    if (metadata.messageGroupKey !== messageGroupKey) continue;
+    metadata.missingFactKey = String(missingFact?.key || "");
+    metadata.missingFactQuestion = String(missingFact?.question || "");
+    db.prepare("UPDATE candidate_progress_events SET metadata_json = ? WHERE id = ?")
+      .run(JSON.stringify(metadata), row.id);
+    return;
+  }
+  throw new Error("message group classification was not found");
+}
+
 module.exports = {
   listIncomingLinkedContexts,
   listClassifiedMessageHistory,
@@ -95,5 +112,6 @@ module.exports = {
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
   getDurableMessageDraftContext,
-  getMessageGroupClassification
+  getMessageGroupClassification,
+  updateMessageGroupFactRequest
 };

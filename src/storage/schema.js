@@ -729,6 +729,7 @@ CREATE TABLE IF NOT EXISTS resume_optimizations (
   source_content_hash TEXT NOT NULL,
   source_text TEXT NOT NULL,
   target_direction TEXT NOT NULL DEFAULT '',
+  optimization_mode TEXT NOT NULL DEFAULT 'direction' CHECK(optimization_mode IN ('general','job_specific','direction')),
   target_job_ids_json TEXT NOT NULL DEFAULT '[]',
   context_hash TEXT NOT NULL,
   evidence_json TEXT NOT NULL DEFAULT '[]',

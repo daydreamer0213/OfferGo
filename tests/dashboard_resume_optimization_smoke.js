@@ -89,7 +89,7 @@ const logger = {
         selectedJobs: [{ id: 71, title: "AI <应用> 工程师", company: "示例科技" }],
         drafts: [selectedDraft],
         selectedDraft,
-        selectedIntegrity: warningIntegrity,
+        selectedIntegrity: selectedDraft.status === "activated" ? null : warningIntegrity,
         funnelDiagnosis: { strength: "facts", headline: "当前仅展示事实" }
       };
     },
@@ -124,7 +124,7 @@ const logger = {
   const baseUrl = await listen(server);
   try {
     const page = await request(baseUrl, `/resume-optimization?planId=${owner.planId}&draftId=41`);
-    assert.match(page.body, /生成前可查看本次预计参考的岗位/);
+    assert.match(page.body, /整理我的简历/);
     assert.match(page.body, /AI &lt;应用&gt; 工程师/);
     resumeSamplePreviewClientSmoke(page.body);
     assert.equal(page.status, 200);
@@ -249,6 +249,10 @@ const logger = {
       process.off("unhandledRejection", recordUnhandled);
     }
     assert.equal(unhandled.length, 0, "resume failure must not become an unhandled rejection");
+    selectedDraft.status = "activated";
+    const activatedPage = await request(baseUrl, `/resume-optimization?planId=${owner.planId}&draftId=41`);
+    assert.equal(activatedPage.status, 200, "启用后没有完整性问题也必须能打开结果页面");
+    assert.match(activatedPage.body, /已启用新版本/);
     await resumeSubmitClientSmoke(RESUME_OPTIMIZATION_SCRIPT);
 
     console.log("dashboard_resume_optimization_smoke ok");
@@ -304,36 +308,19 @@ async function waitFor(predicate) {
 }
 
 function resumeSamplePreviewClientSmoke(page) {
-  const script = page.match(/<script>\(\(\)=>\{const picker=document\.querySelector\('\[data-resume-direction-picker\]'\)[\s\S]*?<\/script>/)?.[0];
-  assert(script, "参考岗位预览应随方向选择更新");
-  const button = { disabled: false, dataset: { resumeCreateReady: "true" } };
-  const prompt = { hidden: false };
-  const picker = {
-    value: "",
-    form: { querySelector() { return button; } },
-    addEventListener(type, handler) { assert.equal(type, "change"); this.onChange = handler; }
-  };
-  const groups = [
-    { dataset: { resumeSampleDirection: "AI 应用工程师", resumeSampleCount: "1" }, hidden: true },
-    { dataset: { resumeSampleDirection: "后端工程师", resumeSampleCount: "0" }, hidden: true }
-  ];
-  vm.runInNewContext(script.replace(/^<script>|<\/script>$/g, ""), {
-    document: {
-      querySelector(selector) { return selector === "[data-resume-sample-prompt]" ? prompt : picker; },
-      querySelectorAll() { return groups; }
-    }
-  });
-  assert.equal(button.disabled, true);
-  picker.value = "AI 应用工程师";
-  picker.onChange();
-  assert.equal(groups[0].hidden, false);
-  assert.equal(prompt.hidden, true);
-  assert.equal(button.disabled, false);
-  picker.value = "后端工程师";
-  picker.onChange();
-  assert.equal(groups[0].hidden, true);
-  assert.equal(groups[1].hidden, false);
-  assert.equal(button.disabled, true);
+  const script = page.match(/<script>\(\(\)=>\{const picker=document\.querySelector\('\[data-resume-mode-picker\]'\)[\s\S]*?<\/script>/)?.[0];
+  assert(script, '优化方式切换必须更新岗位选择和生成按钮');
+  const button = { disabled: false, dataset: { resumeCreateReady: 'true' } };
+  const panel = { hidden: true };
+  const job = { value: '', disabled: true, required: false, addEventListener(_, handler) { this.onChange = handler; } };
+  const picker = { value: 'general', form: { querySelector(selector) { return selector === '[data-resume-job-panel]' ? panel : selector === 'select[name="jobId"]' ? job : button; } }, addEventListener(_, handler) { this.onChange = handler; } };
+  vm.runInNewContext(script.replace(/^<script>|<\/script>$/g, ''), { document: { querySelector() { return picker; } } });
+  assert.equal(button.disabled, false, '通用优化不需要岗位');
+  assert.equal(job.disabled, true);
+  picker.value = 'job_specific'; picker.onChange();
+  assert.equal(panel.hidden, false); assert.equal(job.required, true); assert.equal(button.disabled, true);
+  job.value = '71'; job.onChange(); assert.equal(button.disabled, false);
+  picker.value = 'general'; picker.onChange(); assert.equal(job.disabled, true); assert.equal(button.disabled, false);
 }
 
 async function resumeSubmitClientSmoke(markup) {

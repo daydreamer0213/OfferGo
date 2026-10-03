@@ -5904,6 +5904,7 @@ async function handleResumeOptimizationCreate(req, res, { db, resumeOptimization
     profileId: plan.profileId,
     planId: plan.id,
     sourceResumeVersionId: Number(params.sourceResumeVersionId),
+    ...(params.mode ? { mode: params.mode, ...(params.mode === 'job_specific' ? { jobId: Number(params.jobId) } : {}) } : {}),
     targetDirection: String(params.targetDirection || "").trim()
   });
   redirect(res, `/resume-optimization?planId=${encodeURIComponent(plan.id)}&draftId=${encodeURIComponent(draft.id)}#resume-opt-draft-title`);
