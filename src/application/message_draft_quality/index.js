@@ -5,6 +5,8 @@ const { listCandidateFacts, getActiveResumeText } = require("../../storage/candi
 const { listCandidateAnswerMemories } = require("../../storage/message_learning_store");
 const { listCandidateEvidence } = require('../../storage/candidate_evidence_store');
 const { selectRelevantCandidateMaterial } = require('../../core/candidate_evidence');
+const { currentCandidateMaterial, factStatus, mergeCandidateFacts } = require('../../core/candidate_fact_policy');
+const { listCandidateFactRevisions } = require('../../storage/message_learning_store');
 
 async function generateQualityCheckedDraft({
   generate,
@@ -29,7 +31,7 @@ async function generateQualityCheckedDraft({
   }
 }
 
-function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts = [] } = {}) {
+function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts = [], now = new Date().toISOString() } = {}) {
   if (!db) throw new TypeError("db is required");
   const profile = positiveInteger(profileId, "profileId");
   const memories = listCandidateAnswerMemories(db, { profileId: profile, activeOnly: false, limit: 500 });
@@ -39,20 +41,24 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     .map((memory) => String(memory.finalText || "").trim())
     .filter(Boolean);
   const activeResumeText = getActiveResumeText(db, profile);
-  const facts = listCandidateFacts(db, profile, { job });
+  const evidence = listCandidateEvidence(db, { profileId: profile });
+  const factRevisions = listCandidateFactRevisions(db, { profileId: profile, limit: 2000 });
+  const facts = mergeCandidateFacts(listCandidateFacts(db, profile, { job }), evidence, { job, factRevisions });
+  const materialPolicy = { now, facts, factRevisions };
   const activeMemories = listCandidateAnswerMemories(db, {
     profileId: profile,
     activeOnly: true,
     source: "user_edited_reply",
     limit: 500
   });
-  const evidenceTexts = [activeResumeText.trim()]
-    .concat(selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: profile }), {
+  const evidenceTexts = currentCandidateMaterial([{ text: activeResumeText.trim(), source: 'active_resume' }], materialPolicy).map(item => item.text)
+    .concat(selectRelevantCandidateMaterial(currentCandidateMaterial(evidence, materialPolicy), {
       query: messageTexts.join('\n'), job, limit: 12, maxChars: 12000
     }).map(item => item.text))
-    .concat(facts.map(factEvidenceText))
-    .concat(activeMemories
-      .filter((memory) => memoryMatchesQualityContext(memory, job, messageTexts))
+    .concat(facts.filter(fact => factStatus(now, { ...fact, key: fact.factKey || fact.key }).status === 'valid').map(factEvidenceText))
+    .concat(selectRelevantCandidateMaterial(currentCandidateMaterial(activeMemories
+      .filter((memory) => memoryMatchesQualityContext(memory, job, messageTexts)), materialPolicy),
+    { query: messageTexts.join('\n'), job, limit: 12, maxChars: 8000 })
       .map((memory) => String(memory.finalText || "").trim()))
     .filter(Boolean);
   return { recentTexts, evidenceTexts };
@@ -97,7 +103,8 @@ function factEvidenceText(fact = {}) {
   const key = String(fact.factKey || fact.key || "").trim();
   const value = String(fact.factValue ?? fact.value ?? "").trim();
   if (!value) return "";
-  if (key === "availability_date") return `${value}到岗`;
+  if (key === 'employment_status') return `目前${value}`;
+  if (key === "availability_date") return /到岗|入职/.test(value) ? value : `${value}到岗`;
   if (key === "interview_availability") return `${value}可以面试`;
   if (key === "overtime_acceptance") return `${value}加班`;
   if (key === "travel_acceptance") return `${value}出差`;

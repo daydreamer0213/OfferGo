@@ -1,6 +1,18 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+assert.equal(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text: '我目前已离职。', evidenceTexts: ['我目前还在职。'] }).valid, false,
+  'employment status alone must not bypass facts by using a memory');
+assert.equal(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text: '请问岗位是否接受下周到岗？', evidenceTexts: [] }).valid, true,
+  'ordinary questions about employer conditions are not personal commitments');
+for (const [text, evidence] of [
+  ['我下周可以到岗。', '我下周不能到岗。'],
+  ['我下周不能到岗。', '我下周可以到岗。'],
+  ['我不能下周到岗。', '我可以下周到岗。']
+]) {
+  assert.equal(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text, evidenceTexts: [evidence] }).valid, false,
+    'arrival evidence must preserve negation before or after the schedule');
+}
 const {
   OPENING_LENGTH,
   MIN_OPENING_LENGTH,

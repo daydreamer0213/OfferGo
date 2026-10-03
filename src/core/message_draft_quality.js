@@ -13,7 +13,8 @@ const CLAIM_PATTERNS = Object.freeze({
   percentage: /[^，。；\n]{0,12}\d+(?:\.\d+)?%[^，。；\n]{0,12}/g,
   duration: /[^，。；\n]{0,12}\d+(?:\.\d+)?\s*(?:年|个月|月|天)[^，。；\n]{0,12}/g,
   numeric_achievement: /[^，。；\n]{0,16}\d+(?:\.\d+)?\s*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)[^，。；\n]{0,24}/g,
-  arrival: /(?:本周|下周|这周|今天|明天|后天|周[一二三四五六日天]|随时|立即|一周内|两周后|两周内|一个月内|\d+天后|\d+周后)[^，。；\n]{0,8}(?:到岗|入职)/g,
+  arrival: /(?:(?:不能|无法|不可以|不可|不便|没法)[^，。；\n]{0,4})?(?:本周|下周|这周|今天|明天|后天|周[一二三四五六日天]|随时|立即|一周内|两周后|两周内|一个月内|\d+天后|\d+周后|\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日)[^，。；\n]{0,8}(?:到岗|入职)/g,
+  employment: /(?:我(?:目前|现在|当前|仍然|仍|还)?|目前|现在|当前|已经|已|仍然|仍|还)(?:尚未|没有|还没|未|不再|不)?(?:已经|已)?(?:在职|离职)/g,
   interview_availability: /(?:本周|下周|今天|明天|后天|周[一二三四五六日天])[^，。；\n]{0,10}(?:可以|可|方便|有空)?[^，。；\n]{0,4}(?:面试|沟通)/g,
   overtime: /(?:不接受|不考虑|不能|无法|拒绝|可以接受|可以|接受|愿意)[^，。；\n]{0,4}(?:加班|大小周|单休)/g,
   travel: /(?:不接受|不考虑|不能|无法|拒绝|可以接受|可以|接受|愿意)[^，。；\n]{0,8}(?:出差)/g,
@@ -34,6 +35,13 @@ function extractHighRiskClaims(text) {
   for (const [kind, pattern] of Object.entries(CLAIM_PATTERNS)) {
     for (const match of source.matchAll(pattern)) {
       const value = String(match[0] || "").trim().slice(0, 160);
+      if (['arrival', 'employment', 'interview_availability', 'travel', 'overtime', 'relocation'].includes(kind)) {
+        const clause = source.slice(0, match.index).split(/[，。；\n]/).pop()
+          + source.slice(match.index).split(/[，。；\n]/)[0];
+        if (/请问|想了解|想请教|想请问|是否|能否/.test(clause)
+          && /岗位|贵司|团队|招聘方|公司/.test(clause)
+          && !/我(?:目前|现在|当前|已经|已|仍|还|可以|能|愿意|接受)|本人/.test(clause)) continue;
+      }
       if (kind === "numeric_achievement" && !likelyCandidateNumericAchievement(value)) continue;
       const key = `${kind}:${claimSignature({ kind, value })}`;
       if (!value || seen.has(key)) continue;
@@ -143,10 +151,17 @@ function claimSignature({ kind, value }) {
   const normalized = normalizedMessageText(value);
   if (["phone", "email", "url"].includes(kind)) return normalized;
   if (kind === "salary") return numericToken(value);
+  if (kind === 'employment') {
+    const negative = /尚未|没有|还没|未|不再|不/.test(value);
+    return /离职/.test(value) !== negative ? 'left' : 'employed';
+  }
   if (["percentage", "duration", "numeric_achievement"].includes(kind)) {
     return `${numericToken(value)}:${semanticToken(kind, value)}`;
   }
-  if (["arrival", "interview_availability"].includes(kind)) return scheduleToken(value);
+  if (["arrival", "interview_availability"].includes(kind)) {
+    const polarity = /不能|无法|不可以|不可|不便|没法/.test(value) ? 'negative' : 'positive';
+    return `${polarity}:${scheduleToken(value)}`;
+  }
   if (["overtime", "travel", "relocation"].includes(kind)) {
     const polarity = /不接受|不考虑|不能|无法|拒绝/.test(value) ? "negative" : "positive";
     const qualifier = kind === "travel" ? (/长期/.test(value) ? "long" : /短期/.test(value) ? "short" : "") : "";
@@ -157,7 +172,7 @@ function claimSignature({ kind, value }) {
 
 function scheduleToken(value) {
   const match = String(value || "").match(
-    /本周[一二三四五六日天]?|下周[一二三四五六日天]?|这周[一二三四五六日天]?|今天|明天|后天|周[一二三四五六日天]|随时|立即|一周内|两周后|两周内|一个月内|\d+天后|\d+周后/
+    /本周[一二三四五六日天]?|下周[一二三四五六日天]?|这周[一二三四五六日天]?|今天|明天|后天|周[一二三四五六日天]|随时|立即|一周内|两周后|两周内|一个月内|\d+天后|\d+周后|\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日/
   );
   return normalizedMessageText(match?.[0] || value);
 }

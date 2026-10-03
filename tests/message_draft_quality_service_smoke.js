@@ -9,6 +9,40 @@ main().catch((error) => {
 });
 
 async function main() {
+  const storage = require('../src/core/storage');
+  const { buildMessageDraftQualityContext } = require('../src/application/message_draft_quality');
+  const { assessMessageDraftQuality } = require('../src/core/message_draft_quality');
+  const db = storage.openDb(':memory:');
+  try {
+    const now = new Date().toISOString();
+    const profile = storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name: '匿名测试', targetTitles: ['工程师'] } },
+      document: { contentHash: 'resume-fact-precedence', text: '目前在职，下周可以到岗。\n去年入职示例公司，负责接口联调。\n有3年软件开发经验。', format: 'text', originalFileName: 'resume.txt' },
+      searchPlan: { name: '方案', directions: ['工程师'] }
+    });
+    storage.saveCandidateFact(db, { profileId: profile.profileId, factKey: 'employment_status', factValue: '已离职' });
+    storage.saveCandidateFact(db, { profileId: profile.profileId, factKey: 'availability_date', factValue: '我无法下周到岗' });
+    const context = buildMessageDraftQualityContext(db, { profileId: profile.profileId, now });
+    assert.equal(assessMessageDraftQuality({ text: '目前在职，下周可以到岗。', ...context }).valid, false,
+      'explicit current corrections take precedence over conflicting raw active resume clauses');
+    assert.equal(assessMessageDraftQuality({ text: '我目前已离职，我无法下周到岗。', ...context }).valid, true);
+    assert(context.evidenceTexts.some(text => text.includes('去年入职示例公司') && text.includes('接口联调')));
+    assert.equal(assessMessageDraftQuality({ text: '我有3年软件开发经验。', ...context }).valid, true);
+    const evidenceProfile = storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name: '匿名经历测试' } },
+      document: { contentHash: 'evidence-resume-precedence', text: '目前在职，下周可以到岗。\n参与接口联调。', format: 'text', originalFileName: 'resume.txt' }
+    });
+    const { saveCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+    for (const [index, text] of ['我目前在职，下周可以到岗。', '我目前已离职，无法下周到岗。'].entries()) {
+      saveCandidateEvidence(db, { profileId: evidenceProfile.profileId, subject: '已确认求职状态', text, sourceQuote: text,
+        sourceKind: 'interview_turn', sourceId: 'anonymous-test-interview', sourceItemKey: String(index),
+        confirmedAt: new Date(Date.parse(now) - (1 - index) * 1000).toISOString() });
+    }
+    const evidenceContext = buildMessageDraftQualityContext(db, { profileId: evidenceProfile.profileId, now });
+    assert.equal(assessMessageDraftQuality({ text: '我目前在职，下周可以到岗。', ...evidenceContext }).valid, false,
+      'newest confirmed evidence overrides old evidence and resume without requiring a separate manual fact');
+    assert.equal(assessMessageDraftQuality({ text: '我目前已离职，无法下周到岗。', ...evidenceContext }).valid, true);
+  } finally { db.close(); }
   const calls = [];
   const output = await generateQualityCheckedDraft({
     generate: async (input) => {

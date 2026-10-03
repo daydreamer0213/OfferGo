@@ -727,6 +727,39 @@ async function main() {
   });
   assert.deepStrictEqual(scopedMemoryAdapterInput.answerMemories.map((memory) => memory.id), [31],
     "changing reuse scope must not refresh an expired availability answer");
+  let effectiveText;
+  let effectiveResume;
+  const mixedAnalyzer = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+    effectiveText = JSON.stringify(input);
+    effectiveResume = input.currentResume?.text;
+    return { messageIntent: 'general_communication', messageCategory: 'project_fact', messageSummary: '项目经历',
+      requiredFactKeys: [], usedFactKeys: [], usedMemoryIds: [], responseItems: [], coverage: [], missingFact: null, messages: ['我负责过接口联调。'] };
+  } } });
+  const mixed = { id: 40, source: 'user_edited_reply', finalText: '我负责过接口联调，现在已离职，下周可以到岗。',
+    messageCategory: 'project_fact', createdAt: '2026-07-01T00:00:00Z', scope: { kind: 'global' } };
+  await mixedAnalyzer({ messages: [{ text: '你负责过什么项目？现在能到岗吗？' }], now: NOW, answerMemories: [mixed],
+    candidateEvidence: [{ id: 41, text: mixed.finalText, sourceQuote: mixed.finalText, updatedAt: mixed.createdAt, scope: { kind: 'global' } }] });
+  assert(effectiveText.includes('我负责过接口联调'));
+  assert(!effectiveText.includes('已离职') && !effectiveText.includes('下周'), 'expired mixed clauses cannot reach generation as current evidence');
+  assert(mixed.finalText.includes('下周'), 'filtering must not rewrite the durable answer');
+  await mixedAnalyzer({ messages: [{ text: '何时入职？' }], now: NOW,
+    answerMemories: [{ ...mixed, finalText: '我负责接口联调，下周可以入职。' }],
+    candidateEvidence: [{ id: 42, text: '我负责接口联调，下周可以入职。', updatedAt: mixed.createdAt, scope: { kind: 'global' } }] });
+  assert(effectiveText.includes('我负责接口联调'));
+  assert(!effectiveText.includes('下周可以入职'), 'scheduled joining has the same expiry as arrival');
+  await mixedAnalyzer({ messages: [{ text: '目前在职吗？' }], now: NOW,
+    facts: [{ key: 'employment_status', value: '已离职', source: 'user_provided', updatedAt: NOW },
+      { key: 'availability_date', value: '我无法下周到岗', source: 'user_provided', updatedAt: NOW }],
+    currentResume: { text: '目前在职，下周可以到岗。去年入职示例公司，负责接口联调。' } });
+  assert(!effectiveResume.includes('目前在职') && !effectiveResume.includes('下周可以到岗'), 'generation and quality share explicit fact precedence over the resume');
+  assert(effectiveText.includes('去年入职示例公司') && effectiveText.includes('负责接口联调'));
+  for (const history of ['2020年1月1日入职示例公司', '我2020-01-01入职示例公司']) {
+    await mixedAnalyzer({ messages: [{ text: '之前何时加入示例公司？' }], now: NOW,
+      candidateEvidence: [{ id: 43, text: `${history}，负责接口联调。`, sourceQuote: `${history}，负责接口联调。`,
+        updatedAt: '2020-01-01T00:00:00Z', scope: { kind: 'global' } }] });
+    assert(effectiveText.includes(history), 'explicit dated employer history must retain company and joining date');
+    assert(effectiveText.includes('负责接口联调'));
+  }
 
   const qualityMock = new MockModelAdapter();
   const defaultMockDraft = await qualityMock.draftMessageGroup({

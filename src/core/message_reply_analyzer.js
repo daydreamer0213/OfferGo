@@ -1,5 +1,5 @@
 const { validateMessageReply } = require("./message_reply_contract");
-const { VOLATILE_FACT_MAX_AGE_DAYS, mergeCandidateFacts } = require("./candidate_fact_policy");
+const { mergeCandidateFacts, currentCandidateMaterial, factStatus } = require("./candidate_fact_policy");
 const { selectRelevantCandidateMaterial } = require('./candidate_evidence');
 
 function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
@@ -18,15 +18,18 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
       updatedAt: fact.updatedAt || fact.confirmedAt || ""
     }));
     const requestedSubjectKeys = deriveRequestedSubjectKeys(messages, normalizedFacts);
-    const scopedFacts = normalizedFacts.filter((fact) => factMatchesRequestedScope(fact, requestedSubjectKeys));
+    const scopedFacts = normalizedFacts.filter((fact) => factMatchesRequestedScope(fact, requestedSubjectKeys)
+      && factStatus(now, fact).status === 'valid');
     const query = messages.map(message => String(message.text || '')).join('\n');
-    const relevantEvidence = selectRelevantCandidateMaterial(candidateEvidence, { query, job, limit: 12, maxChars: 12000 });
-    const activeMemories = normalizeAnswerMemories(selectRelevantCandidateMaterial((Array.isArray(answerMemories) ? answerMemories : [])
-      .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys)
-        && memoryIsCurrent(memory, now)), { query, job, limit: 12, maxChars: 8000 }));
+    const materialPolicy = { now, facts: normalizedFacts, factRevisions };
+    const relevantEvidence = selectRelevantCandidateMaterial(currentCandidateMaterial(candidateEvidence, materialPolicy), { query, job, limit: 12, maxChars: 12000 });
+    const activeMemories = normalizeAnswerMemories(selectRelevantCandidateMaterial(currentCandidateMaterial((Array.isArray(answerMemories) ? answerMemories : [])
+      .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys)), materialPolicy), { query, job, limit: 12, maxChars: 8000 }));
     const input = {
       profile,
-      currentResume,
+      currentResume: currentResume ? { ...currentResume,
+        text: currentCandidateMaterial([{ text: currentResume.text, source: 'active_resume' }], materialPolicy)[0]?.text || ''
+      } : null,
       job,
       platform: String(platform || "").toLowerCase(),
       requestedActions: Array.isArray(requestedActions)
@@ -107,18 +110,6 @@ function memoryMatchesContext(memory, job = {}, requestedSubjectKeys = []) {
   if (scope.kind === "company") return scopeText(scope.key) === scopeText(job?.company);
   if (scope.kind === "experience") return requestedSubjectKeys.includes(scope.key);
   return false;
-}
-
-function memoryIsCurrent(memory, now) {
-  const days = {
-    availability: VOLATILE_FACT_MAX_AGE_DAYS.availability_date,
-    salary: VOLATILE_FACT_MAX_AGE_DAYS.expected_salary
-  }[String(memory?.messageCategory || "")];
-  if (!days) return true;
-  const answerAt = Date.parse(String(memory?.createdAt || memory?.updatedAt || ""));
-  const currentAt = Date.parse(String(now || new Date().toISOString()));
-  return !Number.isFinite(answerAt) || !Number.isFinite(currentAt)
-    || currentAt - answerAt <= days * 86_400_000;
 }
 
 function deriveRequestedSubjectKeys(messages, facts) {

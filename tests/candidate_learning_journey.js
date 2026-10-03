@@ -88,7 +88,7 @@ class InterviewAdapter extends MockModelAdapter {
       VALUES (?, ?, ?, 'boss', 'reply_ready', 'review', ?, ?, ?)`).run(profile.profileId, profile.planId, jobId, now, now, now).lastInsertRowid);
     for (let index = 0; index < 101; index++) {
       const at = index ? now : '2026-01-01T00:00:00.000Z';
-      const text = index ? '我目前在广州。' : '我累计完成3个知识库接口联调项目。';
+      const text = index ? '我目前在广州。' : '我累计完成3个知识库接口联调项目，现在已离职，下周可以到岗。';
       const [draft] = storage.recordMessageReplyDrafts(db, { profileId: profile.profileId, cardId, jobId,
         messageGroupKey: 'sha256:' + String(index).padStart(64, '0'), questionSummary: index ? '所在城市' : '知识库接口联调',
         messageIntent: 'information_request', messageCategory: index ? 'other' : 'project_fact', messages: ['原始回答'], createdAt: at });
@@ -99,6 +99,10 @@ class InterviewAdapter extends MockModelAdapter {
     const quality = require('../src/application/message_draft_quality').buildMessageDraftQualityContext(db, { profileId: profile.profileId,
       job: { id: jobId, company: '示例公司' }, messageTexts: ['你完成过几个知识库接口联调项目？'] });
     assert(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text: '我累计完成3个知识库接口联调项目。', ...quality }).valid);
+    assert.equal(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text: '我下周可以到岗。', ...quality }).valid, false,
+      'the actual quality context must preserve old projects without supporting expired arrival commitments');
+    assert.equal(require('../src/core/message_draft_quality').assessMessageDraftQuality({ text: '我目前已离职。', ...quality }).valid, false,
+      'expired employment status in a project memory is not current evidence either');
     assert(material.answerMemories.some(item => item.finalText.includes('3个')));
     const oldAnswerService = createResumeOptimizationService({ db, adapter: { async generateResumeOptimization(input) {
       const evidence = input.evidenceCatalog.find(item => item.kind === 'answer' && item.text.includes('3个'));
@@ -135,6 +139,29 @@ async function confirmedFactsJourney() {
   const answer = '我目前已经离职，下周可以到岗。';
   session = await service.answerTurn({ ...context, sessionId: session.id, turnNumber: 1, answerText: answer });
   const entry = service.confirmEvidence({ ...context, sessionId: session.id, turnNumber: 1, sourceQuote: answer, subject: '求职状态', text: answer });
+  const denied = mergeCandidateFacts([], [{ ...entry, text: '我不能下周到岗，不能接受出差。' }]);
+  assert.equal(denied.find(fact => fact.factKey === 'availability_date')?.factValue, '我不能下周到岗');
+  assert.equal(denied.find(fact => fact.factKey === 'accepts_travel')?.factValue, '不能接受出差');
+  assert.equal(mergeCandidateFacts([], [{ ...entry, text: '我下周不能到岗。' }]).find(fact => fact.factKey === 'availability_date')?.factValue, '我下周不能到岗');
+  for (const text of ['同事无法下周到岗，我下周可以到岗。', '去年我已离职，下周可以到岗。']) {
+    const result = mergeCandidateFacts([], [{ ...entry, text }]);
+    assert.equal(result.find(fact => fact.factKey === 'availability_date')?.factValue, text.startsWith('同事') ? '下周' : undefined);
+  }
+  assert.equal(mergeCandidateFacts([], [{ ...entry, text: '如果项目有难题，我会逐项排查。我下周可以到岗。' }]).find(fact => fact.factKey === 'availability_date')?.factValue, '下周');
+  const { currentCandidateMaterial } = require('../src/core/candidate_fact_policy');
+  const mixedText = '如果遇到故障，我会与同事逐项排查，目前已经离职，下周可以到岗。';
+  const stableStory = currentCandidateMaterial([{ ...entry, text: mixedText, updatedAt: '', createdAt: '' }], { now: entry.updatedAt });
+  assert(stableStory[0].text.includes('逐项排查'), 'conditional collaboration stories remain useful experience');
+  assert(!stableStory[0].text.includes('到岗'), 'missing dates do not establish current commitments');
+  for (const policy of [
+    { facts: [{ key: 'availability_date', value: '两周后', updatedAt: newerDate(entry.updatedAt) }] },
+    { facts: [{ key: 'availability_date', value: '两周后', updatedAt: entry.updatedAt }] },
+    { factRevisions: [{ id: 1, factKey: 'availability_date', operation: 'delete', createdAt: newerDate(entry.updatedAt) }] }
+  ]) {
+    const material = currentCandidateMaterial([{ ...entry, text: '我负责接口联调，下周可以到岗。' }], { now: entry.updatedAt, ...policy });
+    assert(material[0].text.includes('负责接口联调'));
+    assert(!material[0].text.includes('到岗'), 'a corrected or deleted schedule cannot survive in an old story');
+  }
   const reply = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
     assert.equal(input.facts.find(fact => fact.key === 'employment_status')?.value, '已离职');
     assert.equal(input.facts.find(fact => fact.key === 'availability_date')?.value, '下周');
@@ -159,3 +186,5 @@ async function confirmedFactsJourney() {
   assert.equal(mergeCandidateFacts([], [{ ...entry, text: '我目前已离职，但到岗时间还没确定。' }]).find(fact => fact.factKey === 'employment_status').factValue, '已离职', 'one unknown item must not hide another known fact');
   assert.deepEqual(mergeCandidateFacts([], [{ ...entry, text: '去年我已经离职，后来入职了一家新公司。' }]), [], 'historical departure must not become current employment status');
 }
+
+function newerDate(at) { return new Date(Date.parse(at) + 1000).toISOString(); }
