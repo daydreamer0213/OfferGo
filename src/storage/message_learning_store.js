@@ -252,6 +252,65 @@ function getCurrentCandidateAnswerMemory(db, { profileId, memoryId } = {}) {
   return row ? mapMemory(row) : null;
 }
 
+function findMessageReplyMemoryByText(db, { profileId, draftId, finalText } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const draft = positiveInteger(draftId, "draftId");
+  const text = draftText(finalText);
+  const digest = sha256(normalizeDigestText(text));
+  const rows = db.prepare(`SELECT * FROM candidate_answer_memories
+    WHERE profile_id = ? AND draft_id = ? ORDER BY updated_at DESC, id DESC`).all(profile, draft);
+  const row = rows.find(item => item.final_digest === digest
+    || comparableText(item.final_text) === comparableText(text));
+  return row ? mapMemory(row) : null;
+}
+
+function recordSentMessageReplyDraftWithoutLearning(db, {
+  profileId, draftId, memoryId, expectedRevision, finalText, completionKey,
+  afterComplete, completedAt = nowIso()
+} = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const memory = optionalPositiveInteger(memoryId, "memoryId");
+  const text = draftText(finalText);
+  const at = isoText(completedAt, "completedAt");
+  return immediateTransaction(db, () => {
+    const draft = requireDraft(db, profile, draftId);
+    const row = memory ? db.prepare(`SELECT * FROM candidate_answer_memories
+      WHERE id = ? AND profile_id = ? AND draft_id = ?`).get(memory, profile, draft.id)
+      : null;
+    if (memory && (!row || comparableText(row.final_text) !== comparableText(text))) {
+      throw storageError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "sent snapshot has no matching answer memory");
+    }
+    if (!memory && !draft.closedAt && draft.revision === Number(expectedRevision)) {
+      throw storageError("MESSAGE_REPLY_SENT_SOURCE_CURRENT", "sent-only completion requires a changed source");
+    }
+    const current = db.prepare(`SELECT id FROM candidate_answer_memories
+      WHERE profile_id = ? AND draft_id = ? AND withdrawn_at IS NULL
+      ORDER BY updated_at DESC, id DESC LIMIT 1`).get(profile, draft.id);
+    if (row && !row.withdrawn_at && Number(current?.id) === memory) {
+      throw storageError("CANDIDATE_ANSWER_MEMORY_CURRENT", "current answer requires normal completion");
+    }
+    const key = sentProgressKey(completionKey);
+    if (key && db.prepare(`SELECT 1 FROM candidate_progress_events
+      WHERE card_id = ? AND idempotency_key = ?
+        AND type IN ('reply_confirmed_sent', 'follow_up_sent') LIMIT 1`).get(draft.cardId, key)) {
+      return draft;
+    }
+    updateDraftOnCompletion(db, draft, text, "sent", at);
+    afterComplete?.();
+    return requireDraft(db, profile, draft.id);
+  });
+}
+
+function sentProgressKey(value) {
+  const key = String(value || "").trim();
+  if (!/^message-reply-send:[1-9]\d*:[1-9]\d*$/.test(key)) return key;
+  // Matches the existing progress key derived from a verified send item.
+  const hex = createHash("sha256").update(key).digest("hex").slice(0, 32).split("");
+  hex[12] = "4";
+  hex[16] = ((Number.parseInt(hex[16], 16) & 3) | 8).toString(16);
+  return `progress:${hex.slice(0, 8).join("")}-${hex.slice(8, 12).join("")}-${hex.slice(12, 16).join("")}-${hex.slice(16, 20).join("")}-${hex.slice(20).join("")}`;
+}
+
 function getMessageReplyLearningStatus(db, { profileId, memoryId } = {}) {
   const profile = positiveInteger(profileId, "profileId");
   const id = positiveInteger(memoryId, "memoryId");
@@ -774,6 +833,8 @@ module.exports = {
   completeMessageReplyDraft,
   listCandidateAnswerMemories,
   getCurrentCandidateAnswerMemory,
+  findMessageReplyMemoryByText,
+  recordSentMessageReplyDraftWithoutLearning,
   getMessageReplyLearningStatus,
   listPendingMessageReplyLearning,
   recordMessageReplyLearningStatus,

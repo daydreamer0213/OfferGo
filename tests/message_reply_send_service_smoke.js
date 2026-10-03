@@ -405,6 +405,10 @@ const db = storage.openDb(":memory:");
     });
     assert.equal(supportedBatch.batch.status, "confirmed", "a current candidate fact should support the untouched model draft");
 
+    await sentAfterLearningOptOutSmoke({ db, owner, learningService, service, now });
+    await sentDuringLearningRaceSmoke({ db, owner, now });
+    await manualSentAfterCloseSmoke({ db, owner, learningService, now });
+
     console.log("message_reply_send_service_smoke ok");
   } finally {
     db.close();
@@ -476,4 +480,135 @@ function countMemories(database, draftId) {
 function countSentEvents(database, cardId) {
   return Number(database.prepare(`SELECT COUNT(*) AS n FROM candidate_progress_events
     WHERE card_id = ? AND type = 'reply_confirmed_sent'`).get(cardId).n);
+}
+
+async function sentAfterLearningOptOutSmoke({ db: database, owner, learningService, service, now }) {
+  for (const mode of ['withdrawn', 'withdrawn-closed', 'superseded']) {
+    const withdrawn = mode.startsWith('withdrawn');
+    const entry = seedDraft(database, owner, `learning-${mode}`, '我目前在广州。', now);
+    saveContext(database, owner, entry, mode === 'withdrawn' ? '378917037748790'
+      : mode === 'withdrawn-closed' ? '378917037748794' : '378917037748791', now);
+    const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
+      draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
+    const copied = await learningService.completeDraft({ profileId: owner.profileId,
+      draftId: edited.id, finalText: edited.currentText, completionKind: 'copied' });
+    if (withdrawn) learningService.withdrawMemory({ profileId: owner.profileId, memoryId: copied.memoryId });
+    const batch = service.confirmBatch({ profileId: owner.profileId,
+      items: [{ draftId: edited.id, revision: edited.revision }] });
+    if (mode === 'withdrawn-closed') storage.closeMessageReplyDrafts(database, {
+      profileId: owner.profileId, cardId: entry.cardId, closedAt: now });
+    if (mode === 'superseded') await learningService.reviseMemory({ profileId: owner.profileId,
+      memoryId: copied.memoryId, finalText: '我目前在珠海。' });
+    transitionReplySendBatch(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      expectedStatus: 'confirmed', status: 'running', updatedAt: now });
+    let item = batch.items[0];
+    for (const status of ['selecting', 'verified', 'filled']) {
+      item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+        itemId: item.id, expectedStatus: item.status, status, updatedAt: now });
+    }
+    item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      itemId: item.id, expectedStatus: 'filled', status: 'click_dispatched', clickCount: 1, updatedAt: now });
+    const factsBefore = storage.listCandidateFactRevisions(database, { profileId: owner.profileId }).length;
+    const evidenceBefore = database.prepare('SELECT COUNT(*) AS n FROM candidate_evidence_entries WHERE profile_id = ?').get(owner.profileId).n;
+    const completed = await service.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+    assert.equal(completed.item.status, 'succeeded', `${mode} learning opt-out must not block verified send bookkeeping`);
+    assert.equal(completed.learning.learningSkipped, withdrawn ? 'withdrawn' : 'superseded');
+    assert.equal(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).currentText,
+      '我目前在深圳。', 'sent snapshot stays the actual confirmed text');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    assert.equal(storage.listCandidateFactRevisions(database, { profileId: owner.profileId }).length, factsBefore);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM candidate_evidence_entries WHERE profile_id = ?').get(owner.profileId).n,
+      evidenceBefore);
+    const history = storage.listCandidateAnswerMemories(database, { profileId: owner.profileId,
+      activeOnly: false }).filter(memory => memory.draftId === edited.id);
+    const old = history.find(memory => memory.id === copied.memoryId);
+    assert.equal(Boolean(old.withdrawnAt), withdrawn);
+    assert.equal(old.completionKind, 'copied', 'historical learning memory is not changed into a sent fact');
+    const repeated = await service.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+    assert.equal(repeated.item.status, 'succeeded');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    let repeatedCallback = 0;
+    const restartedLearning = createMessageReplyLearningService({ db: database, now: () => now });
+    await restartedLearning.completeDraft({ profileId: owner.profileId, draftId: edited.id,
+      finalText: '我目前在深圳。', completionKind: 'sent',
+      completionKey: `message-reply-send:${batch.batch.id}:${item.id}`,
+      afterComplete() { repeatedCallback++; } });
+    assert.equal(repeatedCallback, 0, 'persistent sent evidence prevents callback replay after restart');
+  }
+  const rollback = seedDraft(database, owner, 'learning-opt-out-rollback', '我目前在广州。', now);
+  const saved = await learningService.completeDraft({ profileId: owner.profileId,
+    draftId: rollback.draft.id, finalText: '我目前在深圳。', completionKind: 'copied' });
+  learningService.withdrawMemory({ profileId: owner.profileId, memoryId: saved.memoryId });
+  await assert.rejects(learningService.completeDraft({ profileId: owner.profileId,
+    draftId: rollback.draft.id, finalText: '我目前在深圳。', completionKind: 'sent',
+    afterComplete() { throw new Error('sent bookkeeping failed'); }
+  }), /sent bookkeeping failed/);
+  assert.equal(storage.getMessageReplyDraft(database, { profileId: owner.profileId,
+    draftId: rollback.draft.id }).closedAt, '', 'callback failure rolls back sent-only draft closure');
+  assert(storage.listCandidateAnswerMemories(database, { profileId: owner.profileId,
+    activeOnly: false }).find(memory => memory.id === saved.memoryId).withdrawnAt);
+}
+
+async function sentDuringLearningRaceSmoke({ db: database, owner, now }) {
+  for (const mode of ['withdrawn', 'superseded']) {
+    const entry = seedDraft(database, owner, `learning-race-${mode}`, '我目前在广州。', now);
+    saveContext(database, owner, entry, mode === 'withdrawn' ? '378917037748792' : '378917037748793', now);
+    const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
+      draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
+    let release;
+    const slowLearning = createMessageReplyLearningService({ db: database, now: () => now,
+      adapter: { extractReplyEditFacts: () => new Promise(resolve => { release = () => resolve({ facts: [] }); }) } });
+    const fastLearning = createMessageReplyLearningService({ db: database, now: () => now,
+      adapter: { async extractReplyEditFacts() { return { facts: [] }; } } });
+    const sender = createMessageReplySendingService({ db: database, learningService: slowLearning,
+      now: () => now, executeBatch() {} });
+    const batch = sender.confirmBatch({ profileId: owner.profileId,
+      items: [{ draftId: edited.id, revision: edited.revision }] });
+    transitionReplySendBatch(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      expectedStatus: 'confirmed', status: 'running', updatedAt: now });
+    let item = batch.items[0];
+    for (const status of ['selecting', 'verified', 'filled']) {
+      item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+        itemId: item.id, expectedStatus: item.status, status, updatedAt: now });
+    }
+    item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      itemId: item.id, expectedStatus: 'filled', status: 'click_dispatched', clickCount: 1, updatedAt: now });
+    const finishing = sender.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+    const intervening = await fastLearning.completeDraft({ profileId: owner.profileId, draftId: edited.id,
+      finalText: mode === 'withdrawn' ? '我目前在深圳。' : '我目前在珠海。', completionKind: 'copied' });
+    if (mode === 'withdrawn') fastLearning.withdrawMemory({ profileId: owner.profileId,
+      memoryId: intervening.memoryId });
+    release();
+    const completed = await finishing;
+    assert.equal(completed.item.status, 'succeeded', `${mode} during extraction must not block verified send`);
+    assert.equal(completed.learning.learningSkipped, mode);
+    assert.equal(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).currentText,
+      '我目前在深圳。');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    assert.equal(countMemories(database, edited.id), 1, 'late model result cannot create a ghost memory');
+  }
+}
+
+async function manualSentAfterCloseSmoke({ db: database, owner, learningService, now }) {
+  const { recordReplyConfirmedSent } = require('../src/core/candidate_progress');
+  const entry = seedDraft(database, owner, 'manual-after-close', '我目前在广州。', now);
+  const copied = await learningService.completeDraft({ profileId: owner.profileId,
+    draftId: entry.draft.id, finalText: '我目前在深圳。', completionKind: 'copied' });
+  learningService.withdrawMemory({ profileId: owner.profileId, memoryId: copied.memoryId });
+  storage.closeMessageReplyDrafts(database, { profileId: owner.profileId, cardId: entry.cardId, closedAt: now });
+  const key = 'progress:13245678-1234-4234-8234-123456789abc';
+  let calls = 0;
+  const afterComplete = () => {
+    calls++;
+    recordReplyConfirmedSent(database, { cardId: entry.cardId, idempotencyKey: key,
+      summary: '用户确认已手动发送', occurredAt: now });
+  };
+  await learningService.completeDraft({ profileId: owner.profileId, draftId: entry.draft.id,
+    finalText: '我目前在深圳。', completionKind: 'sent', completionKey: key, afterComplete });
+  assert.equal(calls, 1, 'non-send closure does not skip first manual sent callback');
+  const restarted = createMessageReplyLearningService({ db: database, now: () => now });
+  await restarted.completeDraft({ profileId: owner.profileId, draftId: entry.draft.id,
+    finalText: '我目前在深圳。', completionKind: 'sent', completionKey: key, afterComplete });
+  assert.equal(calls, 1, 'persisted manual sent event prevents replay after restart');
+  assert.equal(countSentEvents(database, entry.cardId), 1);
 }

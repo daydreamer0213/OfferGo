@@ -4409,6 +4409,7 @@ async function handleProgress(req, res, db, messageDiscovery = null, replyLearni
           draftId: params.draftId,
           finalText: params.finalText,
           completionKind: "sent",
+          completionKey: params.idempotencyKey,
           afterComplete: recordProgress
         });
       } else {

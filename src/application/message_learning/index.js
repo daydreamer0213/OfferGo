@@ -1,5 +1,6 @@
 const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDraft,
   listCandidateAnswerMemories, getCurrentCandidateAnswerMemory,
+  findMessageReplyMemoryByText, recordSentMessageReplyDraftWithoutLearning,
   reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
   setCandidateAnswerMemoryScope,
   listCandidateFactRevisions, deleteCandidateFact, getMessageReplyLearningStatus,
@@ -48,38 +49,37 @@ function createMessageReplyLearningService({
     });
   }
 
-  async function completeDraft({ profileId, draftId, finalText, completionKind, afterComplete }) {
+  async function completeDraft({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) {
     const flightKey = `${profileId}:${draftId}:${replyDraftDigest(finalText)}`;
     if (inFlight.has(flightKey)) {
       const prior = await inFlight.get(flightKey);
       return completionKind === "sent"
-        ? completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete }) : prior;
+        ? completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) : prior;
     }
-    const task = completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete });
+    const task = completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete });
     inFlight.set(flightKey, task);
     try { return await task; } finally { inFlight.delete(flightKey); }
   }
 
-  async function completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete }) {
+  async function completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) {
     const draft = requiredDraft(profileId, draftId);
-    const existing = listCandidateAnswerMemories(db, {
-      profileId,
-      activeOnly: false,
-      limit: 500
-    }).find((memory) => memory.draftId === draft.id && (
-      memory.finalDigest === replyDraftDigest(finalText)
-      || !replyDraftWasEdited(memory.finalText, finalText)
-    ));
+    const existing = findMessageReplyMemoryByText(db, { profileId, draftId, finalText });
     if (existing) {
-      if (existing.withdrawnAt) throw serviceError("CANDIDATE_ANSWER_MEMORY_WITHDRAWN", "answer memory was withdrawn");
-      const current = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
-        .find(memory => memory.draftId === draft.id);
-      if (current?.id !== existing.id) throw serviceError("CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "answer memory was superseded");
+      const current = getCurrentCandidateAnswerMemory(db, { profileId, memoryId: existing.id });
+      if (existing.withdrawnAt || !current) {
+        const learningSkipped = existing.withdrawnAt ? "withdrawn" : "superseded";
+        if (completionKind !== "sent") {
+          throw serviceError(existing.withdrawnAt ? "CANDIDATE_ANSWER_MEMORY_WITHDRAWN" : "CANDIDATE_ANSWER_MEMORY_SUPERSEDED",
+            "answer memory is no longer available for learning");
+        }
+        return sentWithoutLearning({ draft, profileId, draftId, finalText, afterComplete,
+          completionKey, memoryId: existing.id, reason: learningSkipped });
+      }
       const memory = completionKind === "sent" && existing.completionKind !== "sent"
         ? completeMessageReplyDraft(db, { profileId, draftId, finalText, completionKind,
           afterComplete, completedAt: nowIso(now()) }) : existing;
       const status = getMessageReplyLearningStatus(db, { profileId, memoryId: existing.id });
-      if (status && ["failed", "unavailable"].includes(status.status)) {
+      if (completionKind !== "sent" && status && ["failed", "unavailable"].includes(status.status)) {
         return retryLearning({ profileId, memoryId: existing.id });
       }
       return completionResult(memory, requiredDraft(profileId, draftId), status?.factCount || 0, status?.status || "not_needed");
@@ -96,6 +96,11 @@ function createMessageReplyLearningService({
       : { scope: { kind: "global", key: "" }, facts: [], status: "not_needed" };
     const currentAfterExtraction = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
       .find(memory => memory.draftId === draft.id);
+    const matchedAfterExtraction = findMessageReplyMemoryByText(db, { profileId, draftId, finalText });
+    if (completionKind === "sent" && matchedAfterExtraction?.withdrawnAt) {
+      return sentWithoutLearning({ draft, profileId, draftId, finalText, afterComplete,
+        completionKey, memoryId: matchedAfterExtraction.id, reason: "withdrawn" });
+    }
     if (currentAfterExtraction?.id !== initialCurrent?.id) {
       if (currentAfterExtraction?.finalDigest === replyDraftDigest(finalText)) {
         const memory = completionKind === "sent" && currentAfterExtraction.completionKind !== "sent"
@@ -105,9 +110,19 @@ function createMessageReplyLearningService({
         return completionResult(memory, requiredDraft(profileId, draftId),
           status?.factCount || 0, status?.status || "not_needed");
       }
+      if (completionKind === "sent") {
+        const matched = findMessageReplyMemoryByText(db, { profileId, draftId, finalText });
+        return sentWithoutLearning({ draft, profileId, draftId, finalText, afterComplete,
+          completionKey, memoryId: matched?.id, reason: matched?.withdrawnAt ? "withdrawn" : "superseded" });
+      }
       throw serviceError("CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "answer changed during learning");
     }
-    if (requiredDraft(profileId, draftId).closedAt) {
+    const refreshedDraft = requiredDraft(profileId, draftId);
+    if (refreshedDraft.closedAt || (completionKind === "sent" && refreshedDraft.revision !== draft.revision)) {
+      if (completionKind === "sent") {
+        return sentWithoutLearning({ draft, profileId, draftId, finalText, afterComplete,
+          completionKey, memoryId: matchedAfterExtraction?.id, reason: "source_changed" });
+      }
       throw serviceError("MESSAGE_REPLY_DRAFT_CLOSED", "message reply draft was closed during learning");
     }
     const memory = completeMessageReplyDraft(db, {
@@ -132,6 +147,16 @@ function createMessageReplyLearningService({
       extraction.facts.length,
       extraction.status
     );
+  }
+
+  function sentWithoutLearning({ draft, profileId, draftId, finalText, completionKey,
+    afterComplete, memoryId, reason }) {
+    const sentDraft = recordSentMessageReplyDraftWithoutLearning(db, { profileId, draftId,
+      memoryId, expectedRevision: draft.revision, finalText, completionKey,
+      afterComplete, completedAt: nowIso(now()) });
+    return { memoryId: null, draftId: draft.id, revision: sentDraft.revision,
+      changed: replyDraftWasEdited(draft.originalText, finalText), learnedFactCount: 0,
+      extractionStatus: "not_needed", learningSkipped: reason };
   }
 
   async function retryLearning({ profileId, memoryId }) {

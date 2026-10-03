@@ -148,11 +148,13 @@ function createMessageReplySendingService({
     const draft = getMessageReplyDraft(db, { profileId, draftId: current.draftId });
     if (!draft) throw sendingError("MESSAGE_REPLY_SEND_DRAFT_NOT_FOUND", "message reply draft was not found");
     const completedAt = nowIso(now());
+    const completionKey = `message-reply-send:${batch}:${item}`;
     const learning = await learningService.completeDraft({
       profileId,
       draftId: current.draftId,
       finalText: current.replyText,
       completionKind: "sent",
+      completionKey,
       afterComplete() {
         transitionReplySendItem(db, {
           profileId,
@@ -166,7 +168,7 @@ function createMessageReplySendingService({
         const recordSent = draft.messageIntent === "follow_up" ? recordFollowUpSent : recordReplyConfirmedSent;
         recordSent(db, {
           cardId: current.cardId,
-          idempotencyKey: `message-reply-send:${batch}:${item}`,
+          idempotencyKey: completionKey,
           summary: draft.messageIntent === "follow_up" ? "已发送首次跟进" : "用户确认已手动发送",
           occurredAt: completedAt
         });
