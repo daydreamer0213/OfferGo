@@ -82,7 +82,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       answer: item.turnNumber === turnNumber ? answerText : item.answerText,
       answerReview: item.answerReview
     }));
-    const step = await generateStep(session.context, session.settings, turns);
+    const step = await generateStep(refreshSupplementalContext(session), session.settings, turns);
     const plannedQuestions = Number(session.settings.plannedQuestions);
     if (turns.length < plannedQuestions && step.complete) {
       throw serviceError("MOCK_INTERVIEW_STEP_TOO_EARLY", "模型在达到计划题数前结束了面试，本次回答未保存");
@@ -121,7 +121,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         throw serviceError("MOCK_INTERVIEW_INCOMPLETE", "当前训练还没有达到计划题数");
       }
       const rawReport = await adapter.reviewMockInterview({
-        context: session.context,
+        context: refreshSupplementalContext(session),
         settings: session.settings,
         turns: modelTurns(session.turns)
       });
@@ -152,7 +152,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     if (existingRetry?.answerText === answerText) return existingRetry;
     requireAdapterMethod("reviewMockInterviewRetry");
     const rawReview = await adapter.reviewMockInterviewRetry({
-      context: session.context,
+      context: refreshSupplementalContext(session),
       settings: session.settings,
       turn: {
         turnNumber: turn.turnNumber,
@@ -225,12 +225,6 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const prepared = prepareResumeTextForModel(resume.text, {
       identity: { names }, originalFileName: resume.fileName, strict: true
     });
-    const activeAnswers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
-      profileId,
-      activeOnly: true,
-      source: "user_edited_reply",
-      limit: 500
-    }), { sessionKind, job }), { query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000 });
     const historyQuery = sessionKind === "resume_general"
       ? { profileId, sessionKind, limit: 30 }
       : { profileId, planId, sessionKind, limit: 30 };
@@ -240,16 +234,9 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         ...(session.report.improvements || []),
         ...(session.report.retryRecommendations || []).map((item) => item.reason)
       ]).filter(Boolean).slice(0, 8);
-    const allEvidence = listCandidateEvidence(db, { profileId });
-    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, {
-      query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000
-    });
     const resumeEvidenceCatalog = buildResumeInterviewEvidenceCatalog(prepared.text);
-    const interviewBrief = buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog, candidateEvidence, priorWeaknesses });
-    return {
+    return refreshSupplementalContext({ profileId, context: {
       sessionKind,
-      candidateEvidence,
-      interviewBrief,
       job: job ? {
         id: Number(job.id),
         title: String(job.title || ""),
@@ -264,11 +251,8 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         text: prepared.text
       },
       resumeEvidenceCatalog,
-      candidateFacts: mergeCandidateFacts(listCandidateFacts(db, profileId, { job: job || {} }), allEvidence,
-        { job: job || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) }),
-      answerMemories: activeAnswers,
       priorWeaknesses
-    };
+    } });
   }
 
   function hydrateSessionContext(session) {
@@ -284,6 +268,26 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         sessionKind: context.sessionKind || session.sessionKind,
         resumeEvidenceCatalog
       }
+    };
+  }
+
+  // Keep this interview's resume/JD stable without freezing records the user can revoke.
+  function refreshSupplementalContext(session) {
+    const context = session.context;
+    const job = context.job || {};
+    const query = job.description || context.resume?.text;
+    const allEvidence = listCandidateEvidence(db, { profileId: session.profileId });
+    const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, { query, job, limit: 12, maxChars: 12000 });
+    return {
+      ...context,
+      candidateEvidence,
+      candidateFacts: mergeCandidateFacts(listCandidateFacts(db, session.profileId, { job }), allEvidence,
+        { job, factRevisions: listCandidateFactRevisions(db, { profileId: session.profileId, limit: 2000 }) }),
+      answerMemories: selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
+        profileId: session.profileId, activeOnly: true, source: 'user_edited_reply', limit: 500
+      }), { sessionKind: context.sessionKind, job }), { query, job, limit: 12, maxChars: 12000 }),
+      interviewBrief: buildInterviewBrief({ sessionKind: context.sessionKind, job: context.job,
+        resumeEvidenceCatalog: context.resumeEvidenceCatalog, candidateEvidence, priorWeaknesses: context.priorWeaknesses })
     };
   }
 

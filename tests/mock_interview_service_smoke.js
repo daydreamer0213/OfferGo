@@ -538,6 +538,38 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(db.prepare('SELECT count(*) AS n FROM mock_interview_sessions').get().n, beforeOpening + 1,
       'regenerating the initial question creates only one session');
 
+    // The resume/JD stay frozen, while the next model call uses live confirmed supplements.
+    const evidenceStore = require('../src/storage/candidate_evidence_store');
+    const liveEntry = evidenceStore.saveCandidateEvidence(db, { profileId: owner.profileId,
+      subject: '知识库排障', text: '通过日志定位知识库接口超时', sourceKind: 'manual',
+      sourceId: 'live-context', sourceItemKey: 'old', sourceQuote: '通过日志定位知识库接口超时', scope: { kind: 'global', key: '' } });
+    const live = await service.startSession({ profileId: owner.profileId, planId: owner.planId,
+      resumeVersionId: owner.resumeVersionId, sessionKind: 'job_specific', jobId, settings: { plannedQuestions: 3 } });
+    const frozenRow = db.prepare('SELECT context_json FROM mock_interview_sessions WHERE id = ?').get(live.id).context_json;
+    assert(live.context.candidateEvidence.some(item => item.id === liveEntry.id));
+    evidenceStore.withdrawCandidateEvidence(db, { profileId: owner.profileId, id: liveEntry.id });
+    storage.withdrawCandidateAnswerMemory(db, { profileId: owner.profileId, memoryId: globalMemory.id });
+    const newestEntry = evidenceStore.saveCandidateEvidence(db, { profileId: owner.profileId,
+      subject: '知识库排障', text: '通过日志发现重试导致接口超时', sourceKind: 'manual',
+      sourceId: 'live-context', sourceItemKey: 'new', sourceQuote: '通过日志发现重试导致接口超时', scope: { kind: 'global', key: '' } });
+    storage.saveCandidateFact(db, { profileId: owner.profileId, factKey: 'direct_preference', factValue: '接受白班' });
+    const liveInput = { profileId: owner.profileId, planId: owner.planId, sessionId: live.id };
+    for (const turnNumber of [1, 2, 3]) await service.answerTurn({ ...liveInput, turnNumber, answerText: `第${turnNumber}题：参与排查接口超时` });
+    await service.finishSession(liveInput);
+    await service.retryTurn({ ...liveInput, turnNumber: 2, answerText: '进一步说明日志排查过程' });
+    const currentInputs = calls.filter(call => (call.kind === 'step' && call.input.turns.length && call.input.turns[0].answer.startsWith('第1题'))
+      || (['report', 'retry'].includes(call.kind) && call.input.context.candidateEvidence.some(item => item.id === newestEntry.id)));
+    assert.strictEqual(currentInputs.length, 5, 'next questions, final report and retry must all refresh supplements');
+    for (const { input } of currentInputs) {
+      assert(!input.context.candidateEvidence.some(item => item.id === liveEntry.id));
+      assert(input.context.candidateEvidence.some(item => item.id === newestEntry.id));
+      assert(!input.context.answerMemories.some(item => item.id === globalMemory.id));
+      assert.strictEqual(input.context.candidateFacts.find(item => item.factKey === 'direct_preference').factValue, '接受白班');
+      assert.deepStrictEqual(input.context.resume, live.context.resume);
+      assert.deepStrictEqual(input.context.job, live.context.job);
+      assert(!JSON.stringify(input.context.interviewBrief).includes('通过日志定位知识库接口超时'));
+    }
+    assert.strictEqual(db.prepare('SELECT context_json FROM mock_interview_sessions WHERE id = ?').get(live.id).context_json, frozenRow);
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();

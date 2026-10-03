@@ -137,25 +137,40 @@ function completeDraft(db, input, { forceEdited }) {
   const scope = normalizeScope(input.scope);
   const extractedFacts = changed ? normalizedExtractedFacts(input.extractedFacts) : [];
   return immediateTransaction(db, () => {
-    const existing = db.prepare(`SELECT * FROM candidate_answer_memories
+    let existing = db.prepare(`SELECT * FROM candidate_answer_memories
       WHERE draft_id = ? AND final_digest = ?`).get(draft.id, finalDigest)
       || db.prepare(`SELECT * FROM candidate_answer_memories
         WHERE draft_id = ? ORDER BY updated_at DESC, id DESC`).all(draft.id)
         .find((memory) => comparableText(memory.final_text) === comparableText(finalText));
+    if (existing && forceEdited && completionKind === "profile_edit") {
+      const active = db.prepare(`SELECT id FROM candidate_answer_memories
+        WHERE profile_id = ? AND draft_id = ? AND withdrawn_at IS NULL
+        ORDER BY updated_at DESC, id DESC LIMIT 1`).get(profileId, draft.id);
+      if (existing.withdrawn_at || Number(active?.id) !== Number(existing.id)) {
+        // A fresh explicit confirmation needs a new version; reserve the canonical digest for it.
+        db.prepare("UPDATE candidate_answer_memories SET final_digest = ? WHERE id = ?")
+          .run(sha256(`historical:${existing.id}:${finalDigest}`), existing.id);
+        existing = null;
+      }
+    }
     if (existing) {
       const active = db.prepare(`SELECT id FROM candidate_answer_memories
         WHERE profile_id = ? AND draft_id = ? AND withdrawn_at IS NULL
         ORDER BY updated_at DESC, id DESC LIMIT 1`).get(profileId, draft.id);
+      if (existing.withdrawn_at) throw storageError("CANDIDATE_ANSWER_MEMORY_WITHDRAWN", "withdrawn answer cannot be completed again");
+      if (active && Number(active.id) !== Number(existing.id)) {
+        throw storageError("CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "superseded answer cannot be completed again");
+      }
       const affectedKeys = new Set(db.prepare(`SELECT DISTINCT fact_key FROM candidate_fact_revisions
         WHERE answer_memory_id IN (?, ?)`).all(existing.id, active?.id || existing.id).map((row) => row.fact_key));
       const strongerKind = completionKind === "sent" || existing.completion_kind === "sent" ? "sent" : existing.completion_kind;
       db.prepare(`UPDATE candidate_answer_memories
-        SET final_digest = ?, completion_kind = ?, withdrawn_at = NULL, updated_at = ? WHERE id = ?`)
-        .run(finalDigest, strongerKind, completedAt, existing.id);
+        SET final_digest = ?, completion_kind = ? WHERE id = ?`)
+        .run(finalDigest, strongerKind, existing.id);
       for (const factKey of affectedKeys) projectCandidateFact(db, profileId, factKey, completedAt);
       updateDraftOnCompletion(db, draft, finalText, completionKind, completedAt);
       const result = { ...mapMemory(db.prepare("SELECT * FROM candidate_answer_memories WHERE id = ?").get(existing.id)), changed };
-      input.afterComplete?.(result);
+      if (completionKind === "sent" && existing.completion_kind !== "sent") input.afterComplete?.(result);
       return result;
     }
     if (draft.closedAt && completionKind !== "profile_edit") {
@@ -223,6 +238,89 @@ function listCandidateAnswerMemories(db, {
   return db.prepare(`SELECT m.* FROM candidate_answer_memories m
     WHERE ${conditions.join(" AND ")}
     ORDER BY m.updated_at DESC, m.id DESC LIMIT ?`).all(...args).map(mapMemory);
+}
+
+function getCurrentCandidateAnswerMemory(db, { profileId, memoryId } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(memoryId, "memoryId");
+  const row = db.prepare(`SELECT m.* FROM candidate_answer_memories m
+    WHERE m.profile_id = ? AND m.id = ? AND m.withdrawn_at IS NULL
+      AND m.id = (SELECT m2.id FROM candidate_answer_memories m2
+        WHERE m2.profile_id = m.profile_id AND m2.draft_id = m.draft_id
+          AND m2.withdrawn_at IS NULL
+        ORDER BY m2.updated_at DESC, m2.id DESC LIMIT 1)`).get(profile, id);
+  return row ? mapMemory(row) : null;
+}
+
+function getMessageReplyLearningStatus(db, { profileId, memoryId } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(memoryId, "memoryId");
+  const row = db.prepare(`SELECT id, payload_json, created_at FROM candidate_job_events
+    WHERE profile_id = ? AND event_type = 'message_reply_learning'
+      AND json_extract(payload_json, '$.memoryId') = ?
+    ORDER BY id DESC LIMIT 1`).get(profile, id);
+  return row ? { ...parseJson(row.payload_json, {}), lastAttemptAt: row.created_at,
+    lastAttemptId: Number(row.id) } : null;
+}
+
+function listPendingMessageReplyLearning(db, { profileId, limit = 1 } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const bounded = boundedLimit(limit, 1, 5);
+  return db.prepare(`SELECT m.id AS memory_id FROM candidate_answer_memories m
+    JOIN candidate_job_events e ON e.id = (
+      SELECT e2.id FROM candidate_job_events e2
+      WHERE e2.profile_id = m.profile_id AND e2.event_type = 'message_reply_learning'
+        AND json_extract(e2.payload_json, '$.memoryId') = m.id
+      ORDER BY e2.id DESC LIMIT 1
+    )
+    WHERE m.profile_id = ? AND m.source = 'user_edited_reply' AND m.withdrawn_at IS NULL
+      AND m.id = (SELECT m2.id FROM candidate_answer_memories m2
+        WHERE m2.profile_id = m.profile_id AND m2.draft_id = m.draft_id
+          AND m2.withdrawn_at IS NULL
+        ORDER BY m2.updated_at DESC, m2.id DESC LIMIT 1)
+      AND json_extract(e.payload_json, '$.status') IN ('failed', 'unavailable')
+    ORDER BY e.created_at, e.id, m.id LIMIT ?`).all(profile, bounded)
+    .map(row => Number(row.memory_id));
+}
+
+function recordMessageReplyLearningStatus(db, { profileId, memoryId, status, factCount = 0, at = nowIso() } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(memoryId, "memoryId");
+  if (!["succeeded", "failed", "unavailable", "not_needed"].includes(status)) throw new TypeError("learning status is invalid");
+  const owner = db.prepare(`SELECT d.job_id FROM candidate_answer_memories m
+    JOIN message_reply_drafts d ON d.id = m.draft_id
+    WHERE m.id = ? AND m.profile_id = ?`).get(id, profile);
+  if (!owner) throw storageError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
+  db.prepare(`INSERT INTO candidate_job_events(profile_id, job_id, event_type, payload_json, created_at)
+    VALUES (?, ?, 'message_reply_learning', ?, ?)`).run(profile, owner.job_id,
+    JSON.stringify({ memoryId: id, status, factCount: Number(factCount) || 0 }), isoText(at, "at"));
+}
+
+function applyMessageReplyLearning(db, { profileId, memoryId, extractedFacts = [], afterApply, at = nowIso() } = {}) {
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(memoryId, "memoryId");
+  return immediateTransaction(db, () => {
+    const row = db.prepare(`SELECT * FROM candidate_answer_memories WHERE id = ? AND profile_id = ?`).get(id, profile);
+    if (!row || row.withdrawn_at) return null;
+    const latest = db.prepare(`SELECT id FROM candidate_answer_memories
+      WHERE profile_id = ? AND draft_id = ? AND withdrawn_at IS NULL
+      ORDER BY updated_at DESC, id DESC LIMIT 1`).get(profile, row.draft_id);
+    if (Number(latest?.id) !== id) return null;
+    if (getMessageReplyLearningStatus(db, { profileId: profile, memoryId: id })?.status === "succeeded") return mapMemory(row);
+    const facts = normalizedExtractedFacts(extractedFacts);
+    for (const fact of facts) {
+      db.prepare(`INSERT INTO candidate_fact_revisions(profile_id, fact_key, fact_value, operation, source,
+        answer_memory_id, evidence_text, withdrawn_at, created_at)
+        VALUES (?, ?, ?, 'set', 'user_edited_reply', ?, ?, NULL, ?)`).run(
+        profile, fact.factKey, fact.factValue, id, fact.evidenceText, row.created_at);
+      projectCandidateFact(db, profile, fact.factKey);
+    }
+    const memory = mapMemory(db.prepare("SELECT * FROM candidate_answer_memories WHERE id = ?").get(id));
+    afterApply?.(memory);
+    recordMessageReplyLearningStatus(db, { profileId: profile, memoryId: id,
+      status: "succeeded", factCount: facts.length, at });
+    return memory;
+  });
 }
 
 function setCandidateAnswerMemoryScope(db, {
@@ -401,7 +499,7 @@ function latestCandidateFactRevision(db, profileId, factKey, { job } = {}) {
     OR (json_extract(m.scope_json, '$.kind') = 'company' AND json_extract(m.scope_json, '$.key') = ?)
   ) ELSE 0 END)`;
   return db.prepare(`SELECT r.*,
-      CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END AS confirmed_at
+      r.created_at AS confirmed_at
     FROM candidate_fact_revisions r
     LEFT JOIN candidate_answer_memories m ON m.id = r.answer_memory_id
     WHERE r.profile_id = ? AND r.fact_key = ? AND r.withdrawn_at IS NULL
@@ -416,7 +514,7 @@ function latestCandidateFactRevision(db, profileId, factKey, { job } = {}) {
           ORDER BY m2.updated_at DESC, m2.id DESC LIMIT 1)
       ))
     ${scopeFilter}
-    ORDER BY CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END DESC, r.id DESC
+    ORDER BY r.created_at DESC, r.id DESC
     LIMIT 1`).get(profileId, factKey, ...(job === undefined ? [] : [String(job?.id ?? ''), String(job?.sourceId ?? ''), String(job?.company || '').trim()]));
 }
 
@@ -675,6 +773,11 @@ module.exports = {
   saveMessageReplyDraftEdit,
   completeMessageReplyDraft,
   listCandidateAnswerMemories,
+  getCurrentCandidateAnswerMemory,
+  getMessageReplyLearningStatus,
+  listPendingMessageReplyLearning,
+  recordMessageReplyLearningStatus,
+  applyMessageReplyLearning,
   setCandidateAnswerMemoryScope,
   reviseCandidateAnswerMemory,
   withdrawCandidateAnswerMemory,

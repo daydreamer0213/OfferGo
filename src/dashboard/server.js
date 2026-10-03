@@ -1318,12 +1318,20 @@ function createDashboardServer({
         messageReplyActionToken,
         helpers: messageDiscoveryViewHelpers()
       }));
-      if (req.method === "GET" && url.pathname === "/communication-profile") return sendHtml(res, renderCommunicationProfilePage({
-        db,
-        searchParams: url.searchParams,
-        service: replyLearning,
-        helpers: messageDiscoveryViewHelpers()
-      }));
+      if (req.method === "GET" && url.pathname === "/communication-profile") {
+        const page = renderCommunicationProfilePage({
+          db,
+          searchParams: url.searchParams,
+          service: replyLearning,
+          helpers: messageDiscoveryViewHelpers()
+        });
+        const profileId = Number(url.searchParams.get("profileId"));
+        if (modelReady("deep_analysis") && Number.isSafeInteger(profileId) && profileId > 0) {
+          void replyLearning.retryPendingLearning({ profileId, limit: 1 }).catch(error =>
+            logger?.warn?.("message_reply_learning_retry_failed", { code: String(error?.code || "MESSAGE_REPLY_LEARNING_FAILED") }));
+        }
+        return sendHtml(res, page);
+      }
       if (req.method === "GET" && url.pathname === "/communication/new") return sendHtml(res, renderCommunicationBuilderPage({ db, searchParams: url.searchParams, browserAuthority: frozenBrowserAuthority }));
       if (req.method === "GET" && url.pathname === "/communication") return sendHtml(res, renderCommunicationCenterPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/jobs/export.csv") return handleFilteredJobExport(res, db, url.searchParams);
@@ -4294,6 +4302,8 @@ async function handleCommunicationProfile(req, res, service) {
     const action = String(params.action || "").trim();
     if (action === "revise_memory") {
       await service.reviseMemory({ profileId, memoryId: params.memoryId, finalText: params.finalText });
+    } else if (action === "retry_learning") {
+      await service.retryLearning({ profileId, memoryId: params.memoryId });
     } else if (action === "set_memory_scope") {
       service.setMemoryScope({ profileId, memoryId: params.memoryId, scopeKind: params.scopeKind });
     } else if (action === "withdraw_memory") {

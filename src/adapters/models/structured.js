@@ -527,7 +527,7 @@ StructuredModelAdapter.prototype.draftMessageGroup = async function draftMessage
     "只有招聘方直接要求候选人参加、确认或选择一场面试，才是 interview_invitation。询问是否愿意了解岗位是 interest_check；索要候选人信息是 information_request；补充岗位或流程信息是 information_update；招聘方明确表示候选人不合适或明确结束本次机会才是 rejection；只提到面试产品、流程、系统、功能或经历不是面试邀约。",
     "对照：‘想邀请你参加周三下午的面试’是 interview_invitation；‘是否有意向了解这个岗位’是 interest_check；‘请补充你在项目中的职责’是 information_request；‘这个岗位负责开发面试安排系统’是 information_update。明确结束本次机会才是 rejection；面试时间不合适、薪资仍需沟通或暂时未回复都不是 rejection。",
     "Answer every required question or request.",
-    "使用 supplied profile 中的简历资料、facts、answerMemories 和已由用户确认的 candidateEvidence。普通在职、城市、薪资、到岗和经历问题是正常求职沟通，有资料就直接回答，不因隐私保护而拒答。",
+    "使用 supplied currentResume.text（当前启用的完整简历）、profile、facts、answerMemories 和已由用户确认的 candidateEvidence。currentResume 与旧 profile 的经历描述不同，以 currentResume 为准；当前事实以 facts 的最新有效确认记录为准。普通在职、城市、薪资、到岗和经历问题是正常求职沟通，有资料就直接回答，不因隐私保护而拒答。",
     "supplied answerMemories 只包含用户主动修改并且当前未撤回的历史回答；只有当前问题语义和适用范围一致时才能复用。",
     "如果使用 answerMemories，必须在 usedMemoryIds 中返回实际使用的记忆 id；不得返回未提供的 id。",
     "Do not confirm interview times unless supplied confirmed facts support them.",

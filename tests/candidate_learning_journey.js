@@ -108,6 +108,15 @@ class InterviewAdapter extends MockModelAdapter {
     } } });
     const oldAnswerDraft = await oldAnswerService.createDraft({ ...context, sourceResumeVersionId: profile.resumeVersionId, mode: 'general' });
     assert.equal(oldAnswerService.activateDraft({ ...context, draftId: oldAnswerDraft.id, finalText: oldAnswerDraft.finalText + '\n项目经历：参与企业知识库开发' }).status, 'activated');
+    const currentMaterial = require('../src/application/message_discovery/materials').candidateReplyMaterial(db, profile.profileId);
+    assert(currentMaterial.currentResume.text.includes('累计完成3个知识库接口联调项目'));
+    assert(!currentMaterial.currentResume.text.includes('测试用户'), 'reply input must use existing resume masking');
+    const resumeReply = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+      assert(input.currentResume.text.includes('累计完成3个知识库接口联调项目'), 'activated resume must reach the actual drafting adapter');
+      return { ...salaryReply, messageCategory: 'project_fact', requiredFactKeys: [], usedFactKeys: [],
+        responseItems: [], coverage: [], messages: ['做过3个知识库接口联调项目。'] };
+    } } });
+    await resumeReply({ ...currentMaterial, messages: [{ text: '做过多少个知识库联调项目？' }] });
     await confirmedFactsJourney();
     console.log('candidate_learning_journey ok');
   } finally { db.close(); }

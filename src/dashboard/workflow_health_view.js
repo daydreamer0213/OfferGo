@@ -66,7 +66,8 @@ function eventLabel(value) {
     skipped: "已跳过",
     no_reply: "无回复",
     follow_up: "新增跟进",
-    recommendation_feedback: "推荐反馈"
+    recommendation_feedback: "推荐反馈",
+    message_reply_learning: "回复资料整理"
   }[value] || String(value || "未知状态");
 }
 

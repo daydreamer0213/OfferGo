@@ -1,7 +1,10 @@
 const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDraft,
-  listCandidateAnswerMemories, reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
+  listCandidateAnswerMemories, getCurrentCandidateAnswerMemory,
+  reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
   setCandidateAnswerMemoryScope,
-  listCandidateFactRevisions, deleteCandidateFact } = require("../../storage/message_learning_store");
+  listCandidateFactRevisions, deleteCandidateFact, getMessageReplyLearningStatus,
+  listPendingMessageReplyLearning, recordMessageReplyLearningStatus,
+  applyMessageReplyLearning } = require("../../storage/message_learning_store");
 const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
 const { listCandidateEvidence, saveCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
@@ -19,10 +22,13 @@ function createMessageReplyLearningService({
   now = () => new Date().toISOString()
 } = {}) {
   if (!db) throw new Error("message reply learning service requires db");
+  const inFlight = new Map();
 
   return {
     saveDraft,
     completeDraft,
+    retryLearning,
+    retryPendingLearning,
     listCommunicationProfile,
     reviseMemory,
     setMemoryScope,
@@ -43,6 +49,18 @@ function createMessageReplyLearningService({
   }
 
   async function completeDraft({ profileId, draftId, finalText, completionKind, afterComplete }) {
+    const flightKey = `${profileId}:${draftId}:${replyDraftDigest(finalText)}`;
+    if (inFlight.has(flightKey)) {
+      const prior = await inFlight.get(flightKey);
+      return completionKind === "sent"
+        ? completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete }) : prior;
+    }
+    const task = completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete });
+    inFlight.set(flightKey, task);
+    try { return await task; } finally { inFlight.delete(flightKey); }
+  }
+
+  async function completeDraftOnce({ profileId, draftId, finalText, completionKind, afterComplete }) {
     const draft = requiredDraft(profileId, draftId);
     const existing = listCandidateAnswerMemories(db, {
       profileId,
@@ -53,24 +71,45 @@ function createMessageReplyLearningService({
       || !replyDraftWasEdited(memory.finalText, finalText)
     ));
     if (existing) {
-      const memory = completeMessageReplyDraft(db, {
-        profileId,
-        draftId,
-        finalText,
-        completionKind,
-        afterComplete,
-        completedAt: nowIso(now())
-      });
-      return completionResult(memory, requiredDraft(profileId, draftId), 0, "not_needed");
+      if (existing.withdrawnAt) throw serviceError("CANDIDATE_ANSWER_MEMORY_WITHDRAWN", "answer memory was withdrawn");
+      const current = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
+        .find(memory => memory.draftId === draft.id);
+      if (current?.id !== existing.id) throw serviceError("CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "answer memory was superseded");
+      const memory = completionKind === "sent" && existing.completionKind !== "sent"
+        ? completeMessageReplyDraft(db, { profileId, draftId, finalText, completionKind,
+          afterComplete, completedAt: nowIso(now()) }) : existing;
+      const status = getMessageReplyLearningStatus(db, { profileId, memoryId: existing.id });
+      if (status && ["failed", "unavailable"].includes(status.status)) {
+        return retryLearning({ profileId, memoryId: existing.id });
+      }
+      return completionResult(memory, requiredDraft(profileId, draftId), status?.factCount || 0, status?.status || "not_needed");
     }
     if (draft.closedAt) {
       throw serviceError("MESSAGE_REPLY_DRAFT_CLOSED", "message reply draft is already closed");
     }
+    const initialCurrent = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
+      .find(memory => memory.draftId === draft.id);
     const changed = replyDraftWasEdited(draft.originalText, finalText);
     const changedText = changed ? deriveUserChangedText(draft.originalText, finalText) : "";
     const extraction = changed
       ? await extractFacts({ draft, finalText, changedText })
       : { scope: { kind: "global", key: "" }, facts: [], status: "not_needed" };
+    const currentAfterExtraction = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
+      .find(memory => memory.draftId === draft.id);
+    if (currentAfterExtraction?.id !== initialCurrent?.id) {
+      if (currentAfterExtraction?.finalDigest === replyDraftDigest(finalText)) {
+        const memory = completionKind === "sent" && currentAfterExtraction.completionKind !== "sent"
+          ? completeMessageReplyDraft(db, { profileId, draftId, finalText, completionKind,
+            afterComplete, completedAt: nowIso(now()) }) : currentAfterExtraction;
+        const status = getMessageReplyLearningStatus(db, { profileId, memoryId: currentAfterExtraction.id });
+        return completionResult(memory, requiredDraft(profileId, draftId),
+          status?.factCount || 0, status?.status || "not_needed");
+      }
+      throw serviceError("CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "answer changed during learning");
+    }
+    if (requiredDraft(profileId, draftId).closedAt) {
+      throw serviceError("MESSAGE_REPLY_DRAFT_CLOSED", "message reply draft was closed during learning");
+    }
     const memory = completeMessageReplyDraft(db, {
       profileId,
       draftId,
@@ -80,6 +119,8 @@ function createMessageReplyLearningService({
       afterComplete: memory => {
         saveReplyExperiences(memory, draft, extraction.experiences || []);
         afterComplete?.(memory);
+        recordMessageReplyLearningStatus(db, { profileId, memoryId: memory.id,
+          status: extraction.status, factCount: extraction.facts.length, at: nowIso(now()) });
       },
       scope: extraction.scope,
       extractedFacts: extraction.facts,
@@ -93,6 +134,66 @@ function createMessageReplyLearningService({
     );
   }
 
+  async function retryLearning({ profileId, memoryId }) {
+    const key = `learning:${profileId}:${memoryId}`;
+    if (inFlight.has(key)) return inFlight.get(key);
+    const task = retryLearningOnce({ profileId, memoryId });
+    inFlight.set(key, task);
+    try { return await task; } finally { inFlight.delete(key); }
+  }
+
+  async function retryLearningOnce({ profileId, memoryId }) {
+    const current = getCurrentCandidateAnswerMemory(db, { profileId, memoryId });
+    if (!current || current.source !== "user_edited_reply") {
+      throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory is no longer current");
+    }
+    const status = getMessageReplyLearningStatus(db, { profileId, memoryId: current.id });
+    if (!status || !["failed", "unavailable"].includes(status.status)) {
+      return completionResult(current, requiredDraft(profileId, current.draftId), status?.factCount || 0, status?.status || "not_needed");
+    }
+    const draft = requiredDraft(profileId, current.draftId);
+    const confirmedExperiences = listCandidateEvidence(db, { profileId }).filter(entry =>
+      entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`);
+    const extraction = await extractFacts({ draft, finalText: current.finalText,
+      changedText: current.changedText, confirmedExperiences });
+    const stillCurrent = Boolean(getCurrentCandidateAnswerMemory(db, { profileId, memoryId: current.id }));
+    if (!stillCurrent || getMessageReplyLearningStatus(db, { profileId, memoryId: current.id })?.status === "succeeded") {
+      throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory changed during learning");
+    }
+    if (extraction.status !== "succeeded") {
+      recordMessageReplyLearningStatus(db, { profileId, memoryId: current.id, status: extraction.status, at: nowIso(now()) });
+      return completionResult(current, draft, 0, extraction.status);
+    }
+    const memory = applyMessageReplyLearning(db, { profileId, memoryId: current.id,
+      extractedFacts: extraction.facts, at: nowIso(now()),
+      afterApply: item => {
+        const retained = listCandidateEvidence(db, { profileId }).filter(entry =>
+          entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`
+          && current.finalText.includes(entry.sourceQuote));
+        const withdrawnDuringExtraction = new Set(confirmedExperiences
+          .filter(entry => !retained.some(active => active.id === entry.id))
+          .map(entry => entry.sourceQuote));
+        for (const entry of listCandidateEvidence(db, { profileId, includeWithdrawn: true })) {
+          if (entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`
+            && entry.withdrawnAt) withdrawnDuringExtraction.add(entry.sourceQuote);
+        }
+        saveReplyExperiences(item, draft,
+          [...retained, ...(extraction.experiences || []).filter(entry =>
+            !withdrawnDuringExtraction.has(entry.sourceQuote))].filter((entry, index, entries) =>
+            entries.findIndex(other => other.sourceQuote === entry.sourceQuote) === index));
+      } });
+    if (!memory) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory changed during learning");
+    return completionResult(memory, draft, extraction.facts.length, "succeeded");
+  }
+
+  async function retryPendingLearning({ profileId, limit = 1 }) {
+    let result = null;
+    for (const memoryId of listPendingMessageReplyLearning(db, { profileId, limit })) {
+      result = await retryLearning({ profileId, memoryId });
+    }
+    return result;
+  }
+
   function listCommunicationProfile({ profileId }) {
     const evidence = listCandidateEvidence(db, { profileId });
     const revisions = listCandidateFactRevisions(db, { profileId, limit: 2000 });
@@ -104,7 +205,7 @@ function createMessageReplyLearningService({
         activeOnly: true,
         source: "user_edited_reply",
         limit: 100
-      }),
+      }).map(memory => ({ ...memory, learning: getMessageReplyLearningStatus(db, { profileId, memoryId: memory.id }) })),
       revisions
     };
   }
@@ -126,9 +227,13 @@ function createMessageReplyLearningService({
       changedText,
       scope: current.scope,
       extractedFacts: extraction.facts,
-      afterComplete: memory => saveReplyExperiences(memory, draft,
-        [...retainedExperiences, ...(extraction.experiences || [])].filter((entry, index, entries) =>
-          entries.findIndex(item => item.sourceQuote === entry.sourceQuote) === index)),
+      afterComplete: memory => {
+        saveReplyExperiences(memory, draft,
+          [...retainedExperiences, ...(extraction.experiences || [])].filter((entry, index, entries) =>
+            entries.findIndex(item => item.sourceQuote === entry.sourceQuote) === index));
+        recordMessageReplyLearningStatus(db, { profileId, memoryId: memory.id,
+          status: extraction.status, factCount: extraction.facts.length, at: nowIso(now()) });
+      },
       completedAt: nowIso(now())
     });
     return completionResult(memory, requiredDraft(profileId, current.draftId), extraction.facts.length, extraction.status);
@@ -219,7 +324,8 @@ function createMessageReplyLearningService({
     withdrawReplyExperiences(memory.profileId, new Set(previous.map(item => `reply-edit:${item.id}`)));
     experiences.forEach((entry, index) => saveCandidateEvidence(db, {
       ...entry, profileId: memory.profileId, sourceKind: 'manual', sourceId: `reply-edit:${memory.id}`,
-      sourceItemKey: String(index), scope: { kind: 'global', key: '' }
+      sourceItemKey: String(index), scope: { kind: 'global', key: '' },
+      confirmedAt: entry.updatedAt || memory.createdAt
     }));
   }
 }

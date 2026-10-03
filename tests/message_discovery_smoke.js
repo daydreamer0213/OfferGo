@@ -413,12 +413,18 @@ async function uniqueCandidateAndPrivacySmoke() {
   });
   const logs = [];
   let modelCalls = 0;
+  require('../src/storage/candidate_store').saveCandidateResumeVersion(db, { profileId: fixture.profileId,
+    document: { text: '新版简历\n参与 KnowledgeFlow 接口联调并负责回归测试\n电话：13800138000',
+      contentHash: 'reply-current-resume', format: 'text', originalFileName: 'resume.txt' },
+    version: { name: '新版简历', isActive: true } });
   const summary = await runBossMessageDiscovery({
     db,
     profileId: fixture.profileId,
     reader: fakeReader([selected]),
-    classifyMessageGroup: async ({ profile, card, job, messages, answerMemories }) => {
+    classifyMessageGroup: async ({ profile, currentResume, card, job, messages, answerMemories }) => {
       modelCalls += 1;
+      assert(currentResume.text.includes('参与 KnowledgeFlow 接口联调并负责回归测试'));
+      assert(!currentResume.text.includes('13800138000'));
       assert.deepStrictEqual(profile.candidate, {
         city: "Guangzhou",
         targetTitles: ["Java Engineer"],

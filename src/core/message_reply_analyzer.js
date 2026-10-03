@@ -7,7 +7,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     throw new Error("message reply analyzer requires adapter.draftMessageGroup");
   }
   return async function analyzeMessageGroup(
-    { profile, job, platform = "", requestedActions = [], messages = [], facts = [], factRevisions = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
+    { profile, currentResume = null, job, platform = "", requestedActions = [], messages = [], facts = [], factRevisions = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
     { signal = null } = {}
   ) {
     const normalizedFacts = mergeCandidateFacts(facts, candidateEvidence, { job, factRevisions }).map((fact) => ({
@@ -25,6 +25,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
         && memoryIsCurrent(memory, now)), { query, job, limit: 12, maxChars: 8000 }));
     const input = {
       profile,
+      currentResume,
       job,
       platform: String(platform || "").toLowerCase(),
       requestedActions: Array.isArray(requestedActions)

@@ -126,7 +126,10 @@ function assertQuestionResponsibilityBoundary(questionText, citedEvidence) {
 }
 
 function normalizedQuestion(text) {
-  return String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}]/gu, '');
+  return String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}]/gu, '')
+    .replace(/^(?:(?:请问|请|你能否|你可以|能否))+/, '')
+    .replace(/(?:说说|讲讲|介绍|描述|说明)(?:一下)?/g, '说明')
+    .replace(/怎样|如何/g, '怎么').replace(/难点/g, '难题');
 }
 
 function assertTrainingQuestion(text, turns) {
@@ -136,7 +139,7 @@ function assertTrainingQuestion(text, turns) {
   }
   // A project preface alone is not training. Preserve mixed questions that actually ask about capability or motivation.
   const clauses = text.split(/[，,。.!！?？;；]/).filter(Boolean);
-  const logistics = clause => /(?:到岗|入职|上岗).*(?:时间|日期|多久|何时|什么时候|几天)|(?:何时|什么时候|多久|几天|哪天|是否|能否|可以|能).*?(?:到岗|入职|上岗)/.test(clause)
+  const logistics = clause => /(?:到岗|入职|上岗|来上班|开始工作|报到).*(?:时间|日期|多久|何时|什么时候|几天)|(?:何时|什么时候|多久|几天|哪天|几号|是否|能否|可以|能).*?(?:到岗|入职|上岗|来上班|开始工作|报到)/.test(clause)
     || /(?:期望|预期|期待|希望|要求|接受多少).*?(?:薪资|薪酬|工资|待遇)|(?:薪资|薪酬|工资|待遇).*?(?:期望|预期|期待|要求|多少|范围)/.test(clause)
     || /在职还是|是否.*离职|(?:目前|现在|当前).*?(?:在职|离职|就业状态|工作状态)|(?:在职|离职).*?(?:了吗|了么|吗|么)/.test(clause)
     || /(?:在哪|哪个|哪些|意向|期望|希望|接受).*?(?:城市|工作地点)|(?:是否|能否|可以|能|接受).*?出差|出差.*?(?:频率|接受|吗)/.test(clause)

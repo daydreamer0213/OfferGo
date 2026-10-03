@@ -62,19 +62,35 @@ function trainingStep(text, withTurns = false) {
 for (const question of ['你什么时候能到岗？', '你的期望薪资是多少？', '你目前是在职还是已离职？', '你预计何时入职？',
   '你的薪资范围是什么？', '你能接受多少薪资？', '你目前的就业状态是什么？', '结合简历项目经历，你预计什么时候能到岗？',
   '这个项目之后你什么时候到岗？', '结合技术经历，你什么时候能到岗？', '你目前在哪个城市？',
-  '你希望在哪个城市工作？', '你能接受出差吗？', '明天几点方便参加面试？']) {
+  '你希望在哪个城市工作？', '你能接受出差吗？', '明天几点方便参加面试？',
+  '你最快什么时候可以来上班？', '你什么时候能开始工作？', '最早几号能报到？']) {
   assert.throws(() => validateInterviewStep(trainingStep(question), { ...stepContext, interviewBrief: generalBrief, turns: [] }),
     error => error.code === 'MOCK_INTERVIEW_LOGISTICS_QUESTION');
 }
 for (const question of ['为什么离开上一份工作？这段经历如何影响求职方向？', '空档期选择学习 Node.js 的原因是什么？',
   '请说明知识库项目中的接口设计取舍。', '你在薪资计算系统开发中遇到了什么技术难题？', '为满足客户到岗排班需求，你如何设计系统？',
-  '请说明项目中的接口设计取舍；另外你什么时候能到岗？', '你目前为什么离职？', '你的期望薪资是多少，为什么选择知识库开发方向？']) {
+  '请说明项目中的接口设计取舍；另外你什么时候能到岗？', '你目前为什么离职？', '你的期望薪资是多少，为什么选择知识库开发方向？',
+  '请说说上班后遇到的技术难题。', '你什么时候开始这个项目，如何设计接口？']) {
   assert.strictEqual(validateInterviewStep(trainingStep(question), { ...stepContext, interviewBrief: generalBrief, turns: [] }).nextQuestion.text, question);
 }
 assert.throws(() => validateInterviewStep(trainingStep(' 请说明知识库项目中的接口设计取舍? ', true), {
   ...stepContext, interviewBrief: generalBrief,
   turns: [{ turnNumber: 1, question: '请说明知识库项目中的接口设计取舍？', answer: '选择统一接口' }]
 }), error => error.code === 'MOCK_INTERVIEW_REPEATED_QUESTION');
+assert.throws(() => validateInterviewStep(trainingStep('请说说项目中遇到的技术难点。', true), {
+  ...stepContext, interviewBrief: generalBrief,
+  turns: [{ turnNumber: 1, question: '请介绍项目中遇到的技术难题。', answer: '接口偶尔超时' }]
+}), error => error.code === 'MOCK_INTERVIEW_REPEATED_QUESTION');
+assert(validateInterviewStep(trainingStep('请说说项目中遇到的技术难题如何解决。', true), {
+  ...stepContext, interviewBrief: generalBrief,
+  turns: [{ turnNumber: 1, question: '请介绍项目中遇到的技术难题。', answer: '接口偶尔超时' }]
+}).nextQuestion, 'a follow-up asking for a solution is new information');
+for (const question of ['请介绍一下项目中遇到的技术难题。', '请问你能否说说项目中遇到的技术难点？']) {
+  assert.throws(() => validateInterviewStep(trainingStep(question, true), {
+    ...stepContext, interviewBrief: generalBrief,
+    turns: [{ turnNumber: 1, question: '请介绍项目中遇到的技术难题。', answer: '接口偶尔超时' }]
+  }), error => error.code === 'MOCK_INTERVIEW_REPEATED_QUESTION');
+}
 
 assert.deepStrictEqual(normalizeInterviewSettings({
   type: "technical",

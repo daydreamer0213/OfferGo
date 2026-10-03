@@ -32,10 +32,12 @@ main().catch((error) => {
 async function main() {
   const fixture = createFixture();
   let browserCalls = 0;
+  let extractionFails = false;
   const learning = createMessageReplyLearningService({
     db,
     adapter: {
       async extractReplyEditFacts(input) {
+        if (extractionFails) throw new Error('temporary extraction failure');
         return {
           scope: { kind: "global", key: "" },
           facts: input.changedText.includes("广州")
@@ -199,6 +201,29 @@ async function main() {
   assert.strictEqual(listCandidateAnswerMemories(db, { profileId: fixture.profileId, source: "user_edited_reply" }).length, 0);
   profilePage = await getText(base, `/communication-profile?profileId=${fixture.profileId}`);
   assert(!profilePage.body.includes("我目前在广州，最快下周一到岗。"));
+
+  const retryDraft = recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId, cardId: fixture.cardId, jobId: fixture.jobId,
+    messageGroupKey: `sha256:${"d".repeat(64)}`, questionSummary: '确认城市',
+    messageIntent: 'information_request', messageCategory: 'other', messages: ['我目前在广州。']
+  })[0];
+  extractionFails = true;
+  response = await postJson(base, '/api/message-reply-draft', {
+    action: 'complete', profileId: fixture.profileId, draftId: retryDraft.id,
+    text: '我目前在深圳。', completionKind: 'copied'
+  });
+  assert.equal(response.body.extractionStatus, 'failed');
+  profilePage = await getText(base, `/communication-profile?profileId=${fixture.profileId}`);
+  assert.match(profilePage.body, /回答已保存，资料暂未整理/);
+  assert.match(profilePage.body, /补做资料整理/);
+  extractionFails = false;
+  response = await postForm(base, '/api/communication-profile', {
+    action: 'retry_learning', profileId: fixture.profileId,
+    memoryId: response.body.memoryId
+  });
+  assert.equal(response.status, 303);
+  profilePage = await getText(base, `/communication-profile?profileId=${fixture.profileId}`);
+  assert.match(profilePage.body, /回答和资料已保存/);
 
   const sentDraft = recordMessageReplyDrafts(db, {
     profileId: fixture.profileId,
@@ -392,6 +417,7 @@ async function editableDraftClientSmoke(markup, draftId) {
   const timers = new Map();
   let nextTimer = 1;
   let completeFailure = false;
+  let extractionStatus = 'succeeded';
   let holdSave = false;
   let releaseHeldSave = null;
   const document = {
@@ -421,7 +447,7 @@ async function editableDraftClientSmoke(markup, draftId) {
       }
       if (completeFailure && body.action === "complete") throw new Error("offline");
       return jsonResponse(200, body.action === "complete"
-        ? { ok: true, draftId, revision: 2, changed: true, learnedFactCount: 1, extractionStatus: "succeeded" }
+        ? { ok: true, draftId, revision: 2, changed: true, learnedFactCount: 1, extractionStatus }
         : { ok: true, draftId, revision: 1 });
     },
     setTimeout(callback, delay) { const id = nextTimer++; timers.set(id, { callback, delay }); return id; },
@@ -461,7 +487,12 @@ async function editableDraftClientSmoke(markup, draftId) {
   const completeIndex = raceOrder.findIndex((item) => item[0] === "fetch" && item[1] === "complete");
   assert(clipboardIndex >= 0 && completeIndex > clipboardIndex, "clipboard write must finish before local completion starts");
   assert.strictEqual(requests.filter((item) => item.body.action === "complete").at(-1).body.text, "复制前的最后修改", "completion must persist the exact text copied, not later typing");
-  assert.match(feedback.textContent, /已记住你这次修改的回答/);
+  assert.match(feedback.textContent, /已复制，修改后的回答和资料已保存/);
+
+  extractionStatus = 'failed';
+  field.value = '另一条需要补做的回答';
+  await copyHandlers.get('click')();
+  assert.match(feedback.textContent, /回答已保存；资料暂未整理/);
 
   completeFailure = true;
   field.value = "复制前的最后修改";

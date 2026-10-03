@@ -1,4 +1,7 @@
 const assert = require("node:assert");
+const { applyMessageReplyLearning, recordMessageReplyLearningStatus,
+  getMessageReplyLearningStatus } = require('../src/storage/message_learning_store');
+const { saveCandidateEvidence, listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
 const {
   openDb,
   recordMessageReplyDrafts,
@@ -295,7 +298,7 @@ try {
     completedAt: "2026-08-28T01:09:35.000Z"
   });
   assert.strictEqual(currentFacts(db, fixture.profileId).accepts_overtime, "接受");
-  const answerARestored = completeMessageReplyDraft(db, {
+  assert.throws(() => completeMessageReplyDraft(db, {
     profileId: fixture.profileId,
     draftId: revisionDraft.id,
     finalText: "我不接受加班。  ",
@@ -304,11 +307,10 @@ try {
     scope: { kind: "job", key: String(fixture.jobId) },
     extractedFacts: [{ factKey: "accepts_overtime", factValue: "不接受", evidenceText: "不接受加班" }],
     completedAt: "2026-08-28T01:09:40.000Z"
-  });
-  assert.strictEqual(answerARestored.id, answerA.id, "A to B to A and line whitespace must reactivate the original answer instead of duplicating it");
-  assert.strictEqual(currentFacts(db, fixture.profileId).accepts_overtime, "不接受", "reactivating A must also make A's facts newer than facts from another draft");
+  }), (error) => error.code === "CANDIDATE_ANSWER_MEMORY_SUPERSEDED", "late completion must not restore a superseded answer");
+  assert.strictEqual(currentFacts(db, fixture.profileId).accepts_overtime, "接受", "late completion must not override a later confirmation");
   assert.strictEqual(listCandidateAnswerMemories(db, { profileId: fixture.profileId, activeOnly: true })
-    .find((memory) => memory.draftId === revisionDraft.id).id, answerA.id, "the restored A answer must become active again");
+    .find((memory) => memory.draftId === revisionDraft.id).id, answerB.id);
   assert.strictEqual(listCandidateAnswerMemories(db, { profileId: fixture.profileId, activeOnly: false })
     .filter((memory) => memory.draftId === revisionDraft.id).length, 2);
   assert.strictEqual(answerB.withdrawnAt, "");
@@ -317,7 +319,7 @@ try {
     memoryId: answerA.id,
     withdrawnAt: "2026-08-28T01:09:45.000Z"
   });
-  const reactivatedWithdrawn = completeMessageReplyDraft(db, {
+  assert.throws(() => completeMessageReplyDraft(db, {
     profileId: fixture.profileId,
     draftId: revisionDraft.id,
     finalText: "我不接受加班。",
@@ -326,9 +328,14 @@ try {
     scope: { kind: "job", key: String(fixture.jobId) },
     extractedFacts: [{ factKey: "accepts_overtime", factValue: "不接受", evidenceText: "不接受加班" }],
     completedAt: "2026-08-28T01:09:50.000Z"
+  }), (error) => error.code === "CANDIDATE_ANSWER_MEMORY_WITHDRAWN", "withdrawn answer must stay withdrawn");
+  completeMessageReplyDraft(db, {
+    profileId: fixture.profileId,
+    draftId: revisionDraft.id,
+    finalText: answerB.finalText,
+    completionKind: "sent",
+    completedAt: "2026-08-28T01:09:51.000Z"
   });
-  assert.strictEqual(reactivatedWithdrawn.id, answerA.id);
-  assert.strictEqual(reactivatedWithdrawn.withdrawnAt, "", "re-completing a withdrawn answer must reactivate it");
   assert.throws(
     () => completeMessageReplyDraft(db, {
       profileId: fixture.profileId,
@@ -449,6 +456,33 @@ try {
   assert.strictEqual(db.prepare("SELECT count(*) AS n FROM candidate_progress_events WHERE card_id = ? AND type = 'reply_confirmed_sent'").get(zhaopin.cardId).n, 0);
   assert.strictEqual(db.prepare("SELECT count(*) AS n FROM candidate_funnel_entries WHERE job_id = ?").get(zhaopin.jobId).n, 0);
   assert.strictEqual(db.prepare("SELECT count(*) AS n FROM message_reply_send_batches WHERE profile_id = ?").get(zhaopin.profileId).n, 0);
+
+  const rollbackDraft = recordMessageReplyDrafts(db, {
+    profileId: fixture.profileId, cardId: fixture.cardId, jobId: fixture.jobId,
+    messageGroupKey: digest('learning-rollback'), questionSummary: '确认城市',
+    messageIntent: 'information_request', messageCategory: 'other',
+    messages: ['我目前在广州。'], createdAt: '2026-08-28T03:00:00.000Z'
+  })[0];
+  const rollbackMemory = completeMessageReplyDraft(db, { profileId: fixture.profileId,
+    draftId: rollbackDraft.id, finalText: '我目前在深圳。', changedText: '深圳',
+    completionKind: 'copied', completedAt: '2026-08-28T03:01:00.000Z' });
+  recordMessageReplyLearningStatus(db, { profileId: fixture.profileId,
+    memoryId: rollbackMemory.id, status: 'failed', at: '2026-08-28T03:02:00.000Z' });
+  const previousFacts = listCandidateFactRevisions(db, { profileId: fixture.profileId }).length;
+  const previousEvidence = listCandidateEvidence(db, { profileId: fixture.profileId }).length;
+  assert.throws(() => applyMessageReplyLearning(db, { profileId: fixture.profileId,
+    memoryId: rollbackMemory.id, extractedFacts: [{ factKey: 'current_city', factValue: '深圳', evidenceText: '深圳' }],
+    afterApply: () => {
+      saveCandidateEvidence(db, { profileId: fixture.profileId, subject: '项目经历', text: '我负责接口联调。',
+        sourceKind: 'manual', sourceId: `reply-edit:${rollbackMemory.id}`, sourceItemKey: '0',
+        sourceQuote: '我负责接口联调。' });
+      throw new Error('callback failed');
+    }
+  }), /callback failed/);
+  assert.strictEqual(listCandidateFactRevisions(db, { profileId: fixture.profileId }).length, previousFacts);
+  assert.strictEqual(listCandidateEvidence(db, { profileId: fixture.profileId }).length, previousEvidence);
+  assert.strictEqual(getMessageReplyLearningStatus(db, { profileId: fixture.profileId,
+    memoryId: rollbackMemory.id }).status, 'failed');
 
   console.log("message_learning_store_smoke ok");
 } finally {

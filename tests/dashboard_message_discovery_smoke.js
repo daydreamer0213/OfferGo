@@ -2739,11 +2739,17 @@ async function durableMissingFactRecoverySmoke() {
     assert.match(markup, /生成回复草稿/);
     assert.doesNotMatch(markup, /这条消息仍在等待你处理/);
     let factAttempts = 0;
+    const resumeStore = require('../src/storage/candidate_store');
+    resumeStore.saveCandidateResumeVersion(durableDb, { profileId,
+      document: { text: 'Missing fact candidate\n参与需求梳理与产品验收', contentHash: 'fact-resume-1', format: 'text', originalFileName: 'resume.txt' },
+      version: { name: '第一版', isActive: true } });
     const answering = createMessageDiscoveryController({
       db: durableDb,
       modelReady: () => true,
       getModelConfig: () => ({ provider: "mock", providers: { mock: {} } }),
       createAnalyzer: () => async (input) => {
+        assert(input.currentResume.text.includes(factAttempts ? '负责接口联调和产品验收' : '参与需求梳理与产品验收'));
+        assert(!input.currentResume.text.includes('Missing fact candidate'));
         assert(input.facts.some((fact) => fact.factKey === "availability_date"
           && fact.factValue === "本周工作日下午都方便电话沟通"));
         factAttempts += 1;
@@ -2774,6 +2780,9 @@ async function durableMissingFactRecoverySmoke() {
     assert.strictEqual(answering.pageState(profileId).results[0].missingFactKey, 'expected_salary');
     const facts = require('../src/storage/candidate_store').listCandidateFacts(durableDb, profileId);
     assert(facts.some(fact => fact.factKey === 'availability_date' && fact.factValue === '本周工作日下午都方便电话沟通'));
+    resumeStore.saveCandidateResumeVersion(durableDb, { profileId,
+      document: { text: 'Missing fact candidate\n负责接口联调和产品验收', contentHash: 'fact-resume-2', format: 'text', originalFileName: 'resume.txt' },
+      version: { name: '第二版', isActive: true } });
     const second = await answering.answerFact({ profileId, cardId: card.id, messageGroupKey, factKey: 'expected_salary', factValue: '15–20K' });
     assert.strictEqual(second.body.status, 'completed');
     const answeredResult = answering.pageState(profileId).results[0];

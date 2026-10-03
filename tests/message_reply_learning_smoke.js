@@ -156,6 +156,14 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
     assert.strictEqual(repeated.memoryId, completed.memoryId);
     assert.strictEqual(calls.length, 1, "idempotent completion should not pay for extraction twice");
     assert.strictEqual(listCandidateFactRevisions(db, { profileId: fixture.profileId }).length, 2);
+    let successfulSendCallbacks = 0;
+    await service.completeDraft({ profileId: fixture.profileId, draftId: firstDraft.id,
+      finalText: saved.currentText, completionKind: 'sent', afterComplete: () => { successfulSendCallbacks++; } });
+    assert.equal(successfulSendCallbacks, 1, 'copied successful answer upgrades to sent once');
+    assert.equal(listCandidateAnswerMemories(db, { profileId: fixture.profileId }).find(item => item.id === completed.memoryId).completionKind, 'sent');
+    await service.completeDraft({ profileId: fixture.profileId, draftId: firstDraft.id,
+      finalText: saved.currentText, completionKind: 'sent', afterComplete: () => { successfulSendCallbacks++; } });
+    assert.equal(successfulSendCallbacks, 1, 'sent replay does not repeat callback');
 
     const unchangedDraft = seedDraft(db, fixture, "service-2", "您好，感谢沟通。这个岗位我愿意继续了解。");
     const unchanged = await service.completeDraft({
@@ -182,6 +190,50 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
     assert.strictEqual(failed.learnedFactCount, 0);
     assert(listCandidateAnswerMemories(db, { profileId: fixture.profileId, activeOnly: true, source: "user_edited_reply" })
       .some((memory) => memory.finalText === "您好，我目前在深圳。"), "extractor failure must not lose the user's final answer");
+    extractionMode = "success";
+    const recovery = await service.completeDraft({ profileId: fixture.profileId, draftId: failureDraft.id,
+      finalText: "您好，我目前在深圳。", completionKind: "copied" });
+    assert.strictEqual(recovery.memoryId, failed.memoryId);
+    assert.strictEqual(recovery.extractionStatus, "succeeded", "same completion retries only learning");
+    assert.strictEqual(calls.length, 3, "failed extraction is retried once");
+    await service.completeDraft({ profileId: fixture.profileId, draftId: failureDraft.id,
+      finalText: "您好，我目前在深圳。", completionKind: "copied" });
+    assert.strictEqual(calls.length, 3, "successful learning remains idempotent");
+
+    extractionMode = 'failure';
+    const sendAfterFailureDraft = seedDraft(db, fixture, 'service-send-after-failure', '我目前在广州。', 'other');
+    const pendingSend = await service.completeDraft({ profileId: fixture.profileId,
+      draftId: sendAfterFailureDraft.id, finalText: '我目前在深圳。', completionKind: 'copied' });
+    assert.equal(pendingSend.extractionStatus, 'failed');
+    let failedSendCallbacks = 0;
+    const sentAfterFailure = await service.completeDraft({ profileId: fixture.profileId,
+      draftId: sendAfterFailureDraft.id, finalText: '我目前在深圳。', completionKind: 'sent',
+      afterComplete: () => { failedSendCallbacks++; } });
+    assert.equal(failedSendCallbacks, 1, 'sent callback still runs when learning remains failed');
+    assert.equal(sentAfterFailure.extractionStatus, 'failed');
+    assert.equal(listCandidateAnswerMemories(db, { profileId: fixture.profileId }).find(item => item.id === pendingSend.memoryId).completionKind, 'sent');
+    await service.completeDraft({ profileId: fixture.profileId, draftId: sendAfterFailureDraft.id,
+      finalText: '我目前在深圳。', completionKind: 'sent', afterComplete: () => { failedSendCallbacks++; } });
+    assert.equal(failedSendCallbacks, 1, 'replayed sent completion must not replay callback');
+    extractionMode = 'success';
+
+    const concurrentDraft = seedDraft(db, fixture, 'service-concurrent-send', '我目前在广州。', 'other');
+    let releaseConcurrent;
+    const concurrentService = createMessageReplyLearningService({ db, adapter: {
+      extractReplyEditFacts: () => new Promise(resolve => { releaseConcurrent = () => resolve({ facts: [] }); })
+    } });
+    let concurrentSentCallbacks = 0;
+    const copying = concurrentService.completeDraft({ profileId: fixture.profileId,
+      draftId: concurrentDraft.id, finalText: '我目前在南京。', completionKind: 'copied' });
+    const sending = concurrentService.completeDraft({ profileId: fixture.profileId,
+      draftId: concurrentDraft.id, finalText: '我目前在南京。', completionKind: 'sent',
+      afterComplete: () => { concurrentSentCallbacks++; } });
+    releaseConcurrent();
+    const [copiedConcurrent, sentConcurrent] = await Promise.all([copying, sending]);
+    assert.equal(copiedConcurrent.memoryId, sentConcurrent.memoryId);
+    assert.equal(concurrentSentCallbacks, 1, 'concurrent copy and send retain the sent callback');
+    assert.equal(listCandidateAnswerMemories(db, { profileId: fixture.profileId })
+      .find(item => item.id === sentConcurrent.memoryId).completionKind, 'sent');
 
     const noAdapterDraft = seedDraft(db, fixture, "service-4", "您好，我暂不接受出差。", "qualification");
     const noAdapterService = createMessageReplyLearningService({ db, adapter: {}, now: () => "2026-08-28T02:06:00.000Z" });
@@ -227,6 +279,8 @@ assert.equal(validateReplyEditFactExtraction({ experiences: [{ subject: '联调'
 
     await reusableExperienceSmoke(db, fixture);
     await factsLifecycleSmoke();
+    await recoveryLifecycleSmoke();
+    await explicitRevertSmoke();
     console.log("message_reply_learning_smoke ok");
   } finally {
     db.close();
@@ -278,7 +332,45 @@ async function reusableExperienceSmoke(database, fixture) {
   const salaryOnly = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() { return { facts: [], experiences: [] }; } } });
   const latest = await salaryOnly.reviseMemory({ profileId: fixture.profileId, memoryId: shortCorrection.memoryId, finalText: quote + condition.replace('20K', '25K') });
   assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text, quote, 'editing salary alone must keep the unchanged personal story');
-  salaryOnly.withdrawMemory({ profileId: fixture.profileId, memoryId: latest.memoryId });
+  const failingEdit = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+    throw new Error('temporary extraction failure');
+  } } });
+  const failedRevision = await failingEdit.reviseMemory({ profileId: fixture.profileId,
+    memoryId: latest.memoryId, finalText: quote + condition.replace('20K', '28K') });
+  assert.equal(failedRevision.extractionStatus, 'failed');
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text, quote);
+  const confirmedEntry = listCandidateEvidence(database, { profileId: fixture.profileId })[0];
+  salaryOnly.reviseEvidence({ profileId: fixture.profileId, id: confirmedEntry.id,
+    subject: confirmedEntry.subject, text: `${quote} 补充：我也做了回归验证。` });
+  database.prepare('UPDATE candidate_evidence_entries SET updated_at = ? WHERE id = ?')
+    .run('2026-10-20T00:00:00.000Z', confirmedEntry.id);
+  const factsOnlyRecovery = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+    return { facts: [], experiences: [] };
+  } } });
+  await factsOnlyRecovery.retryLearning({ profileId: fixture.profileId, memoryId: failedRevision.memoryId });
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.text,
+    `${quote} 补充：我也做了回归验证。`,
+    'facts-only recovery retains a confirmed experience from the failed revision');
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId })[0]?.updatedAt,
+    '2026-10-20T00:00:00.000Z', 'retry keeps the later manual experience correction time');
+  const anotherFailedRevision = await failingEdit.reviseMemory({ profileId: fixture.profileId,
+    memoryId: failedRevision.memoryId, finalText: quote + condition.replace('20K', '29K') });
+  let releaseLearning;
+  const delayedRecovery = createMessageReplyLearningService({ db: database, adapter: {
+    extractReplyEditFacts: () => new Promise(resolve => { releaseLearning = () => resolve({
+      facts: [], experiences: [{ subject: '联调', sourceQuote: quote }]
+    }); })
+  } });
+  const late = delayedRecovery.retryLearning({ profileId: fixture.profileId,
+    memoryId: anotherFailedRevision.memoryId });
+  const entryToWithdraw = listCandidateEvidence(database, { profileId: fixture.profileId })[0];
+  const { withdrawCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+  withdrawCandidateEvidence(database, { profileId: fixture.profileId, id: entryToWithdraw.id });
+  releaseLearning();
+  await late;
+  assert.equal(listCandidateEvidence(database, { profileId: fixture.profileId }).length, 0,
+    'experience withdrawn during recovery must stay withdrawn');
+  salaryOnly.withdrawMemory({ profileId: fixture.profileId, memoryId: anotherFailedRevision.memoryId });
   assert.deepEqual(listCandidateEvidence(database, { profileId: fixture.profileId }), []);
   const rollbackDraft = seedDraft(database, fixture, 'reusable-rollback', '感谢介绍。', 'project_fact');
   await assert.rejects(service.completeDraft({ profileId: fixture.profileId, draftId: rollbackDraft.id,
@@ -286,6 +378,183 @@ async function reusableExperienceSmoke(database, fixture) {
   }), /completion failed/);
   assert.deepEqual(listCandidateEvidence(database, { profileId: fixture.profileId }), [], 'failed completion must roll back its reusable story');
   assert(!listCandidateAnswerMemories(database, { profileId: fixture.profileId }).some(item => item.draftId === rollbackDraft.id), 'failed completion must roll back its answer memory');
+}
+
+async function recoveryLifecycleSmoke() {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = 'D:\\DevData\\OfferGo-validation\\2026-10-03\\learning-recovery';
+  fs.mkdirSync(root, { recursive: true });
+  const dbPath = path.join(root, `reply-recovery-${process.pid}.sqlite`);
+  let database = openDb(dbPath);
+  try {
+    const fixture = createFixture(database);
+    const draft = seedDraft(database, fixture, 'restart-recovery', '我目前在广州。', 'other');
+    const failedService = createMessageReplyLearningService({ db: database, now: () => '2026-10-01T00:00:00.000Z',
+      adapter: { async extractReplyEditFacts() { throw new Error('temporary failure'); } } });
+    const failed = await failedService.completeDraft({ profileId: fixture.profileId, draftId: draft.id,
+      finalText: '我目前在深圳。', completionKind: 'copied' });
+    assert.equal(failed.extractionStatus, 'failed');
+    assert.equal(failedService.listCommunicationProfile({ profileId: fixture.profileId }).answers[0].learning.status, 'failed');
+    database.close();
+    database = openDb(dbPath);
+    const resumedFailure = createMessageReplyLearningService({ db: database, now: () => '2026-10-01T00:00:00.000Z',
+      adapter: { async extractReplyEditFacts() { throw new Error('temporary failure'); } } });
+    let calls = 0;
+    const successful = createMessageReplyLearningService({ db: database, now: () => '2026-10-06T00:00:00.000Z',
+      adapter: { async extractReplyEditFacts() { calls++; return { facts: [
+        { factKey: 'current_city', factValue: '深圳', evidenceText: '深圳' }
+      ] }; } } });
+    const { recordCandidateFactValue } = require('../src/storage/message_learning_store');
+    recordCandidateFactValue(database, { profileId: fixture.profileId, factKey: 'current_city', factValue: '成都',
+      occurredAt: '2026-10-05T00:00:00.000Z' });
+    successful.setMemoryScope({ profileId: fixture.profileId, memoryId: failed.memoryId, scopeKind: 'global' });
+    const [a, b] = await Promise.all([
+      successful.retryLearning({ profileId: fixture.profileId, memoryId: failed.memoryId }),
+      successful.retryLearning({ profileId: fixture.profileId, memoryId: failed.memoryId })
+    ]);
+    assert.equal(a.extractionStatus, 'succeeded');
+    assert.equal(b.memoryId, a.memoryId);
+    assert.equal(calls, 1, 'concurrent retry shares one extraction');
+    assert.equal(currentFacts(database, fixture.profileId).current_city, '成都', 'later manual fact wins over recovered old fact');
+    assert.equal(listCandidateAnswerMemories(database, { profileId: fixture.profileId })
+      .find(item => item.id === failed.memoryId).scope.kind, 'global', 'retry preserves manually selected answer scope');
+    assert.equal(listCandidateFactRevisions(database, { profileId: fixture.profileId, factKey: 'current_city' })
+      .filter(item => item.answerMemoryId === failed.memoryId).length, 1, 'recovered fact is written once');
+    await successful.retryLearning({ profileId: fixture.profileId, memoryId: failed.memoryId });
+    assert.equal(calls, 1, 'success is durable after retry');
+
+    const withdrawnDraft = seedDraft(database, fixture, 'withdrawn-recovery', '我目前在广州。', 'other');
+    const withdrawn = await resumedFailure.completeDraft({ profileId: fixture.profileId, draftId: withdrawnDraft.id,
+      finalText: '我目前在佛山。', completionKind: 'copied' });
+    resumedFailure.withdrawMemory({ profileId: fixture.profileId, memoryId: withdrawn.memoryId });
+    await assert.rejects(successful.retryLearning({ profileId: fixture.profileId, memoryId: withdrawn.memoryId }),
+      error => error.code === 'CANDIDATE_ANSWER_MEMORY_NOT_CURRENT');
+    await assert.rejects(successful.completeDraft({ profileId: fixture.profileId, draftId: withdrawnDraft.id,
+      finalText: '我目前在佛山。', completionKind: 'copied' }),
+      error => error.code === 'CANDIDATE_ANSWER_MEMORY_WITHDRAWN');
+
+    const deletedDraft = seedDraft(database, fixture, 'delete-recovery', '我目前在广州。', 'other');
+    const pending = await resumedFailure.completeDraft({ profileId: fixture.profileId, draftId: deletedDraft.id,
+      finalText: '我目前在东莞。', completionKind: 'copied' });
+    successful.deleteFact({ profileId: fixture.profileId, factKey: 'current_city' });
+    await successful.retryLearning({ profileId: fixture.profileId, memoryId: pending.memoryId });
+    assert.equal(currentFacts(database, fixture.profileId).current_city, undefined, 'later deletion tombstone wins over recovered old fact');
+
+    const racingDraft = seedDraft(database, fixture, 'racing-recovery', '我目前在广州。', 'other');
+    const racingMemory = await resumedFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: racingDraft.id, finalText: '我目前在珠海。', completionKind: 'copied' });
+    let release;
+    const racing = createMessageReplyLearningService({ db: database, adapter: {
+      extractReplyEditFacts: () => new Promise(resolve => { release = () => resolve({ facts: [
+        { factKey: 'current_city', factValue: '珠海', evidenceText: '珠海' }
+      ] }); })
+    } });
+    const attempt = racing.retryLearning({ profileId: fixture.profileId, memoryId: racingMemory.memoryId });
+    racing.withdrawMemory({ profileId: fixture.profileId, memoryId: racingMemory.memoryId });
+    release();
+    await assert.rejects(attempt, error => error.code === 'CANDIDATE_ANSWER_MEMORY_NOT_CURRENT');
+    assert.equal(listCandidateFactRevisions(database, { profileId: fixture.profileId, factKey: 'current_city' })
+      .filter(item => item.answerMemoryId === racingMemory.memoryId).length, 0,
+      'withdrawal during extraction prevents late fact writes');
+
+    const supersededDraft = seedDraft(database, fixture, 'superseded-recovery', '我目前在广州。', 'other');
+    const superseded = await resumedFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: supersededDraft.id, finalText: '我目前在珠海。', completionKind: 'copied' });
+    const staleAttempt = racing.retryLearning({ profileId: fixture.profileId, memoryId: superseded.memoryId });
+    await successful.reviseMemory({ profileId: fixture.profileId, memoryId: superseded.memoryId,
+      finalText: '我目前在中山。' });
+    release();
+    await assert.rejects(staleAttempt, error => error.code === 'CANDIDATE_ANSWER_MEMORY_NOT_CURRENT');
+    assert.equal(listCandidateFactRevisions(database, { profileId: fixture.profileId, factKey: 'current_city' })
+      .filter(item => item.answerMemoryId === superseded.memoryId).length, 0,
+      'superseded answer cannot receive late learning');
+
+    const olderPendingDraft = seedDraft(database, fixture, 'older-pending-recovery', '我目前在广州。', 'other');
+    const olderPending = await resumedFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: olderPendingDraft.id, finalText: '我目前在珠海。', completionKind: 'copied' });
+    const newerSuccessDraft = seedDraft(database, fixture, 'newer-success-recovery', '我目前在广州。', 'other');
+    await successful.completeDraft({ profileId: fixture.profileId, draftId: newerSuccessDraft.id,
+      finalText: '我目前在深圳。', completionKind: 'copied' });
+    const selected = await successful.retryPendingLearning({ profileId: fixture.profileId, limit: 1 });
+    assert.equal(selected?.memoryId, olderPending.memoryId,
+      'bounded pending retry scans past newer successful answers');
+
+    const laterClockFailure = createMessageReplyLearningService({ db: database,
+      now: () => '2026-10-02T00:00:00.000Z',
+      adapter: { async extractReplyEditFacts() { throw new Error('temporary failure'); } } });
+    const validPendingDraft = seedDraft(database, fixture, 'rotating-valid-pending', '我目前在广州。', 'other');
+    const validPending = await laterClockFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: validPendingDraft.id, finalText: '我目前在佛山。', completionKind: 'copied' });
+    const invalidPendingDraft = seedDraft(database, fixture, 'rotating-invalid-pending', '我目前在广州。', 'other');
+    const invalidPending = await resumedFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: invalidPendingDraft.id, finalText: '我目前在珠海。', completionKind: 'copied' });
+    const rotating = createMessageReplyLearningService({ db: database,
+      now: () => '2026-10-06T00:00:00.000Z', adapter: { async extractReplyEditFacts(input) {
+        if (input.finalText.includes('珠海')) throw new Error('still invalid');
+        return { facts: [] };
+      } } });
+    const firstVisit = await rotating.retryPendingLearning({ profileId: fixture.profileId, limit: 1 });
+    assert.equal(firstVisit.memoryId, invalidPending.memoryId);
+    assert.equal(firstVisit.extractionStatus, 'failed');
+    const secondVisit = await rotating.retryPendingLearning({ profileId: fixture.profileId, limit: 1 });
+    assert.equal(secondVisit.memoryId, validPending.memoryId,
+      'failed latest answer rotates behind another pending answer on the next visit');
+    assert.equal(secondVisit.extractionStatus, 'succeeded');
+
+    const deepPendingDraft = seedDraft(database, fixture, 'deep-pending-recovery', '我目前在广州。', 'other');
+    const deepPending = await resumedFailure.completeDraft({ profileId: fixture.profileId,
+      draftId: deepPendingDraft.id, finalText: '我目前在佛山。', completionKind: 'copied' });
+    const { completeMessageReplyDraft } = require('../src/core/storage');
+    const { recordMessageReplyLearningStatus } = require('../src/storage/message_learning_store');
+    for (let index = 0; index < 501; index++) {
+      const newer = seedDraft(database, fixture, `newer-success-${index}`, '我目前在广州。', 'other');
+      const memory = completeMessageReplyDraft(database, { profileId: fixture.profileId,
+        draftId: newer.id, finalText: '我目前在深圳。', changedText: '深圳',
+        completionKind: 'copied', completedAt: '2026-10-07T00:00:00.000Z' });
+      recordMessageReplyLearningStatus(database, { profileId: fixture.profileId,
+        memoryId: memory.id, status: 'succeeded', at: '2026-10-07T00:00:00.000Z' });
+    }
+    const deepSelected = await successful.retryPendingLearning({ profileId: fixture.profileId, limit: 1 });
+    assert.equal(deepSelected?.memoryId, deepPending.memoryId,
+      'pending selection filters before limiting even behind 501 newer successful answers');
+  } finally {
+    database.close();
+    fs.rmSync(dbPath, { force: true });
+  }
+}
+
+async function explicitRevertSmoke() {
+  const database = openDb(':memory:');
+  try {
+    const fixture = createFixture(database);
+    const draft = seedDraft(database, fixture, 'explicit-revert', '我目前在广州。', 'other');
+    let clock = '2026-10-01T00:00:00.000Z';
+    let callbacks = 0;
+    const service = createMessageReplyLearningService({ db: database, now: () => clock,
+      adapter: { async extractReplyEditFacts(input) {
+        const city = input.finalText.includes('珠海') ? '珠海' : '深圳';
+        return { facts: [{ factKey: 'current_city', factValue: city, evidenceText: city }] };
+      } } });
+    const a = await service.completeDraft({ profileId: fixture.profileId, draftId: draft.id,
+      finalText: '我目前在深圳。', completionKind: 'copied', afterComplete: () => { callbacks++; } });
+    clock = '2026-10-02T00:00:00.000Z';
+    const b = await service.reviseMemory({ profileId: fixture.profileId, memoryId: a.memoryId,
+      finalText: '我目前在珠海。' });
+    clock = '2026-10-03T00:00:00.000Z';
+    const reverted = await service.reviseMemory({ profileId: fixture.profileId, memoryId: b.memoryId,
+      finalText: '我目前在深圳。' });
+    assert.notEqual(reverted.memoryId, a.memoryId, 'explicit A-B-A edit is a fresh confirmation');
+    assert.equal(currentFacts(database, fixture.profileId).current_city, '深圳');
+    assert.equal(listCandidateFactRevisions(database, { profileId: fixture.profileId, factKey: 'current_city' })
+      .find(item => item.answerMemoryId === reverted.memoryId).createdAt, clock);
+    assert.equal(callbacks, 1, 'explicit profile edits do not replay the original completion callback');
+    assert.equal(listCandidateAnswerMemories(database, { profileId: fixture.profileId, activeOnly: false })
+      .filter(item => item.draftId === draft.id).length, 3);
+    await assert.rejects(service.completeDraft({ profileId: fixture.profileId, draftId: draft.id,
+      finalText: '我目前在珠海。', completionKind: 'copied' }),
+      error => error.code === 'CANDIDATE_ANSWER_MEMORY_SUPERSEDED');
+  } finally { database.close(); }
 }
 
 async function factsLifecycleSmoke() {

@@ -35,7 +35,7 @@ function saveCandidateEvidence(db, input) {
   const scope = input.scope || { kind: 'global', key: '' };
   if (!['global', 'experience', 'job', 'company'].includes(scope.kind)) throw new TypeError('适用范围无效');
   if (scope.kind !== 'global' && !String(scope.key || '').trim()) throw new TypeError('适用范围缺少对象');
-  const now = nowIso();
+  const now = input.confirmedAt ? new Date(input.confirmedAt).toISOString() : nowIso();
   const result = db.prepare(`INSERT INTO candidate_evidence_entries(
     profile_id, subject, evidence_text, source_kind, source_id, source_item_key, source_quote, scope_json, created_at, updated_at
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
