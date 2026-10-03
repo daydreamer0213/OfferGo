@@ -1,4 +1,5 @@
 const all = Object.freeze([
+  "candidate_evidence_smoke.js",
   "self_check.js",
   "windows_installer_smoke.js",
   "cross_machine_runtime_smoke.js",
@@ -186,6 +187,7 @@ const all = Object.freeze([
 
 const groups = Object.freeze({
   fast: Object.freeze([
+  "candidate_evidence_smoke.js",
   "storage_boundary_smoke.js",
   "architecture_boundaries_smoke.js",
   "test_manifest_smoke.js",

@@ -917,7 +917,27 @@ CREATE INDEX IF NOT EXISTS idx_message_platform_actions_active
   ON message_platform_actions(profile_id, status, updated_at DESC, id DESC);
 `;
 
+const CANDIDATE_EVIDENCE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS candidate_evidence_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES candidate_profiles(id) ON DELETE CASCADE,
+  subject TEXT NOT NULL,
+  evidence_text TEXT NOT NULL,
+  source_kind TEXT NOT NULL CHECK(source_kind IN ('interview_turn','manual')),
+  source_id TEXT NOT NULL,
+  source_item_key TEXT NOT NULL,
+  source_quote TEXT NOT NULL,
+  scope_json TEXT NOT NULL DEFAULT '{"kind":"global","key":""}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  withdrawn_at TEXT,
+  UNIQUE(profile_id, source_kind, source_id, source_item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_candidate_evidence_profile ON candidate_evidence_entries(profile_id, withdrawn_at, updated_at);
+`;
+
 module.exports = {
+  CANDIDATE_EVIDENCE_SCHEMA,
   buildSchema,
   MATCHING_CARD_SCHEMA,
   CANDIDATE_PROGRESS_SCHEMA,

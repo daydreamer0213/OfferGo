@@ -16,7 +16,8 @@ const {
   JOB_SEARCH_FUNNEL_SCHEMA,
   FUNNEL_STRATEGY_ROUNDS_SCHEMA,
   RESUME_OPTIMIZATION_SCHEMA,
-  MOCK_INTERVIEW_V1_SCHEMA
+  MOCK_INTERVIEW_V1_SCHEMA,
+  CANDIDATE_EVIDENCE_SCHEMA
 } = require("../storage/schema");
 const { currentSchemaVersion } = require("../storage/migrations");
 const candidateStore = require("../storage/candidate_store");
@@ -679,6 +680,11 @@ const MIGRATIONS = [
     apply(db) {
       db.exec(MESSAGE_ACTION_SCHEMA);
     }
+  },
+  {
+    version: 36,
+    name: "confirmed_candidate_evidence_v1",
+    apply(db) { db.exec(CANDIDATE_EVIDENCE_SCHEMA); }
   }
 ];
 
