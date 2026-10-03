@@ -243,12 +243,12 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const allowedScopeKinds = sessionKind === "resume_general"
       ? ["global", "experience"]
       : ["global", "experience", "job", "company"];
-    const activeAnswers = applicableAnswers(listCandidateAnswerMemories(db, {
+    const activeAnswers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: true,
       source: "user_edited_reply",
-      limit: 100
-    }), { sessionKind, job });
+      limit: 500
+    }), { sessionKind, job }), { query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000 });
     const factMemories = listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: false,

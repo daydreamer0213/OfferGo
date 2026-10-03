@@ -69,12 +69,12 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     const candidateEvidence = selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId }), {
       query, job: jobs[0] || {}, limit: 12, maxChars: 16000
     });
-    const answers = applicableAnswers(listCandidateAnswerMemories(db, {
+    const answers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: true,
       source: "user_edited_reply",
       limit: 500
-    }), jobs);
+    }), jobs), { query, job: jobs[0] || {}, limit: 12, maxChars: 16000 });
     const funnelDiagnosis = compactDiagnosis(funnelAnalysis.getDashboard({ profileId, planId: plan.id }));
     const evidenceCatalog = buildResumeEvidenceCatalog({
       sourceText: prepared.text,
