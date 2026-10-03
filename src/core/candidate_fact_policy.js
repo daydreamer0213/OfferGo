@@ -25,7 +25,10 @@ function factStatus(now, fact = {}) {
     return { status: "valid", confirmedAt };
   }
   const maxAgeDays = VOLATILE_FACT_MAX_AGE_DAYS[key];
-  if (maxAgeDays === undefined) return { status: "requires_confirmation", confirmedAt };
+  if (maxAgeDays === undefined) {
+    return { status: fact.source === "user_provided" && Number.isFinite(Date.parse(confirmedAt))
+      ? "valid" : "requires_confirmation", confirmedAt };
+  }
   const confirmedMs = Date.parse(confirmedAt);
   const nowMs = Date.parse(now);
   if (!Number.isFinite(confirmedMs)) return { status: "expired", maxAgeDays, confirmedAt };

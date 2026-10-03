@@ -55,6 +55,8 @@ const {
 } = require("../src/dashboard/message_discovery_view");
 const { installDashboardSignalHandlers, persistBossRiskControl } = require("../src/cli");
 const { communicationRuntimeBlock } = require("../src/core/communication_runtime");
+const { createMessageReplyAnalyzer } = require("../src/core/message_reply_analyzer");
+const { answerMissingMessageFact } = require("../src/application/message_discovery/answer_fact");
 
 const PRIVATE_BODY = "脱敏测试问题";
 const PRIVATE_PREVIEW = "脱敏会话预览";
@@ -2788,6 +2790,42 @@ async function durableMissingFactRecoverySmoke() {
     const answeredResult = answering.pageState(profileId).results[0];
     assert.strictEqual(answeredResult.missingFactKey, "");
     assert.strictEqual(answeredResult.drafts[0].text, "您好，本周工作日下午我都方便电话沟通，请问您哪天合适？");
+    const englishGroupKey = `sha256:${"6".repeat(64)}`;
+    recordDiscoveredMessageGroupClassification(durableDb, {
+      cardId: card.id, platform: "boss", threadKey,
+      messageKeys: [`sha256:${"4".repeat(64)}`], messageGroupKey: englishGroupKey,
+      messageIntent: "information_request", messageCategory: "qualification",
+      missingFactKey: "english_proficiency", missingFactQuestion: "你的英语交流能力如何？",
+      manualActions: [], progressUpdate: { stage: "needs_user_action" }, occurredAt: now
+    });
+    saveMessageInboundContext(durableDb, {
+      profileId, cardId: card.id, messageGroupKey: englishGroupKey,
+      conversationKey: `sha256:${"3".repeat(64)}`, sourceJobId: "boss:missing-fact-job",
+      lastMessageId: "123456789012346", messageIntent: "information_request",
+      messageCategory: "qualification",
+      inboundMessages: [{ kind: "text", text: "英语交流能力怎么样？" }],
+      manualActions: [], createdAt: now, updatedAt: now
+    });
+    const englishAnalyzer = createMessageReplyAnalyzer({ adapter: {
+      async draftMessageGroup() {
+        return {
+          messageIntent: "information_request", messageCategory: "qualification",
+          messageSummary: "对方询问英语交流能力。",
+          requiredFactKeys: ["english_proficiency"], usedFactKeys: ["english_proficiency"],
+          responseItems: [{ id: "english_proficiency", kind: "question", required: true }],
+          coverage: [{ responseItemId: "english_proficiency", covered: true }],
+          missingFact: null, messages: ["我能阅读英文文档，也能进行日常英文交流。"]
+        };
+      }
+    } });
+    const englishAnswered = await answerMissingMessageFact({
+      db: durableDb, profileId, cardId: card.id, messageGroupKey: englishGroupKey,
+      factKey: "english_proficiency", factValue: "能阅读英文文档并日常交流",
+      classifyMessageGroup: englishAnalyzer, now: () => now
+    });
+    assert.strictEqual(englishAnswered.drafts[0].currentText, "我能阅读英文文档，也能进行日常英文交流。");
+    assert(require('../src/storage/candidate_store').listCandidateFacts(durableDb, profileId)
+      .some((fact) => fact.factKey === "english_proficiency" && fact.source === "user_provided"));
   } finally {
     durableDb.close();
   }

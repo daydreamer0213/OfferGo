@@ -100,6 +100,45 @@ async function main() {
     () => validateMessageReply(safeReply({ responseItems: [{ id: "PRIVATE_HR_RAW_TEXT", kind: "question", required: true }] }), { facts: validFacts, now: NOW }),
     (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT"
   );
+  const englishReply = safeReply({
+    messageCategory: "qualification",
+    requiredFactKeys: ["english_proficiency"],
+    usedFactKeys: ["english_proficiency"],
+    responseItems: [{ id: "english_proficiency", kind: "question", required: true }],
+    coverage: [{ responseItemId: "english_proficiency", covered: true }],
+    messages: ["我能阅读英文文档，也能进行日常英文交流。"]
+  });
+  const englishFact = { key: "english_proficiency", value: "能阅读英文文档并日常交流",
+    source: "user_provided", updatedAt: NOW };
+  assert.deepStrictEqual(validateMessageReply(englishReply, { facts: [englishFact], now: NOW }).messages,
+    ["我能阅读英文文档，也能进行日常英文交流。"]);
+  for (const fact of [
+    { ...englishFact, source: "" },
+    { ...englishFact, updatedAt: "" }
+  ]) {
+    assert.throws(() => validateMessageReply(englishReply, { facts: [fact], now: NOW }),
+      (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT",
+      "a generic fact must come from a dated user answer");
+  }
+  const englishQuestion = safeReply({
+    messageCategory: "qualification",
+    requiredFactKeys: ["english_proficiency"], usedFactKeys: [],
+    responseItems: [{ id: "english_proficiency", kind: "question", required: true }],
+    coverage: [{ responseItemId: "english_proficiency", covered: false }],
+    missingFact: { key: "english_proficiency", question: "你的英语交流能力如何？" }, messages: []
+  });
+  assert.strictEqual(validateMessageReply(englishQuestion, { facts: [], now: NOW }).missingFact.key,
+    "english_proficiency");
+  assert.throws(() => validateMessageReply({ ...englishQuestion, missingFact: { key: "another_fact", question: "请确认" } },
+    { facts: [], now: NOW }), (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT");
+  assert.throws(() => validateMessageReply({ ...englishQuestion, missingFact: { key: "bad key", question: "请确认" } },
+    { facts: [], now: NOW }), (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT");
+  assert.throws(() => validateMessageReply({ ...englishQuestion,
+    requiredFactKeys: [], responseItems: [], coverage: [] }, { facts: [], now: NOW }),
+  (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT",
+  "an unsupplied generic missing fact must match a required response item");
+  assert.throws(() => validateMessageReply(englishReply, { facts: [{ ...englishFact, source: "model_generated" }], now: NOW }),
+    (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT");
   assert.throws(
     () => validateMessageReply(safeReply({ coverage: [{ responseItemId: "missing-item", covered: true }] }), { facts: validFacts, now: NOW }),
     (error) => error.code === "MESSAGE_REPLY_COVERAGE_INVALID"
@@ -492,6 +531,26 @@ async function main() {
   assert.strictEqual(mixedSalary.progressUpdate.stage, "needs_user_action");
 
   const storedShapeAnalyzer = createMessageReplyAnalyzer({ adapter: new MockModelAdapter() });
+  const englishAnalyzer = createMessageReplyAnalyzer({ adapter: {
+    async draftMessageGroup(input) {
+      const supplied = input.facts.find((fact) => fact.key === "english_proficiency");
+      return supplied ? englishReply : englishQuestion;
+    }
+  } });
+  const askEnglish = await englishAnalyzer({
+    profile: { id: 1 }, job: { id: 2, title: "Java Engineer" },
+    messages: [{ messageKey: "sha256:" + "1".repeat(64), text: "英语交流能力怎么样？" }],
+    facts: [], now: NOW
+  });
+  assert.strictEqual(askEnglish.missingFact.question, "你的英语交流能力如何？");
+  assert.deepStrictEqual(askEnglish.messages, []);
+  const answerEnglish = await englishAnalyzer({
+    profile: { id: 1 }, job: { id: 2, title: "Java Engineer" },
+    messages: [{ messageKey: "sha256:" + "2".repeat(64), text: "英语交流能力怎么样？" }],
+    facts: [{ factKey: "english_proficiency", factValue: "能阅读英文文档并日常交流",
+      source: "user_provided", updatedAt: NOW }], now: NOW
+  });
+  assert.deepStrictEqual(answerEnglish.messages, ["我能阅读英文文档，也能进行日常英文交流。"]);
   const storedMessages = [{ messageKey: "sha256:" + "c".repeat(64), text: "什么时候可以到岗？" }];
   const storedShapeAnalyzed = await storedShapeAnalyzer({
     profile: { id: 1 },

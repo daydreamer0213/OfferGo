@@ -14,6 +14,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
       key: String(fact.key || fact.factKey || ""),
       value: fact.value !== undefined ? fact.value : fact.factValue,
       subjectKey: fact.subjectKey || "",
+      source: fact.source || "",
       updatedAt: fact.updatedAt || fact.confirmedAt || ""
     }));
     const requestedSubjectKeys = deriveRequestedSubjectKeys(messages, normalizedFacts);

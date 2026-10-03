@@ -33,7 +33,7 @@ function validateMessageReply(value, context = {}) {
   const validMemoryIds = new Set(answerMemories.map((memory) => Number(memory?.id)).filter((id) => Number.isSafeInteger(id) && id > 0));
   const now = String(context.now || new Date().toISOString());
   assertIntentShape(normalized);
-  assertKnownFactKeys(normalized);
+  assertKnownFactKeys(normalized, facts, now);
   assertCoverageComplete(normalized);
   assertDraftLimit(normalized.messages, MAX_DRAFTS);
   assertManualOnlyHasNoDraft(normalized);
@@ -201,14 +201,22 @@ function normalizedMessageSummary(value) {
   return summary;
 }
 
-function assertKnownFactKeys(normalized) {
+function assertKnownFactKeys(normalized, facts, now) {
+  const userFacts = new Map(facts.filter((fact) => fact.source === "user_provided"
+    && factStatus(now, fact).status === "valid").map((fact) => [String(fact.key || ""), fact]));
+  const unansweredKey = normalized.missingFact?.key;
+  const canAskForUnansweredKey = !normalized.messages.length
+    && normalized.requiredFactKeys.includes(unansweredKey)
+    && normalized.responseItems.some((item) => item.id === unansweredKey);
   const ids = [
     ...normalized.requiredFactKeys,
     ...normalized.usedFactKeys,
-    ...normalized.responseItems.map((item) => item.id)
+    ...normalized.responseItems.map((item) => item.id),
+    ...(normalized.missingFact ? [normalized.missingFact.key] : [])
   ];
   for (const id of ids) {
-    if (!isKnownFactKey(id)) {
+    if (!isKnownFactKey(id) && !(/^[a-z][a-z0-9_.-]{0,79}$/i.test(id)
+      && (userFacts.has(id) || (unansweredKey === id && canAskForUnansweredKey)))) {
       throw contractError("MESSAGE_REPLY_UNKNOWN_FACT", `unknown fact key ${id}`);
     }
   }

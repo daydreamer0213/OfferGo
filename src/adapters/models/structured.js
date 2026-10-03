@@ -539,7 +539,7 @@ StructuredModelAdapter.prototype.draftMessageGroup = async function draftMessage
     "missingFact 只能是 null 或 {key,question}，不得输出 reason 等其他字段。只有招聘方询问了输入中没有的候选人事实时才使用 missingFact；question 必须是向用户补充该事实的简短问题，此时 messages 必须为空。",
     "interest_check 本身不需要候选人事实：missingFact 必须为 null，并生成自然表达愿意了解岗位的草稿，不得虚构个人经历。",
     "除 rejection、manual_review、identity_uncertain 或确实缺少关键事实外，必须返回 1-2 条自然草稿。薪资、在职、家庭等分类不是禁答理由；一次回答对方本轮多个问题。面试邀约根据具体安排回应，没有已确认可用时间时可询问安排，不承诺时间。rejection 必须返回 messages: []。",
-    "responseItems 只列招聘方要求候选人回答的事实项，不得列草稿选项；id 只能使用 supplied facts 的 key，或 employment_status/availability_date/current_city/expected_salary/accepts_travel/accepts_relocation/accepts_overtime，interview_availability，以及能从消息明确识别对象的 gap./leaving_reason./short_project. 键；kind 只能是 question 或 statement。",
+    "responseItems 只列招聘方要求候选人回答的事实项，不得列草稿选项；id 可使用 supplied facts 中已确认的 key，或 employment_status/availability_date/current_city/expected_salary/accepts_travel/accepts_relocation/accepts_overtime、interview_availability，以及能从消息明确识别对象的 gap./leaving_reason./short_project. 键。若招聘方询问尚无资料的其他普通个人事实，可用安全英文键（以字母开头，之后仅字母、数字、下划线、点或短横线，最多80字符），并在 missingFact.key 中使用同一个键向用户提问，此时不要生成草稿；用户明确补充后才可据此回答。kind 只能是 question 或 statement。",
     "coverage 必须逐项对应 responseItems 的 id。interest_check 的 responseItems 和 coverage 必须为空数组。",
     "messageCategory 只表示消息主题，只能是 project_fact/qualification/salary/availability/sensitive/other/identity_uncertain。",
     "messageSummary 必须用一句中文概括对方本轮的主要意思和要求的行动，最多 160 个字符。",
