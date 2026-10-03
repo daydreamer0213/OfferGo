@@ -53,7 +53,7 @@ async function answerMissingMessageFact({
   }
   const answeredAt = now();
   saveCandidateFact(db, { profileId: profile, factKey: key, factValue: answer, source: "user_provided" });
-  const facts = listCandidateFacts(db, profile)
+  const facts = listCandidateFacts(db, profile, { job: { id: jobRow.job_id, sourceId: jobRow.source_id, company: jobRow.company } })
     .filter((fact) => fact.factKey !== key)
     .concat([{ factKey: key, factValue: answer, source: "user_provided", updatedAt: answeredAt }]);
   const messages = context.inboundMessages

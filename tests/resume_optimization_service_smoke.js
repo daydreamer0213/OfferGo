@@ -320,6 +320,26 @@ try {
   });
   assert.strictEqual(mockDraft.suggestions[0].originalText, "参与企业知识库开发");
 
+  const punctuationText = '标点测试\n项目经历：参与接口联调，做检索测试。\n技能：Ｎｏｄｅ．ｊｓ';
+  const punctuation = storage.saveProfileAnalysis(db, {
+    profile: { candidate: { name: '标点测试', targetTitles: ['工程师'] } },
+    document: { text: punctuationText, contentHash: 'normalization-anchors', format: 'text', originalFileName: 'punctuation.txt' },
+    searchPlan: { name: '标点方案', directions: ['工程师'] }
+  });
+  const punctuationService = createResumeOptimizationService({ db, adapter: { async generateResumeOptimization(input) {
+    const evidence = input.evidenceCatalog.find(item => item.text.includes('接口联调'));
+    return { headline: '写清具体工作', suggestions: [{ id: 'S1', operation: 'replace', originalText: evidence.text,
+      proposedText: '项目经历：参与接口联调与检索测试。', reason: '明确工作范围', evidenceIds: [evidence.id], editingPrinciple: 'concision' }] };
+  } } });
+  const normalizedDraft = await punctuationService.createDraft({ profileId: punctuation.profileId, planId: punctuation.planId,
+    sourceResumeVersionId: punctuation.resumeVersionId, mode: 'general' });
+  assert.equal(normalizedDraft.suggestions[0].originalText, '项目经历：参与接口联调，做检索测试。');
+  assert(normalizedDraft.generatedText.includes('项目经历：参与接口联调与检索测试。'));
+  assert(normalizedDraft.generatedText.includes('技能：Ｎｏｄｅ．ｊｓ'), 'unmodified formatting must remain intact');
+  const { restoreResumeSuggestionAnchors } = require('../src/core/resume_optimization');
+  assert.throws(() => restoreResumeSuggestionAnchors({ suggestions: [{ originalText: 'AA' }] }, { sourceText: 'ＡＡＡ', modelText: 'AAA' }), /不唯一/);
+  assert.throws(() => restoreResumeSuggestionAnchors({ suggestions: [{ originalText: '[姓名已隐藏]' }] }, { sourceText: '真实姓名', modelText: '[姓名已隐藏]' }), /不存在/);
+
   console.log("resume_optimization_service_smoke ok");
 } finally {
   db.close();

@@ -61,10 +61,34 @@ function buildResumeEvidenceCatalog(input = {}) {
 function exactRange(sourceText, originalText) {
   const start = sourceText.indexOf(originalText);
   if (start < 0) throw new Error(`建议原文不存在：${originalText}`);
-  if (sourceText.indexOf(originalText, start + originalText.length) >= 0) {
+  if (sourceText.indexOf(originalText, start + 1) >= 0) {
     throw new Error(`建议原文不唯一：${originalText}`);
   }
   return { start, end: start + originalText.length };
+}
+
+// Model input normalizes full-width punctuation. Restore only a unique literal
+// Unicode-equivalent anchor; masked identity text and guessed wording cannot map.
+function restoreResumeSuggestionAnchors(raw, { sourceText, modelText }) {
+  if (!Array.isArray(raw?.suggestions)) return raw;
+  let normalizedSource;
+  let boundaries;
+  return { ...raw, suggestions: raw.suggestions.map(suggestion => {
+    const anchor = String(suggestion?.originalText || '').trim();
+    if (!anchor || sourceText.includes(anchor)) return suggestion;
+    exactRange(modelText, anchor);
+    if (!boundaries) {
+      boundaries = new Map([[0, 0]]);
+      normalizedSource = '';
+      for (const { segment, index } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(sourceText)) {
+        normalizedSource += segment.normalize('NFKC');
+        boundaries.set(normalizedSource.length, index + segment.length);
+      }
+    }
+    const range = exactRange(normalizedSource, anchor);
+    if (!boundaries.has(range.start) || !boundaries.has(range.end)) throw new Error('建议原文不能准确映射');
+    return { ...suggestion, originalText: sourceText.slice(boundaries.get(range.start), boundaries.get(range.end)) };
+  }) };
 }
 
 function numericTokens(text) {
@@ -380,6 +404,7 @@ function uniqueIssues(items) {
 
 module.exports = {
   buildResumeEvidenceCatalog,
+  restoreResumeSuggestionAnchors,
   validateResumeOptimizationDraft,
   validateResumeActivationText,
   normalizeResumeSuggestionDecisions,

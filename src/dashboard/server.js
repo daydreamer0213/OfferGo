@@ -915,7 +915,7 @@ function createDashboardServer({
           salary: job.salary,
           experience: job.experience
         },
-        userProvidedFacts: listCandidateFacts(db, profile.id),
+        userProvidedFacts: listCandidateFacts(db, profile.id, { job }),
         ...(draftQualityRevision ? { draftQualityRevision } : {})
       });
     }
@@ -4210,7 +4210,7 @@ async function handleCommunication(req, res, { db, modelConfig, modelReady, logg
       matchDecision: analysis,
       jobEvidence: { title: job.title, company: job.company, description: job.description, salary: job.salary, experience: job.experience },
       hrMessage: String(params.hrMessage || "").trim(),
-      userProvidedFacts: listCandidateFacts(db, profile.id)
+      userProvidedFacts: listCandidateFacts(db, profile.id, { job })
     });
     recordCandidateJobEvent(db, {
       profileId: profile.id,

@@ -312,6 +312,15 @@ async function factsLifecycleSmoke() {
     assert.equal(service.deleteFact({ profileId: fixture.profileId, factKey: 'availability_date' }), true, 'projected facts shown in the profile must be deletable');
     assert(!service.listCommunicationProfile({ profileId: fixture.profileId }).facts.some(fact => fact.factKey === 'availability_date'));
     assert.equal(service.deleteFact({ profileId: fixture.profileId, factKey: 'availability_date' }), false, 'repeated deletion must not add another revision');
+    recordCandidateFactValue(database, { profileId: fixture.profileId, factKey: 'expected_salary', factValue: '15-18K', occurredAt: '2026-10-01T00:00:00.000Z' });
+    const scoped = createMessageReplyLearningService({ db: database, adapter: { async extractReplyEditFacts() {
+      return { facts: [{ factKey: 'expected_salary', factValue: '20K', evidenceText: '期望薪资20K' }] };
+    } } });
+    const salaryDraft = seedDraft(database, fixture, 'scoped-salary', '感谢介绍。', 'salary');
+    await scoped.completeDraft({ profileId: fixture.profileId, draftId: salaryDraft.id, finalText: '针对这份岗位，我期望薪资20K。', completionKind: 'copied' });
+    assert.equal(listCandidateFacts(database, fixture.profileId, { job: { id: fixture.jobId } }).find(fact => fact.factKey === 'expected_salary').factValue, '20K');
+    assert.equal(listCandidateFacts(database, fixture.profileId, { job: { id: fixture.jobId + 1 } }).find(fact => fact.factKey === 'expected_salary').factValue, '15-18K', 'other jobs must retain the older global fact instead of borrowing a company-specific condition');
+    assert.equal(listCandidateFacts(database, fixture.profileId, { job: {} }).find(fact => fact.factKey === 'expected_salary').factValue, '15-18K', 'general optimization uses global facts only');
   } finally { database.close(); }
 }
 

@@ -1,4 +1,4 @@
-const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCandidateResumeDocument } = require("../../storage/candidate_store");
+const { getCandidateProfile, getSearchPlan, listCandidateResumeVersions, getCandidateResumeDocument, listCandidateFacts } = require("../../storage/candidate_store");
 const { listCandidateAnswerMemories, listCandidateFactRevisions } = require("../../storage/message_learning_store");
 const { listCandidateEvidence, saveCandidateEvidence } = require("../../storage/candidate_evidence_store");
 const { selectRelevantCandidateMaterial } = require("../../core/candidate_evidence");
@@ -12,7 +12,6 @@ const {
   buildInterviewBrief,
   buildInterviewProgress,
   buildResumeInterviewEvidenceCatalog,
-  projectInterviewFacts,
   validateInterviewStep,
   validateInterviewReport,
   validateRetryReview
@@ -226,21 +225,12 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const prepared = prepareResumeTextForModel(resume.text, {
       identity: { names }, originalFileName: resume.fileName, strict: true
     });
-    const allowedScopeKinds = sessionKind === "resume_general"
-      ? ["global", "experience"]
-      : ["global", "experience", "job", "company"];
     const activeAnswers = selectRelevantCandidateMaterial(applicableAnswers(listCandidateAnswerMemories(db, {
       profileId,
       activeOnly: true,
       source: "user_edited_reply",
       limit: 500
     }), { sessionKind, job }), { query: job?.description || prepared.text, job: job || {}, limit: 12, maxChars: 12000 });
-    const factMemories = listCandidateAnswerMemories(db, {
-      profileId,
-      activeOnly: false,
-      source: "user_edited_reply",
-      limit: 500
-    }).filter((memory) => !memory.withdrawnAt);
     const historyQuery = sessionKind === "resume_general"
       ? { profileId, sessionKind, limit: 30 }
       : { profileId, planId, sessionKind, limit: 30 };
@@ -274,12 +264,8 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         text: prepared.text
       },
       resumeEvidenceCatalog,
-      candidateFacts: mergeCandidateFacts(projectInterviewFacts({
-        factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }),
-        answerMemories: factMemories,
-        allowedScopeKinds,
-        includeTimestamps: true
-      }), allEvidence, { job: job || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) }),
+      candidateFacts: mergeCandidateFacts(listCandidateFacts(db, profileId, { job: job || {} }), allEvidence,
+        { job: job || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) }),
       answerMemories: activeAnswers,
       priorWeaknesses
     };

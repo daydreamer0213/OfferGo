@@ -39,7 +39,7 @@ function buildMessageDraftQualityContext(db, { profileId, job = {}, messageTexts
     .map((memory) => String(memory.finalText || "").trim())
     .filter(Boolean);
   const activeResumeText = getActiveResumeText(db, profile);
-  const facts = listCandidateFacts(db, profile);
+  const facts = listCandidateFacts(db, profile, { job });
   const activeMemories = listCandidateAnswerMemories(db, {
     profileId: profile,
     activeOnly: true,

@@ -10,6 +10,7 @@ const { createResumeOptimization, getResumeOptimization, listResumeOptimizations
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   buildResumeEvidenceCatalog,
+  restoreResumeSuggestionAnchors,
   validateResumeOptimizationDraft,
   validateResumeActivationText,
   renderOptimizedResume,
@@ -66,7 +67,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       strict: true
     });
     const allEvidence = listCandidateEvidence(db, { profileId });
-    const facts = mergeCandidateFacts(listCandidateFacts(db, profileId), allEvidence, { job: jobs[0] || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) });
+    const facts = mergeCandidateFacts(listCandidateFacts(db, profileId, { job: jobs[0] || {} }), allEvidence, { job: jobs[0] || {}, factRevisions: listCandidateFactRevisions(db, { profileId, limit: 2000 }) });
     const query = jobs.map(job => job.description).join('\n') || prepared.text;
     const candidateEvidence = selectRelevantCandidateMaterial(allEvidence, {
       query, job: jobs[0] || {}, limit: 12, maxChars: 16000
@@ -103,7 +104,8 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       evidenceCatalog
     };
     const raw = await adapter.generateResumeOptimization(modelInput);
-    const validated = validateResumeOptimizationDraft(raw, {
+    const restored = restoreResumeSuggestionAnchors(raw, { sourceText: source.text, modelText: prepared.text });
+    const validated = validateResumeOptimizationDraft(restored, {
       sourceText: source.text,
       evidenceCatalog
     });
@@ -229,7 +231,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       generatedText: draft.generatedText,
       finalText,
       candidateName: profile?.profile?.candidate?.name || profile?.displayName || "",
-      facts: listCandidateFacts(db, draft.profileId),
+      facts: listCandidateFacts(db, draft.profileId, { job: integrityJobs(draft.targetJobIds)[0] || {} }),
       candidateEvidence: selectRelevantCandidateMaterial(listCandidateEvidence(db, { profileId: draft.profileId }), {
         query: finalText, job: integrityJobs(draft.targetJobIds)[0] || {}, limit: 12, maxChars: 16000
       }),

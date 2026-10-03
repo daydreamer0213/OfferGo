@@ -425,6 +425,15 @@ const db = storage.openDb(":memory:");
     assert(jobContext.candidateFacts.some((item) => item.factKey === "company_only"));
     assert(jobContext.priorWeaknesses.includes("岗位专用弱点不能进入通用训练"));
     assert(!jobContext.priorWeaknesses.includes("跨方案通用弱点：项目结果需要量化"));
+    const otherJobId = storage.upsertJob(db, { ...job('scope-other-job'), company: '另一家公司' }, batch);
+    const scopeService = createMockInterviewService({ db, adapter: { async generateMockInterviewStep(input) {
+      assert(!input.context.candidateFacts.some(item => ['job_only', 'company_only'].includes(item.factKey)), 'another job interview must not borrow original job/company conditions');
+      assert(input.context.candidateFacts.some(item => item.factKey === 'direct_preference'));
+      throw new Error('SCOPED_CONTEXT_VERIFIED');
+    } } });
+    await assert.rejects(scopeService.startSession({ profileId: owner.profileId, planId: owner.planId,
+      sessionKind: 'job_specific', jobId: otherJobId, resumeVersionId: owner.resumeVersionId, settings: { plannedQuestions: 3 }
+    }), /SCOPED_CONTEXT_VERIFIED/);
 
     assert.strictEqual(db.prepare("SELECT count(*) AS n FROM candidate_facts WHERE profile_id = ?").get(owner.profileId).n, factCount);
     assert.strictEqual(db.prepare("SELECT count(*) AS n FROM candidate_answer_memories WHERE profile_id = ?").get(owner.profileId).n, memoryCount);

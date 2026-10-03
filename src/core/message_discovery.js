@@ -711,7 +711,7 @@ async function runBossMessageDiscovery({
     });
     let classification;
     try {
-      const currentFacts = requested.replyMessages.length ? listCandidateFacts(db, profileId) : [];
+      const currentFacts = requested.replyMessages.length ? listCandidateFacts(db, profileId, { job: resolved.job }) : [];
       const answerMemories = requested.replyMessages.length
         ? listCandidateAnswerMemories(db, {
           profileId,

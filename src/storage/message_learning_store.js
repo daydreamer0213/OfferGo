@@ -394,7 +394,12 @@ function closeOpenMessageReplyDraftsByIntent(db, {
   });
 }
 
-function latestCandidateFactRevision(db, profileId, factKey) {
+function latestCandidateFactRevision(db, profileId, factKey, { job } = {}) {
+  const scopeFilter = job === undefined ? '' : `AND (r.answer_memory_id IS NULL OR CASE WHEN json_valid(m.scope_json) THEN (
+    COALESCE(json_extract(m.scope_json, '$.kind'), 'global') IN ('global', 'experience')
+    OR (json_extract(m.scope_json, '$.kind') = 'job' AND json_extract(m.scope_json, '$.key') IN (?, ?))
+    OR (json_extract(m.scope_json, '$.kind') = 'company' AND json_extract(m.scope_json, '$.key') = ?)
+  ) ELSE 0 END)`;
   return db.prepare(`SELECT r.*,
       CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END AS confirmed_at
     FROM candidate_fact_revisions r
@@ -410,11 +415,23 @@ function latestCandidateFactRevision(db, profileId, factKey) {
           WHERE m2.profile_id = m.profile_id AND m2.draft_id = m.draft_id AND m2.withdrawn_at IS NULL
           ORDER BY m2.updated_at DESC, m2.id DESC LIMIT 1)
       ))
+    ${scopeFilter}
     ORDER BY CASE WHEN r.answer_memory_id IS NULL THEN r.created_at ELSE m.updated_at END DESC, r.id DESC
-    LIMIT 1`).get(profileId, factKey);
+    LIMIT 1`).get(profileId, factKey, ...(job === undefined ? [] : [String(job?.id ?? ''), String(job?.sourceId ?? ''), String(job?.company || '').trim()]));
 }
 
-function listCandidateFacts(db, profileId) {
+function listCandidateFacts(db, profileId, { job } = {}) {
+  if (job !== undefined) {
+    const rows = db.prepare(`SELECT fact_key FROM candidate_facts WHERE profile_id = ?
+      UNION SELECT fact_key FROM candidate_fact_revisions WHERE profile_id = ? ORDER BY fact_key`).all(Number(profileId), Number(profileId));
+    return rows.flatMap(row => {
+      const revision = latestCandidateFactRevision(db, Number(profileId), row.fact_key, { job });
+      if (revision) return revision.operation === 'delete' ? [] : [{ factKey: row.fact_key, factValue: revision.fact_value, source: revision.source, updatedAt: revision.confirmed_at }];
+      if (latestCandidateFactRevision(db, Number(profileId), row.fact_key)) return [];
+      const legacy = db.prepare('SELECT fact_value, source, updated_at FROM candidate_facts WHERE profile_id = ? AND fact_key = ?').get(Number(profileId), row.fact_key);
+      return legacy ? [{ factKey: row.fact_key, factValue: legacy.fact_value, source: legacy.source, updatedAt: legacy.updated_at }] : [];
+    });
+  }
   return db.prepare('SELECT fact_key, fact_value, source, updated_at FROM candidate_facts WHERE profile_id = ? ORDER BY fact_key')
     .all(Number(profileId)).map(row => {
       const revision = latestCandidateFactRevision(db, Number(profileId), row.fact_key);
