@@ -204,7 +204,7 @@ const { communicationSiteLabel, communicationJobDecisionLabel } = require("./sta
 const { createFunnelAnalysisService } = require("../application/funnel_analysis");
 const { renderFunnelPage, FUNNEL_STRATEGY_SCRIPT } = require("./pages/funnel");
 const { createResumeOptimizationService } = require("../application/resume_optimization");
-const { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues } = require("./pages/resume_optimization");
+const { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues, renderResumePrintPage } = require("./pages/resume_optimization");
 const { createMockInterviewService } = require("../application/mock_interview");
 const { renderMockInterviewPage, MOCK_INTERVIEW_SCRIPT } = require("./pages/mock_interview");
 const { createModelRuntimeCache, modelRuntimeFileSignature } = require("../application/model_runtime_cache");
@@ -1562,6 +1562,10 @@ function createDashboardServer({
         resumeOptimization: getResumeOptimizationService()
       });
       if (req.method === "POST" && url.pathname === "/api/resume-optimization/save") return await handleResumeOptimizationSave(req, res, {
+        db,
+        resumeOptimization: getResumeOptimizationService()
+      });
+      if (req.method === "POST" && url.pathname === "/api/resume-optimization/export") return await handleResumeOptimizationExport(req, res, {
         db,
         resumeOptimization: getResumeOptimizationService()
       });
@@ -5962,6 +5966,25 @@ async function handleResumeOptimizationActivate(req, res, { db, resumeOptimizati
     });
   }
   redirect(res, `/resume-optimization?planId=${encodeURIComponent(plan.id)}&draftId=${encodeURIComponent(draftId)}#resume-opt-activated`);
+}
+
+async function handleResumeOptimizationExport(req, res, { db, resumeOptimization }) {
+  const params = parseBody(await readBody(req), req.headers["content-type"] || "");
+  const plan = requiredResumeOptimizationPlan(db, params.planId);
+  const draft = resumeOptimization.getDraft({ profileId: plan.profileId, draftId: Number(params.draftId) });
+  if (!draft) throw appError("RESUME_OPTIMIZATION_NOT_FOUND", "简历草稿不存在。", { statusCode: 404 });
+  if (draft.planId !== plan.id) throw appError("RESUME_OPTIMIZATION_PLAN_MISMATCH", "请从这份草稿原来的方案导出。", { statusCode: 409 });
+  if (!["text", "print"].includes(params.format)) throw appError("RESUME_EXPORT_FORMAT_INVALID", "请选择文字版或打印版。", { statusCode: 400 });
+  // Export the submitted editor snapshot; a pending autosave must not replace it with old text.
+  const text = draft.status === "activated" ? draft.finalText : String(params.finalText || "");
+  if (!String(text || "").trim()) throw appError("RESUME_EXPORT_EMPTY", "请先填写简历正文。", { statusCode: 400 });
+  res.setHeader("cache-control", "no-store");
+  if (params.format === "print") return sendHtml(res, renderResumePrintPage(text));
+  res.writeHead(200, {
+    "content-type": "text/plain; charset=utf-8",
+    "content-disposition": 'attachment; filename="OfferGo-resume.txt"'
+  });
+  res.end(`\uFEFF${String(text).replace(/\r?\n/g, "\r\n")}`);
 }
 
 function requiredResumeOptimizationPlan(db, planId) {

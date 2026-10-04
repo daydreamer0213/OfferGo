@@ -2471,6 +2471,7 @@ function assertManualProgressRemainsOrdinary(markup) {
 async function messageDiscoveryClientResponseSmoke(markup) {
   for (const scenario of [
     { name: "accepted JSON", response: jsonResponse(202, { status: "running" }), reloads: 1, feedback: "" },
+    { name: "next missing fact", response: jsonResponse(200, { status: "needs_fact", draftCount: 0 }), reloads: 1, feedback: "" },
     { name: "already running conflict", response: jsonResponse(409, { errorCode: "MESSAGE_DISCOVERY_ALREADY_RUNNING" }), reloads: 0, feedback: "正在运行" },
     { name: "application error", response: jsonResponse(409, { errorCode: "BOSS_RISK_CONTROL" }), reloads: 0, feedback: "安全检查" },
     { name: "non-JSON response", response: textResponse(502, "bad gateway"), reloads: 0, feedback: "本地服务" },
@@ -2723,6 +2724,24 @@ async function durableMissingFactRecoverySmoke() {
       "restart must retain the exact user fact needed by a message without a draft");
     assert.strictEqual(result.missingFactQuestion, "你什么时候方便电话或视频沟通？",
       "restart must retain the concrete question instead of a generic pending label");
+    const oldGroup = `sha256:${"8".repeat(64)}`;
+    const oldDraft = recordMessageReplyDrafts(durableDb, {
+      profileId, cardId: card.id, jobId, messageGroupKey: oldGroup,
+      messageIntent: "information_request", messageCategory: "qualification",
+      questionSummary: "介绍实习", messages: ["我在拾光软件做过产品实习。"], createdAt: now
+    })[0];
+    saveMessageInboundContext(durableDb, {
+      profileId, cardId: card.id, messageGroupKey: oldGroup, conversationKey,
+      sourceJobId: "boss:missing-fact-job", lastMessageId: "123456789012344",
+      messageIntent: "information_request", messageCategory: "qualification",
+      inboundMessages: [{ kind: "text", text: "在哪家公司实习过？" }], manualActions: [],
+      createdAt: "2026-09-17T03:00:00.000Z", updatedAt: "2026-09-19T03:00:00.000Z"
+    });
+    const recovered = createMessageDiscoveryController({ db: durableDb }).pageState(profileId).results[0];
+    assert.equal(recovered.messageGroupKey, messageGroupKey, "inbox latest message wins even when an older context was edited more recently");
+    assert.equal(recovered.missingFactKey, "availability_date", "an old open draft must not mask the latest question");
+    assert.deepEqual(recovered.drafts, []);
+    assert.equal(durableDb.prepare("SELECT closed_at FROM message_reply_drafts WHERE id = ?").get(oldDraft.id).closed_at, null, "history must not be deleted or closed during page restoration");
     const markup = renderMessageDiscoveryPage({
       db: durableDb,
       searchParams: new URLSearchParams({ profileId: String(profileId) }),

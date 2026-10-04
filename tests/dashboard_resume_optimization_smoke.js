@@ -43,6 +43,7 @@ const logger = {
   };
   const selectedDraft = {
     id: 41,
+    planId: owner.planId,
     profileId: owner.profileId,
     sourceResumeVersionId: owner.resumeVersionId,
     sourceResumeDocumentId: owner.resumeDocumentId,
@@ -207,6 +208,32 @@ const logger = {
       finalText: "自动保存中的旧文字"
     });
 
+    const latestExportText = "林晓\n产品实习：整理工单规则 <script>alert(1)</script>\n导出时还没有自动保存的修改";
+    const exportsBefore = calls.save.length;
+    for (const format of ["text", "print"]) {
+      const exported = await request(baseUrl, "/api/resume-optimization/export", {
+        method: "POST", body: new URLSearchParams({ planId: owner.planId, draftId: 41,
+          finalText: latestExportText, format }).toString()
+      });
+      assert.equal(exported.status, 200);
+      if (format === "text") {
+        assert.equal(exported.body.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"), latestExportText);
+        assert.match(exported.headers["content-disposition"], /^attachment;/);
+      } else {
+        assert.match(exported.body, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+        assert.doesNotMatch(exported.body, /<script>alert\(1\)<\/script>/);
+        assert(exported.body.includes("导出时还没有自动保存的修改"));
+        assert(!exported.body.includes(selectedDraft.headline));
+      }
+    }
+    assert.equal(calls.save.length, exportsBefore, "exporting a snapshot must not overwrite or activate a version");
+    selectedDraft.planId = owner.planId + 99;
+    const wrongPlan = await request(baseUrl, "/api/resume-optimization/export", {
+      method: "POST", body: new URLSearchParams({ planId: owner.planId, draftId: 41, format: "text", finalText: latestExportText }).toString()
+    });
+    assert.equal(wrongPlan.status, 409, "export must retain the draft's plan ownership check");
+    selectedDraft.planId = owner.planId;
+
     activateFailure = Object.assign(new Error("internal integrity failure"), {
       code: "RESUME_ACTIVATION_INTEGRITY_FAILED",
       issues: [{ code: "RESUME_PLACEHOLDER_PRESENT" }]
@@ -250,6 +277,12 @@ const logger = {
     }
     assert.equal(unhandled.length, 0, "resume failure must not become an unhandled rejection");
     selectedDraft.status = "activated";
+    const activatedExport = await request(baseUrl, "/api/resume-optimization/export", {
+      method: "POST", body: new URLSearchParams({ planId: owner.planId, draftId: 41,
+        format: "text", finalText: "不应覆盖已启用版本" }).toString()
+    });
+    assert.equal(activatedExport.status, 200);
+    assert.equal(activatedExport.body.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"), selectedDraft.finalText);
     const activatedPage = await request(baseUrl, `/resume-optimization?planId=${owner.planId}&draftId=41`);
     assert.equal(activatedPage.status, 200, "启用后没有完整性问题也必须能打开结果页面");
     assert.match(activatedPage.body, /已启用新版本/);
@@ -405,6 +438,10 @@ async function resumeSubmitClientSmoke(markup) {
     console
   };
   vm.runInNewContext(script, context);
+  let exportIntercepted = false;
+  await formHandlers.get("submit")({ preventDefault() { exportIntercepted = true; },
+    submitter: { getAttribute(name) { return name === "formaction" ? "/api/resume-optimization/export" : null; } } });
+  assert.equal(exportIntercepted, false, "native export submits the current form snapshot and includes the clicked format button");
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(revealedTarget, "resume-opt-activated", "a reloaded workflow result must be scrolled into view");
   editor.value = "自动保存后需要更新完整性提示";

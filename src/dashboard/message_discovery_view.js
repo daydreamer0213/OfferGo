@@ -422,7 +422,7 @@ function messageDiscoveryClientScript(scriptState) {
     const initial=${scriptState};
     const feedback=document.querySelector("[data-discovery-feedback]");
     const forms=Array.from(document.querySelectorAll("[data-discovery-form]"));
-    const postStatuses=["running","stopped","completed","needs_user_action","dismissed"];
+    const postStatuses=["running","stopped","completed","needs_user_action","needs_fact","dismissed"];
     const pollStatuses=["idle","running","stopped","completed","needs_user_action","dismissed"];
     let actionPending=false;
     let actionVersion=0;
@@ -604,7 +604,7 @@ function messageDiscoveryManualActionText(result) {
 
 function renderMissingFactForm(result, { profileId, escapeHtml, escapeAttr }) {
   const question = missingFactQuestion(result);
-  return `<section class="message-missing-fact"><h4>需要你确认一项个人信息</h4><p class="line">${escapeHtml(question)}</p><p class="line">OfferGo 不会替你编造这个答案。填写后会立即生成可确认的回复草稿。</p><form class="form-stack" data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="answer_fact"><input type="hidden" name="profileId" value="${Number(profileId)}"><input type="hidden" name="cardId" value="${Number(result.cardId)}"><input type="hidden" name="messageGroupKey" value="${escapeAttr(result.messageGroupKey || "")}"><input type="hidden" name="factKey" value="${escapeAttr(result.missingFactKey || "")}"><label>你的回答<textarea name="factValue" required placeholder="例如：本周工作日下午都方便电话沟通"></textarea></label><button>生成回复草稿</button></form></section>`;
+  return `<section class="message-missing-fact"><h4>需要你确认一项个人信息</h4><p class="line">${escapeHtml(question)}</p><p class="line">OfferGo 不会替你编造这个答案。填写后会继续准备回复；如果还缺其他信息，会接着问你。</p><form class="form-stack" data-discovery-form method="post" action="/api/message-discovery"><input type="hidden" name="action" value="answer_fact"><input type="hidden" name="profileId" value="${Number(profileId)}"><input type="hidden" name="cardId" value="${Number(result.cardId)}"><input type="hidden" name="messageGroupKey" value="${escapeAttr(result.messageGroupKey || "")}"><input type="hidden" name="factKey" value="${escapeAttr(result.missingFactKey || "")}"><label>你的回答<textarea name="factValue" required placeholder="例如：本周工作日下午都方便电话沟通"></textarea></label><button>生成回复草稿</button></form></section>`;
 }
 
 function missingFactQuestion(result) {

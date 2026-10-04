@@ -13,4 +13,4 @@
 
 ## 本轮三模块后的验收
 
-先参考 [三模块报告](superpowers/reports/2026-10-03-candidate-learning-three-modules.md) 区分离线回归、当前外层 Agent 内容样例、内置浏览器点击验收和仍未完成的 Edge/真实平台验证。当前实现不等于新安装版已经交付，也不证明所有 HR 文案都符合个人审美。后续实际模型与 Edge 验收应检查具体回复是否切题、经历是否真实、专项训练是否贴合所选 JD、简历是否更好读。
+先参考 [三模块设计报告](superpowers/reports/2026-10-03-candidate-learning-three-modules.md) 和 [10 月 4 日使用体验修复](superpowers/reports/2026-10-04-three-module-user-experience.md)。新来信、连续补资料、面试反馈/重练、简历导出及默认版本选择已通过隔离 Edge 表单验收；受控输出确认操作和状态，不证明实际 API 模型的文风。当前实现不等于新安装版已经交付。后续安装与实际模型验收仍需检查回复切题、经历真实、专项训练贴合 JD、简历易读；真实平台读取与发送按各自边界验收。

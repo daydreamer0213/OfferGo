@@ -189,6 +189,16 @@ async function main() {
     ["好的，我会按您提供的邮箱发送。"],
     "an explicitly requested external channel may remain in the draft"
   );
+  for (const platform of ["boss", "zhaopin"]) {
+    for (const text of ["我能阅读英文文档、处理英文邮件。", "实习时通过邮件确认客户需求，也维护过微信公众号。", "我协助过英文会议，整理纪要和行动项，英文邮件也能处理。"])
+      assert.deepStrictEqual(validateMessageReply(safeReply({ messages: [text] }), {
+        facts: validFacts, now: NOW, platform, sourceMessages: ["英语能力如何？"]
+      }).messages, [text], "work experience mentioning channels must not imply a channel switch");
+    for (const text of ["请把邮箱给我，我把简历发到邮箱。", "您加我微信吧，之后微信联系。", "我会通过邮件把资料发给您。", "我会通过邮件发送。", "I will send my resume by email.", "我的邮箱是 candidate@example.com。"])
+      assert.throws(() => validateMessageReply(safeReply({ messages: [text] }), {
+        facts: validFacts, now: NOW, platform, sourceMessages: ["英语能力如何？"]
+      }), error => error.code === "MESSAGE_REPLY_CHANNEL_UNSUPPORTED");
+  }
   const interview = validateMessageReply(safeReply({
     messageIntent: "interview_invitation",
     messageCategory: "other",

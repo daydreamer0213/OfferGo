@@ -794,7 +794,8 @@ function createMessageDiscoveryController(deps = {}) {
     }
     return results.map((result) => {
       if (!result.drafts.length) return result;
-      const openDrafts = byCard.get(result.cardId) || [];
+      const openDrafts = (byCard.get(result.cardId) || [])
+        .filter(draft => !result.messageGroupKey || draft.messageGroupKey === result.messageGroupKey);
       if (!openDrafts.length && !result.drafts.some((draft) => messageReplyDraftExists(db, { draftId: draft.id, profileId }))) return result;
       if (!openDrafts.length) return null;
       const drafts = uniqueDrafts(openDrafts
@@ -847,7 +848,8 @@ function createMessageDiscoveryController(deps = {}) {
   function durableStatus(profileId) {
     const drafts = listOpenMessageReplyDrafts(db, { profileId, limit: 500 })
       .filter((draft) => draft.messageIntent !== "follow_up");
-    const inboxIdentities = new Set(listMessageInboxItems(db, { profileId })
+    const inboxItems = listMessageInboxItems(db, { profileId });
+    const inboxIdentities = new Set(inboxItems
       .map((item) => `${Number(item.cardId)}\0${item.conversationKey}`));
     const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 }).filter(context => {
       if (drafts.some(draft => draft.cardId === context.cardId && draft.messageGroupKey === context.messageGroupKey)) return true;
@@ -879,7 +881,8 @@ function createMessageDiscoveryController(deps = {}) {
       profileId,
       cardId,
       cardDrafts,
-      contextsByCard.get(cardId) || []
+      contextsByCard.get(cardId) || [],
+      inboxItems.filter(item => Number(item.cardId) === Number(cardId))
     )).filter((item) => !isClearlyUnmatchedMessageCard(db, {
       profileId, cardId: item.cardId, jobId: item.jobId
     }));
@@ -909,13 +912,18 @@ function createMessageDiscoveryController(deps = {}) {
     };
   }
 
-  function durableDraftResult(profileId, cardId, drafts, contexts = []) {
+  function durableDraftResult(profileId, cardId, drafts, contexts = [], inboxItems = []) {
     const row = getDurableMessageDraftContext(db, { profileId, cardId });
     if (!row) throw messageDiscoveryError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "durable draft context is missing", 500);
     const platform = row.source === row.card_source && ["boss", "zhaopin"].includes(row.source) ? row.source : "";
-    const first = drafts[0] || contexts[0] || {};
-    const conversationKey = safeDigest(first.conversationKey) || safeDigest(contexts[0]?.conversationKey);
-    const selectedGroupKey = safeDigest(first.messageGroupKey) || safeDigest(contexts[0]?.messageGroupKey);
+    // Editing an older draft/context must not make it the latest HR request again.
+    const latestContext = contexts.find(context => inboxItems.some(item =>
+      item.conversationKey === context.conversationKey && item.lastMessageId === context.lastMessageId))
+      || [...contexts].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)) || right.id - left.id)[0];
+    const selectedGroupKey = safeDigest(latestContext?.messageGroupKey) || safeDigest(drafts[0]?.messageGroupKey);
+    const selectedDrafts = drafts.filter(draft => draft.messageGroupKey === selectedGroupKey);
+    const first = selectedDrafts[0] || latestContext || {};
+    const conversationKey = safeDigest(latestContext?.conversationKey) || safeDigest(first.conversationKey);
     const classification = selectedGroupKey
       ? getMessageGroupClassification(db, { profileId, cardId, messageGroupKey: selectedGroupKey }) || {}
       : {};
@@ -939,7 +947,7 @@ function createMessageDiscoveryController(deps = {}) {
       ...activeContexts.flatMap((context) => context.manualActions),
       ...(pendingResumeRequest ? [{ kind: "resume_request" }] : [])
     ], row.source);
-    const safeDrafts = uniqueDrafts(drafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
+    const safeDrafts = uniqueDrafts(selectedDrafts.sort((left, right) => left.draftIndex - right.draftIndex).slice(0, 2).map((draft) => ({
       id: draft.id,
       text: sanitizeDraftForRequestedActions(draft.currentText, {
         platform,

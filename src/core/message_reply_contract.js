@@ -263,7 +263,21 @@ function assertDraftChannelSafe(messages, context = {}) {
   ];
   for (const channel of channels) {
     if (channel.pattern.test(source)) continue;
-    if (messages.some((message) => channel.pattern.test(String(message || "")))) {
+    if (messages.some((message) => {
+      const text = String(message || "");
+      if (!channel.pattern.test(text)) return false;
+      // A channel mentioned in skills or past work is not a request to move this conversation.
+      return text.split(/[。！？!?；;\n]/).some((sentence) => channel.pattern.test(sentence) && (
+        /@[a-z0-9.-]+\.[a-z]{2,}/i.test(sentence)
+        || /(?:请|麻烦|能否|能不能|方便|可以).{0,16}(?:给|提供|告诉|留|发).{0,12}(?:邮箱|邮件|微信|wechat|e-?mail|qq)/i.test(sentence)
+        || /(?:邮箱|邮件|微信|wechat|e-?mail|qq).{0,12}(?:给我|发我|发给我|是什么|多少)/i.test(sentence)
+        || /(?:加|添加|交换|留个|留一下).{0,8}(?:微信|wechat|qq|邮箱)/i.test(sentence)
+        || /(?:邮箱|邮件|微信|wechat|e-?mail|qq).{0,24}(?:发给您|发给你|发您|发你|发送给您|发送给你|给您发|给你发|联系您|联系你|与您沟通|和您沟通|联系吧|沟通吧|联系我)/i.test(sentence)
+        || /(?:简历|履历|资料|材料).{0,20}(?:发到|发送到|寄到|发至|发送至).{0,12}(?:邮箱|邮件|微信|wechat|e-?mail|qq)/i.test(sentence)
+        || /(?:我会|我将|稍后|接下来).{0,12}(?:邮箱|邮件|微信|wechat|e-?mail|qq).{0,12}(?:发送|发过去|发给|联系您|联系你)/i.test(sentence)
+        || /(?:send|sending).{0,20}(?:resume|cv|materials).{0,20}(?:email|wechat|qq)|(?:email|wechat).{0,8}(?:you|me)|(?:add|contact).{0,12}(?:wechat|qq)/i.test(sentence)
+      ));
+    })) {
       throw contractError("MESSAGE_REPLY_CHANNEL_UNSUPPORTED", `draft invented unsupported ${channel.name} channel`);
     }
   }

@@ -316,6 +316,7 @@ h2{font-size:19px;font-weight:600}
 .resume-change-ledger{max-height:760px;overflow:auto}
 .resume-change-ledger .resume-opt-compare{grid-template-columns:1fr}
 .interview-workbench .interview-current-question{border-top:4px solid var(--rf-teal);box-shadow:0 8px 24px rgba(23,36,33,.08)}
+.interview-current>.interview-latest-feedback{grid-column:1/-1;margin:0;border:0;border-bottom:1px solid var(--rf-rule);border-radius:0;background:var(--rf-mist)}
 .interview-past-answers,.interview-past-sessions{border-top:1px solid var(--rf-rule)}
 .interview-past-answers>.interview-transcript,.interview-past-sessions>.interview-history{margin:0 0 16px}
 @media(max-width:920px){
