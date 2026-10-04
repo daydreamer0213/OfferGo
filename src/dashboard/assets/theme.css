@@ -40,6 +40,7 @@
 :root[data-theme="dark"] :is(input,select,textarea)::placeholder { color:#9aaba1; }
 :root[data-theme="dark"] .action-panel,
 :root[data-theme="dark"] .today-priority,
+:root[data-theme="dark"] .resume-opt-conclusion,
 :root[data-theme="dark"] .workflow-focus .workflow-primary { background:#1c342d; }
 :root[data-theme="dark"] .action-panel .button:not(.quiet) { color:#172421; }
 :root[data-theme="dark"] .action-panel .button.quiet { color:#edf5f0; border-color:#657e70; }

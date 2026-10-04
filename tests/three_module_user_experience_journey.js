@@ -152,6 +152,26 @@ const { createDashboardServer } = require('../src/dashboard/server');
     assert(await technical.locator('p').isVisible());
     await technical.locator('summary').click();
     result.checks.push('descriptive suggestion IDs generate a draft; technical details stay collapsed until requested');
+    for (const theme of ['dark', 'light']) {
+      await page.locator('[data-theme-toggle]').click();
+      await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme);
+      const contrasts = await page.locator('.resume-opt-conclusion').evaluate(node => {
+        const luminance = color => {
+          const channels = color.match(/\d+/g).slice(0, 3).map(Number).map(value => value / 255)
+            .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+          return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        };
+        const background = luminance(getComputedStyle(node).backgroundColor);
+        return [...node.querySelectorAll('h2,p')].map(child => {
+          const text = luminance(getComputedStyle(child).color);
+          return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+        });
+      });
+      assert(contrasts.length > 0 && contrasts.every(ratio => ratio >= 4.5),
+        `${theme} resume conclusion must remain readable: ${contrasts}`);
+      await shot(`resume-conclusion-${theme}`);
+    }
+    result.checks.push('resume conclusion stays readable in both dark and light themes');
     const editor = page.locator('textarea[name=finalText]');
     const latest = (await editor.inputValue()) + '\n补充：协助整理会议纪要。';
     await editor.fill(latest);
