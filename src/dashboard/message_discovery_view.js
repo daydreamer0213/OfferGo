@@ -182,12 +182,17 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const title = job.title || "岗位处理结果";
     const company = job.company || "公司待确认";
     const preview = messagePreview(result);
+    const actionGroup = inboxItem?.actionGroup || (pending ? "needs_action" : "done");
+    const statusText = expired ? "超过 7 天，已结束处理" : waitingForRecruiter ? "等待对方反馈"
+      : completedResumeAction && actionGroup === "done" ? "简历邀请已处理"
+      : actionGroup === "done" ? result.messageIntent === "rejection" ? "对方已结束沟通" : inboxItem?.statusText || "已经处理"
+      : messageStatusLabel({ ...result, manualActions: resumeRequested ? manualActions : [] });
     return {
       key: viewKey,
       identity: `${result.platform}\0${result.conversationKey}`,
-      actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
+      actionGroup,
       contactKey: matchingContact?.key || "",
-      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : waitingForRecruiter ? "等待对方反馈" : completedResumeAction && inboxItem?.actionGroup === "done" ? "简历邀请已处理" : messageStatusLabel({ ...result, manualActions: resumeRequested ? manualActions : [] }))}</small><em>${escapeHtml(preview)}</em></span></label>`,
+      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(statusText)}</small><em>${escapeHtml(preview)}</em></span></label>`,
       detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${jobOverview}${responseSection}${sentForm}${fitDetails}</section>`
     };
   });

@@ -1176,6 +1176,7 @@ async function main() {
   assertNoPrivateData(logs);
   await transientMessageRetrySmoke();
   modelUnavailablePresentationSmoke();
+  completedResultPresentationSmoke();
   console.log("dashboard_message_discovery_smoke ok");
 }
 
@@ -1718,6 +1719,26 @@ function modelUnavailablePresentationSmoke() {
   assert.match(html, /已读取，等待回复建议/);
   assert.match(html, /方便介绍一下这个岗位的具体工作吗/);
   assert.doesNotMatch(html, /data-message-action-confirm/, "reading without a model must not offer platform actions");
+}
+
+function completedResultPresentationSmoke() {
+  const fixture = createFixture();
+  const conversationKey = `sha256:${"d".repeat(64)}`;
+  const result = { platform: "boss", cardId: fixture.card.id, conversationKey,
+    contextComplete: true, messageIntent: "rejection", drafts: [], manualActions: [],
+    job: { title: fixture.title, company: fixture.company },
+    inboundMessages: [{ kind: "text", text: "这次先不往下推进了，希望你找到更适合的机会。" }] };
+  const html = renderMessageDiscoveryPage({
+    db, searchParams: new URLSearchParams({ profileId: fixture.profileId }),
+    controller: { pageState: () => ({ status: "completed", results: [result], platformRuns: [],
+      inbox: { groups: { done: [{ platform: "boss", conversationKey, actionGroup: "done", statusText: "已经处理" }] } } }) },
+    helpers: { getCandidateProfile: () => ({}), renderFramedPage: ({ content }) => content,
+      escapeHtml: String, escapeAttr: String, newProgressRequestKey: () => "completed-result" }
+  });
+  const card = html.match(/<label class="message-list-item"[^>]*for="message-view-result-[^"]+"[\s\S]*?<\/label>/)?.[0];
+  assert(card, 'the completed conversation must remain available in history');
+  assert.doesNotMatch(card, /待人工判断/, 'a completed rejection must not ask the user to handle it');
+  assert.doesNotMatch(card, /data-pending="true"/);
 }
 
 async function browserRuntimeGateSmoke(database, projectRoot, databasePath, scopedLogger, profileId) {

@@ -115,6 +115,14 @@ const logger = {
     assert.doesNotMatch(page.body, /<script>alert\(1\)<\/script>/);
     assert.match(page.body, /原回答/);
     assert.match(page.body, /我参与知识库开发，并负责接口联调/);
+    const retryFeedback = page.body.match(/<div class="interview-retries">([\s\S]*?)<\/div>/)?.[1];
+    assert(retryFeedback, 'completed interview must show the retry feedback');
+    for (const point of selectedSession.turns[0].retries[0].review.strengths) {
+      assert(retryFeedback.includes(point), 'retry feedback must retain the concrete strengths returned by the review');
+    }
+    for (const point of selectedSession.turns[0].retries[0].review.remainingImprovements) {
+      assert(retryFeedback.includes(point), 'retry feedback must retain the remaining improvements');
+    }
     assert.match(page.body, /name="sessionId" value="51"/);
     assert.match(page.body, /name="turnNumber" value="1"/);
     assert.match(page.body, /data-interview-draft="retry"/);

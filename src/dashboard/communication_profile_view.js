@@ -3,6 +3,9 @@ const FACT_LABELS = Object.freeze({
   availability_date: "到岗时间",
   current_city: "当前所在城市",
   expected_salary: "期望薪资",
+  interview_availability: "方便面试的时间",
+  english_proficiency: "英语能力",
+  leaving_reason: "离职原因",
   accepts_travel: "能否接受出差",
   accepts_relocation: "能否接受异地工作",
   accepts_overtime: "对加班的态度"

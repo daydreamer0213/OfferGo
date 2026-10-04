@@ -144,7 +144,7 @@ function renderAnswerReview(review) {
 
 function renderRetries(retries = []) {
   if (!retries.length) return "";
-  return `<div class="interview-retries"><strong>重答对比</strong>${retries.map((retry) => `<section><span>第 ${escapeHtml(retry.retryIndex)} 次重答</span><p>${escapeHtml(retry.answerText)}</p><small>${escapeHtml(retry.review?.conclusion || "已保存重答")}</small>${renderTextList(retry.review?.remainingImprovements)}</section>`).join("")}</div>`;
+  return `<div class="interview-retries"><strong>重答对比</strong>${retries.map((retry) => `<section><span>第 ${escapeHtml(retry.retryIndex)} 次重答</span><p>${escapeHtml(retry.answerText)}</p><small>${escapeHtml(retry.review?.conclusion || "已保存重答")}</small>${retry.review?.strengths?.length ? `<strong>这次答得好的地方</strong>${renderTextList(retry.review.strengths)}` : ""}${retry.review?.remainingImprovements?.length ? `<strong>还可以改进</strong>${renderTextList(retry.review.remainingImprovements)}` : ""}</section>`).join("")}</div>`;
 }
 
 function renderQuestionEvidence(session, turn) {

@@ -46,3 +46,5 @@
 - `queue-preview.png`、`communication-preview.png`、`communication-preview-dark.png`：待用户评价的内容布局。
 
 较大信息布局仍待用户看过预览后决定；不将未采用的预览算作正式产品已完成。
+
+提交推送后的再次复查见[第二轮用户流程复查](2026-10-04-ux-second-review.md)，记录新发现的局部展示问题及修复。
