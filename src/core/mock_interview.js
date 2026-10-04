@@ -249,7 +249,8 @@ function validateInterviewReport(raw, context = {}) {
     if (!Number.isInteger(turnNumber) || !validTurns.has(turnNumber)) {
       throw new Error(`回答结构引用了不存在的题号：${turnNumber}`);
     }
-    return { turnNumber, outline: boundedTextArray(item.outline, "回答结构", { maxItems: 8, itemLength: 500 }) };
+    const outline = typeof item.outline === "string" ? [item.outline] : item.outline;
+    return { turnNumber, outline: boundedTextArray(outline, "回答结构", { maxItems: 8, itemLength: 500 }) };
   }) : (() => { throw new Error("回答结构格式无效"); })();
   if (answerStructures.length > 12) throw new Error("回答结构过多");
   return {

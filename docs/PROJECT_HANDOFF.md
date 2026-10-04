@@ -1,6 +1,6 @@
 # OfferGo 当前项目交接
 
-> 核对日期：2026-10-04。最新三模块使用体验修复见[本轮回执](superpowers/reports/2026-10-04-three-module-user-experience.md)，版本和门禁结果以实际 Git 状态与回执中的验证文件为准。2026-09-10 以前的交接原文保存在 [历史交接](PROJECT_HANDOFF_2026-09-10.md)，不能作为当前待办或验收结论。
+> 核对日期：2026-10-04。最新三模块生成格式修复见[本轮回执](superpowers/reports/2026-10-04-generated-format-recovery.md)，之前的使用体验修复见[前轮回执](superpowers/reports/2026-10-04-three-module-user-experience.md)。版本和门禁结果以实际 Git 状态与回执中的验证文件为准。2026-09-10 以前的交接原文保存在 [历史交接](PROJECT_HANDOFF_2026-09-10.md)，不能作为当前待办或验收结论。
 
 ## 先分清两个版本
 

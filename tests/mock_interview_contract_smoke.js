@@ -222,6 +222,21 @@ const report = validateInterviewReport({
 }, { turns });
 assert.strictEqual(report.retryRecommendations[0].turnNumber, 2);
 
+const paragraphOutline = validateInterviewReport({
+  ...report,
+  answerStructures: [{ turnNumber: 2, outline: "先讲问题，再说自己的行动和已经验证的结果。" }]
+}, { turns });
+assert.deepStrictEqual(paragraphOutline.answerStructures[0].outline,
+  ["先讲问题，再说自己的行动和已经验证的结果。"]);
+for (const outline of ["", "长".repeat(501), {}, [null]]) {
+  assert.throws(() => validateInterviewReport({
+    ...report, answerStructures: [{ turnNumber: 2, outline }]
+  }, { turns }), /回答结构/);
+}
+assert.throws(() => validateInterviewReport({
+  ...report, answerStructures: [{ turnNumber: 9, outline: "有效内容，但题号不存在。" }]
+}, { turns }), /题号/);
+
 assert.throws(() => validateInterviewReport({
   conclusion: "复盘",
   strengths: [],

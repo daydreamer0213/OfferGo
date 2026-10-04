@@ -189,6 +189,38 @@ try {
   }), /原文/);
   assert.strictEqual(db.prepare("SELECT count(*) AS n FROM resume_optimizations").get().n, rowsBeforeMalformed);
 
+  const descriptiveIdsService = createResumeOptimizationService({ db, adapter: {
+    async generateResumeOptimization() {
+      return { headline: "展开已有工作与技能", suggestions: [
+        { id: "workorder-detail", operation: "replace", originalText: "参与企业知识库开发",
+          proposedText: "参与 Node.js 企业知识库开发", reason: "补充已有技能",
+          evidenceIds: ["R3", "R4"], editingPrinciple: "contribution_clarity" },
+        { id: "workorder-detail", operation: "replace", originalText: "技能:Node.js",
+          proposedText: "技能：Node.js；用于企业知识库开发", reason: "关联实际项目",
+          evidenceIds: ["R3", "R4"], editingPrinciple: "contribution_clarity" }
+      ] };
+    }
+  } });
+  const descriptiveDraft = await descriptiveIdsService.createDraft({
+    profileId: owner.profileId, planId: owner.planId,
+    sourceResumeVersionId: owner.resumeVersionId, mode: "general"
+  });
+  assert.deepStrictEqual(descriptiveDraft.suggestions.map(item => item.id), ["S1", "S2"]);
+  assert.match(descriptiveDraft.finalText, /参与 Node\.js 企业知识库开发/);
+  const unsupportedNumberService = createResumeOptimizationService({ db, adapter: {
+    async generateResumeOptimization() {
+      return { suggestions: [{ id: "project-detail", operation: "replace",
+        originalText: "参与企业知识库开发", proposedText: "参与企业知识库开发，效率提升99%",
+        reason: "没有依据的效果", evidenceIds: ["R3"], editingPrinciple: "result_visibility" }] };
+    }
+  } });
+  const rowsBeforeUnsupported = db.prepare("SELECT count(*) AS n FROM resume_optimizations").get().n;
+  await assert.rejects(() => unsupportedNumberService.createDraft({
+    profileId: owner.profileId, planId: owner.planId,
+    sourceResumeVersionId: owner.resumeVersionId, mode: "general"
+  }), /没有证据支持的数字/);
+  assert.strictEqual(db.prepare("SELECT count(*) AS n FROM resume_optimizations").get().n, rowsBeforeUnsupported);
+
   const draft = await service.createDraft({
     profileId: owner.profileId,
     planId: owner.planId,

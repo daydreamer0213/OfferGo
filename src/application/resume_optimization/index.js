@@ -104,6 +104,12 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     };
     const raw = await adapter.generateResumeOptimization(modelInput);
     const restored = restoreResumeSuggestionAnchors(raw, { sourceText: source.text, modelText: prepared.text });
+    // Suggestion IDs are local form keys, not model-supplied evidence references.
+    if (Array.isArray(restored?.suggestions)) {
+      restored.suggestions = restored.suggestions.map((item, index) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? { ...item, id: `S${index + 1}` } : item);
+    }
     const validated = validateResumeOptimizationDraft(restored, {
       sourceText: source.text,
       evidenceCatalog

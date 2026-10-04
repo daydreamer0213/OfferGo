@@ -80,10 +80,11 @@ function renderSelectedDraft(dashboard, draft) {
   const activated = draft.status === "activated";
   return `<section class="resume-opt-workspace resume-workbench" aria-labelledby="resume-opt-draft-title">
     <div class="resume-opt-conclusion"><div><p class="section-label">当前优化结论</p><h2 id="resume-opt-draft-title">${escapeHtml(draft.headline || "完整定向简历草稿")}</h2></div><span class="status ${activated ? "good" : "waiting"}">${activated ? "已启用新版本" : "可以继续编辑"}</span></div>
-    <dl class="resume-opt-binding"><div><dt>参考简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>目标投递方向</dt><dd>${escapeHtml(draft.mode === "general" ? "通用整理" : draft.targetDirection || "历史草稿未记录")}</dd></div><div><dt>模型来源</dt><dd>${escapeHtml([draft.modelIdentity?.provider, draft.modelIdentity?.model].filter(Boolean).join(" · ") || "本地记录")}</dd></div></dl>
+    <dl class="resume-opt-binding"><div><dt>参考简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>目标投递方向</dt><dd>${escapeHtml(draft.mode === "general" ? "通用整理" : draft.targetDirection || "历史草稿未记录")}</dd></div></dl>
     ${draft.draftFormat === "whole_draft" ? renderWholeDraft(dashboard, draft, evidence) : renderLegacyDraft(draft, evidence)}
     ${draft.mode === "general" ? "" : renderSelectedJobs(jobs, draft)}
     ${activated ? renderActivatedNotice(dashboard, draft) : ""}
+    <details class="resume-opt-technical"><summary>技术详情</summary><p>生成模型：${escapeHtml([draft.modelIdentity?.provider, draft.modelIdentity?.model].filter(Boolean).join(" · ") || "本地记录")}</p></details>
     ${renderHistory(dashboard, draft)}
   </section>`;
 }
@@ -132,7 +133,7 @@ function renderChangeLedger(changes, evidence, userEdited) {
 
 function renderLedgerItem(change, index, evidence) {
   const cited = (change.evidenceIds || []).map((id) => evidence.get(String(id))).filter(Boolean);
-  return `<article class="resume-opt-ledger-item"><div class="resume-opt-index" aria-hidden="true">${escapeHtml(change.id || `S${index + 1}`)}</div><div><div class="resume-opt-ledger-head"><span>${escapeHtml(PRINCIPLE_LABELS[change.editingPrinciple] || "结构化修改")}</span><strong>${escapeHtml(change.reason || "让相关经历更清楚")}</strong></div><div class="resume-opt-compare"><div><span>原文</span><p>${escapeHtml(change.originalText || "")}</p></div><div><span>系统生成</span><p>${escapeHtml(change.proposedText || "删除这段文字")}</p></div></div><details><summary>查看 ${cited.length} 条依据</summary><ul>${cited.map((item) => `<li><strong>${escapeHtml(item.id)}</strong><span>${escapeHtml(item.text)}</span></li>`).join("")}</ul></details></div></article>`;
+  return `<article class="resume-opt-ledger-item"><div class="resume-opt-index" aria-hidden="true">${index + 1}</div><div><div class="resume-opt-ledger-head"><span>${escapeHtml(PRINCIPLE_LABELS[change.editingPrinciple] || "结构化修改")}</span><strong>${escapeHtml(change.reason || "让相关经历更清楚")}</strong></div><div class="resume-opt-compare"><div><span>原文</span><p>${escapeHtml(change.originalText || "")}</p></div><div><span>系统生成</span><p>${escapeHtml(change.proposedText || "删除这段文字")}</p></div></div><details><summary>查看 ${cited.length} 条依据</summary><ul>${cited.map((item) => `<li><strong>${escapeHtml(item.id)}</strong><span>${escapeHtml(item.text)}</span></li>`).join("")}</ul></details></div></article>`;
 }
 
 function renderLegacyDraft(draft, evidence) {

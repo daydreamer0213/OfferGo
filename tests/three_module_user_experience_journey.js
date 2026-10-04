@@ -59,6 +59,18 @@ const { createDashboardServer } = require('../src/dashboard/server');
     await discover('期望薪资多少？最快什么时候到岗？', { messageCategory: 'salary', messageSummary: '确认薪资和到岗',
       missingFact: { key: 'expected_salary', question: '你的期望薪资是多少？' }, messages: [] });
     const adapter = new MockModelAdapter();
+    const reviewInterview = adapter.reviewMockInterview.bind(adapter);
+    adapter.reviewMockInterview = async input => {
+      const report = await reviewInterview(input);
+      return { ...report, answerStructures: report.answerStructures.map(item =>
+        ({ ...item, outline: item.outline.join(" → ") })) };
+    };
+    const optimizeResume = adapter.generateResumeOptimization.bind(adapter);
+    adapter.generateResumeOptimization = async input => {
+      const draft = await optimizeResume(input);
+      return { ...draft, suggestions: draft.suggestions.map(item =>
+        ({ ...item, id: "workorder-detail" })) };
+    };
     const interview = createMockInterviewService({ db, adapter });
     const optimizer = createResumeOptimizationService({ db, adapter });
     const analyzer = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
@@ -116,6 +128,7 @@ const { createDashboardServer } = require('../src/dashboard/server');
     await shot('03-visible-feedback');
     await page.getByRole('button', { name: '结束并生成复盘', exact: true }).click();
     await page.locator('#interview-report-title').waitFor();
+    result.checks.push('paragraph outline produces a saved interview report without retrying the user action');
     assert.equal(await page.locator('.interview-turn-detail[open]').count(), 0);
     await page.getByRole('link', { name: '重练这题', exact: true }).first().click();
     const retry = page.locator('.interview-turn-detail[open] textarea[name=answerText]');
@@ -130,6 +143,15 @@ const { createDashboardServer } = require('../src/dashboard/server');
     await page.goto(`${base}/resume-optimization?planId=${owner.planId}`);
     await page.getByRole('button', { name: '生成完整草稿', exact: true }).click();
     await page.locator('textarea[name=finalText]').waitFor();
+    assert.deepEqual(await page.locator('.resume-opt-index').allTextContents(),
+      await page.locator('.resume-opt-index').evaluateAll(items => items.map((_, index) => String(index + 1))));
+    const technical = page.locator('details.resume-opt-technical');
+    assert.equal(await technical.getAttribute('open'), null);
+    assert(!(await page.locator('#main-content').innerText()).includes('生成模型：'));
+    await technical.locator('summary').click();
+    assert(await technical.locator('p').isVisible());
+    await technical.locator('summary').click();
+    result.checks.push('descriptive suggestion IDs generate a draft; technical details stay collapsed until requested');
     const editor = page.locator('textarea[name=finalText]');
     const latest = (await editor.inputValue()) + '\n补充：协助整理会议纪要。';
     await editor.fill(latest);
