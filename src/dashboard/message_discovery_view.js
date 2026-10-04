@@ -104,8 +104,12 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
     const expired = inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED"
       || result.legacyActionExpired === true;
-    const pending = !expired && resultPending(result);
-    const resumeRequested = Boolean(matchingContact?.resumeRequested || manualActions.length);
+    const waitingForRecruiter = inboxItem?.actionGroup === "waiting";
+    const completedResumeAction = messageActions.some(action => action.platform === result.platform
+      && action.conversationKey === result.conversationKey && action.status === "succeeded"
+      && String(action.evidence?.sourceMessageId || "") === inboxItem?.lastMessageId);
+    const pending = !expired && !waitingForRecruiter && inboxItem?.actionGroup !== "done" && resultPending(result);
+    const resumeRequested = !completedResumeAction && Boolean(matchingContact?.resumeRequested || manualActions.length);
     const interviewInvited = Boolean(matchingContact?.interviewInvited || result.messageIntent === "interview_invitation");
     const durableDrafts = Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0) : [];
     const draftItems = durableDrafts.length
@@ -158,13 +162,17 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
         ${presented.attentionPoint ? `<h3>需要留意</h3><p class="message-attention-point">${escapeHtml(presented.attentionPoint)}</p>` : ""}
         ${presented.recommendationNote ? `<h3>是否值得继续聊</h3><p class="message-recommendation-note">${escapeHtml(presented.recommendationNote)}</p>` : ""}
       </details>` : "";
-    const replySection = drafts ? `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
+    const replySection = drafts ? waitingForRecruiter
+      ? `<p class="line">目前等待对方反馈，不需要再回复。</p><details class="message-draft-alternatives"><summary>如需致谢，查看可选回复</summary>${drafts}</details>`
+      : `<h3>回复草稿</h3><h4>推荐回复</h4>${drafts}` : "";
     const missingFactSection = result.missingFactKey ? renderMissingFactForm(result, {
       profileId,
       escapeHtml,
       escapeAttr
     }) : "";
-    const responseSection = expired
+    const responseSection = completedResumeAction && inboxItem?.actionGroup === "done"
+      ? '<p class="line">简历邀请已处理，目前没有需要你回复的问题。</p>'
+      : expired
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
       : `${missingFactSection}${replySection}`;
     const sentForm = !expired && sendable && drafts && !durableDrafts.length
@@ -179,7 +187,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       identity: `${result.platform}\0${result.conversationKey}`,
       actionGroup: inboxItem?.actionGroup || (pending ? "needs_action" : "done"),
       contactKey: matchingContact?.key || "",
-      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : messageStatusLabel(result))}</small><em>${escapeHtml(preview)}</em></span></label>`,
+      list: `<label class="message-list-item" data-platform="${escapeAttr(result.platform || "")}" data-task="${pending ? "pending" : "history"}" data-pending="${pending}" data-resume="${resumeRequested}" data-interview="${interviewInvited}" for="${viewId}"><input id="${viewId}" type="radio" name="message-current" data-message-view="${viewKey}" aria-controls="message-detail-${viewKey}"><span><strong>${escapeHtml(title)}</strong><small><span class="message-source">${escapeHtml(platformLabel)}</span>${inboxItem?.lastActivityAt ? ` · ${escapeHtml(messageTimeLabel(inboxItem.lastActivityAt))}` : ""}</small><small>${escapeHtml(company)} · ${escapeHtml(expired ? "超过 7 天，已结束处理" : waitingForRecruiter ? "等待对方反馈" : completedResumeAction && inboxItem?.actionGroup === "done" ? "简历邀请已处理" : messageStatusLabel({ ...result, manualActions: resumeRequested ? manualActions : [] }))}</small><em>${escapeHtml(preview)}</em></span></label>`,
       detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${jobOverview}${responseSection}${sentForm}${fitDetails}</section>`
     };
   });
@@ -329,7 +337,7 @@ function renderIncomingContactView(item, { selected, actionGroup = "done", timel
     actionGroup,
     contactKey: item.key,
     list: `<label class="message-list-item" data-platform="${escapeAttr(item.platform)}" data-task="${actionGroup}" data-pending="${actionGroup === "needs_action" || actionGroup === "needs_review"}" data-resume="${Boolean(item.resumeRequested)}" data-interview="${Boolean(item.interviewInvited)}" for="${inputId}"><input id="${inputId}" type="radio" name="message-current" data-message-view="${key}" aria-controls="message-detail-${key}"${selected ? " checked" : ""}><span><strong>${escapeHtml(item.title || "未关联岗位")}</strong><small><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(status)}</small><small>${escapeHtml(item.company || "公司待确认")}</small><em>${escapeHtml(messagePreview(item, "已记录这次联系，原文暂不可查看"))}</em></span></label>`,
-    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "waiting" ? "你已经回复过这条会话，等待对方继续回复。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? "这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。" : "当前没有需要你处理的操作。"}</p></section>`
+    detail: `<section id="message-detail-${key}" class="panel message-result${actionGroup === "done" ? " message-history" : ""}" data-platform="${escapeAttr(item.platform)}" data-message-detail-panel="${key}"${selected ? "" : " hidden"}><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(item.title || "未关联岗位")}</h2><p class="line"><span class="message-source">${escapeHtml(platform)}</span>${activity ? ` · ${escapeHtml(activity)}` : ""} · ${escapeHtml(item.company || "公司待确认")} · ${escapeHtml(status)}</p>${renderConversationTimeline(timeline, { escapeHtml, escapeAttr, messageActions, allowActions: item.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED" }) || `<section class="message-inbound"><h3>会话记录</h3>${original.length ? original.map((text) => `<p class="line">${escapeHtml(text)}</p>`).join("") : '<p class="line">已记录这次联系，完整内容会在下次同步后显示。</p>'}</section>`}<p class="line">${actionGroup === "waiting" ? "目前等待对方反馈，暂时不需要处理。" : actionGroup === "needs_review" ? "OfferGo 正在补充这条消息所需的岗位资料。" : item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED" ? "这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。" : "当前没有需要你处理的操作。"}</p></section>`
   };
 }
 
@@ -339,11 +347,11 @@ function renderInboxOnlyView(item, { escapeHtml, escapeAttr, messageActions }) {
   const platform = item.platform === "zhaopin" ? "智联" : "BOSS";
   const title = item.positionTitle || "岗位名称待确认";
   const company = item.company || "公司待确认";
-  const statusText = item.statusText || (item.actionGroup === "waiting" ? "已回复，等待对方消息" : "查看这条消息");
+  const statusText = item.statusText || (item.actionGroup === "waiting" ? "等待对方反馈" : "查看这条消息");
   const excerpt = item.latestExcerpt || statusText;
   const reason = item.actionGroup === "needs_review"
     ? "消息原文已保存；模型恢复后重新同步，OfferGo 会接着生成回复建议。"
-    : item.actionGroup === "waiting" ? "你已经回复过这条会话，新的对方消息出现后会自动移回待处理。" : statusText;
+    : item.actionGroup === "waiting" ? "目前等待对方反馈，新的问题出现后会自动移回待处理。" : statusText;
   return {
     key,
     identity: `${item.platform}\0${item.conversationKey}`,

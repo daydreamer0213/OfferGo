@@ -182,6 +182,20 @@ function getMessageReplyDraftPlatforms(db, { profileId, draftIds } = {}) {
   return [...new Set(draftIds.map((draftId) => select.get(positiveInteger(draftId, "draftId"), profile)?.source).filter(Boolean))];
 }
 
+function hasSentReplyForMessageGroup(db, { profileId, cardId, messageGroupKey } = {}) {
+  return Boolean(db.prepare(`SELECT 1 FROM message_reply_drafts drafts
+    WHERE drafts.profile_id = ? AND drafts.card_id = ? AND drafts.message_group_key = ?
+      AND (EXISTS (SELECT 1 FROM candidate_answer_memories memories
+        WHERE memories.draft_id = drafts.id AND memories.profile_id = drafts.profile_id
+          AND memories.completion_kind = 'sent')
+        OR EXISTS (SELECT 1 FROM message_reply_send_items items
+          JOIN message_reply_send_batches batches ON batches.id = items.batch_id
+          WHERE items.draft_id = drafts.id AND batches.profile_id = drafts.profile_id
+            AND items.status = 'succeeded')) LIMIT 1`)
+    .get(positiveInteger(profileId, "profileId"), positiveInteger(cardId, "cardId"),
+      digestKey(messageGroupKey, "messageGroupKey")));
+}
+
 function hasBlockingReplySendItemForCard(db, { profileId, cardId } = {}) {
   return Boolean(db.prepare(`SELECT 1 FROM message_reply_send_items items
     JOIN message_reply_drafts drafts ON drafts.id = items.draft_id
@@ -590,6 +604,7 @@ module.exports = {
   listActiveMessageReplySendBatches,
   getMessageReplySendBatchOwner,
   getMessageReplyDraftPlatforms,
+  hasSentReplyForMessageGroup,
   hasBlockingReplySendItemForCard,
   listActiveFollowUpCardIds,
   listMessageReplySendItems,

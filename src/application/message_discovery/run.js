@@ -4,6 +4,7 @@ const messageInbox = require("../message_inbox");
 const messageTimeline = require("../../storage/message_timeline_store");
 const { getJob } = require("../../storage/job_store");
 const { getBatch } = require("../../storage/scan_store");
+const { hasSentReplyForMessageGroup } = require("../../storage/message_reply_send_store");
 const { getProgressCardById } = require("../../core/candidate_progress");
 const { isClearlyUnmatchedMessageJob } = require("../../core/message_routing_policy");
 const {
@@ -29,6 +30,7 @@ async function runBossMessageDiscovery(options = {}) {
       : options.classifyMessageGroup,
     messageInbox: options.messageInbox || messageInbox,
     messageTimeline: options.messageTimeline || messageTimeline,
+    hasSentReplyForMessageGroup,
     isUnmatchedCard: options.isUnmatchedCard || isClearlyUnmatchedMessageCard,
     qualityCheckDraft: options.qualityCheckDraft || qualityCheckDraft
   });

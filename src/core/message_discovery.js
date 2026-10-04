@@ -1,6 +1,7 @@
 const {
   listMessageDiscoveryCandidates,
   getProgressCardById,
+  transitionProgressCard,
   findMessageDiscoveryJobContext,
   recordDiscoveredMessageGroupClassification,
   recordRecruiterRejection,
@@ -13,6 +14,7 @@ const {
   listCandidateFacts,
   listCandidateAnswerMemories,
   recordMessageReplyDrafts,
+  listOpenMessageReplyDrafts,
   closeMessageReplyDrafts,
   saveMessageInboundContext,
   listMessageInboundContexts,
@@ -21,7 +23,7 @@ const {
 const { safeDigest, messageKey } = require("../adapters/sites/boss_message_dom");
 const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_identity");
 const { MANUAL_ONLY_CATEGORIES } = require("./message_reply_contract");
-const { isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob } = require("./message_routing_policy");
+const { isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob, isRecruiterReceiptUpdate } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
 const { decisionHardBlockers } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
@@ -125,6 +127,7 @@ async function runBossMessageDiscovery({
   onStatus = () => {},
   messageInbox,
   messageTimeline,
+  hasSentReplyForMessageGroup = () => false,
   isUnmatchedCard = () => false,
   analysisAvailable = true,
   retryConversationKeys = null,
@@ -151,8 +154,9 @@ async function runBossMessageDiscovery({
     profileId,
     platform: source,
     now,
-    messageInbox: { listMessageInboxItems, markMessageInboxItemDone },
-    timeline
+    messageInbox: { listMessageInboxItems, markMessageInboxItemDone, upsertMessageInboxItem },
+    timeline,
+    hasSentReplyForMessageGroup
   });
   reconcileUnmatchedMessageHistory({
     db, profileId, platform: source, now,
@@ -661,7 +665,11 @@ async function runBossMessageDiscovery({
           conversationKey: target.conversationKey
         });
         retained = unresolvedSummary(db, profileId, source);
-        markMessageInboxItemDone(db, {
+        const existingInbox = listMessageInboxItems(db, { profileId }).find(item =>
+          item.platform === source && item.conversationKey === target.conversationKey);
+        const unchanged = existingInbox?.lastMessageId === selectedTarget.lastMessageId
+          && ["needs_action", "waiting"].includes(existingInbox.actionGroup);
+        if (!unchanged) markMessageInboxItemDone(db, {
           profileId,
           platform: source,
           conversationKey: target.conversationKey,
@@ -789,6 +797,10 @@ async function runBossMessageDiscovery({
     }
     throwIfAborted(signal);
     const committed = immediateTransaction(db, () => {
+      const receiptUpdate = isRecruiterReceiptUpdate(classification, inboundMessages);
+      if (receiptUpdate) classification = { ...classification,
+        progressUpdate: { stage: "waiting_reply", nextAction: "Wait for recruiter feedback" }
+      };
       if (source === "zhaopin" && !currentZhaopinContext(db, profileId, resolved, selectedTarget, capturedPlan)) {
         recordUnresolvedMessageDiscoveryItem(db, {
           profileId, platform: source, conversationKey: target.conversationKey,
@@ -862,12 +874,12 @@ async function runBossMessageDiscovery({
         lastMessageId: selectedTarget.lastMessageId,
         lastActivityAt: target.lastActivityAt || now(),
         lastDirection: "friend",
-        unread: !rejection,
+        unread: !rejection && !receiptUpdate,
         positionTitle: resolved.job.title,
         company: resolved.job.company,
         latestExcerpt: inboundMessages.at(-1)?.text || target.previewText || "",
-        actionGroup: rejection ? "done" : "needs_action",
-        actionCode: rejection ? "" : "reply",
+        actionGroup: rejection ? "done" : receiptUpdate ? "waiting" : "needs_action",
+        actionCode: rejection ? "" : receiptUpdate ? "wait" : "reply",
         reasonCode: "",
         observedAt: now()
       });
@@ -2041,12 +2053,14 @@ function reconcileTerminalMessageHistory({
   platform,
   now,
   messageInbox,
-  timeline
+  timeline,
+  hasSentReplyForMessageGroup
 }) {
   const inboundContexts = listMessageInboundContexts(db, { profileId, limit: 500 })
     .filter((context) => context.platform === platform);
   const items = messageInbox.listMessageInboxItems(db, { profileId })
-    .filter((item) => item.platform === platform && item.actionGroup !== "done");
+    .filter((item) => item.platform === platform && (item.actionGroup !== "done" || !item.reasonCode));
+  const openDrafts = listOpenMessageReplyDrafts(db, { profileId, limit: 500 });
   for (const item of items) {
     const events = timeline.listMessageEvents(db, {
       profileId,
@@ -2069,7 +2083,36 @@ function reconcileTerminalMessageHistory({
         direction: "friend",
         text: message.text
       }))));
-    if (!rejectionEvent && !rejectionContext) continue;
+    if (!rejectionEvent && !rejectionContext) {
+      const context = inboundContexts.find((context) => context.conversationKey === item.conversationKey
+        && Number(context.cardId) === Number(item.cardId) && context.lastMessageId === item.lastMessageId);
+      const unchangedInbound = context && item.lastDirection === "friend"
+        && (!latestConversationEvent || (latestConversationEvent.direction === "friend"
+          && String(latestConversationEvent.platformMessageId || "") === String(item.lastMessageId || "")));
+      const openReply = context && openDrafts.some(draft => Number(draft.cardId) === Number(item.cardId)
+        && draft.messageGroupKey === context.messageGroupKey);
+      const receipt = context && isRecruiterReceiptUpdate(context, context.inboundMessages);
+      const alreadySent = context && hasSentReplyForMessageGroup(db, { profileId, cardId: item.cardId,
+        messageGroupKey: context.messageGroupKey });
+      const recoverReply = item.actionGroup === "done" && openReply
+        && !alreadySent
+        && !["rejection", "manual_review"].includes(context.messageIntent)
+        && deriveRequestedActions({ platform, messages: context.inboundMessages.filter(message => message.kind === "text"),
+          manualActions: context.manualActions }).replyMessages.length > 0;
+      if (unchangedInbound && !alreadySent && ((receipt && item.actionGroup === "needs_action") || recoverReply)) {
+        immediateTransaction(db, () => {
+          const card = getProgressCardById(db, item.cardId);
+          if (receipt && card?.stage === "reply_ready") transitionProgressCard(db, {
+            cardId: card.id, expectedStage: card.stage, stage: "waiting_reply",
+            nextAction: "Wait for recruiter feedback", now: now()
+          });
+          messageInbox.upsertMessageInboxItem(db, { ...item, unread: !receipt,
+            actionGroup: receipt ? "waiting" : "needs_action", actionCode: receipt ? "wait" : "reply",
+            reasonCode: "", observedAt: now() });
+        });
+      }
+      continue;
+    }
     const occurredAt = now();
     immediateTransaction(db, () => {
       if (Number.isSafeInteger(Number(item.cardId)) && Number(item.cardId) > 0) {

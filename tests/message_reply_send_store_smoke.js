@@ -16,6 +16,7 @@ const NAMES = [
   "listActiveMessageReplySendBatches",
   "getMessageReplySendBatchOwner",
   "getMessageReplyDraftPlatforms",
+  "hasSentReplyForMessageGroup",
   "hasBlockingReplySendItemForCard",
   "listActiveFollowUpCardIds",
   "listMessageReplySendItems",
@@ -26,7 +27,7 @@ const NAMES = [
 assert.deepEqual(Object.keys(store).sort(), [...NAMES].sort());
 for (const name of NAMES.filter((name) => ![
   "getActiveMessageReplySendBatch", "getLatestMessageReplySendBatch", "listActiveMessageReplySendBatches",
-  "getMessageReplySendBatchOwner", "getMessageReplyDraftPlatforms", "hasBlockingReplySendItemForCard", "listActiveFollowUpCardIds"
+  "getMessageReplySendBatchOwner", "getMessageReplyDraftPlatforms", "hasSentReplyForMessageGroup", "hasBlockingReplySendItemForCard", "listActiveFollowUpCardIds"
 ].includes(name))) assert.equal(storage[name], store[name], `${name} must be a direct facade reference`);
 
 const db = storage.openDb(":memory:");
@@ -361,6 +362,22 @@ try {
     cardId: third.card.id,
     messageGroupKey: third.groupKey
   }), null);
+
+  const sentGroup = { profileId: owner.profileId, cardId: alternatives.card.id,
+    messageGroupKey: alternatives.groupKey };
+  const sentBatch = store.createMessageReplySendBatch(db, { profileId: owner.profileId,
+    items: [{ draftId: alternatives.drafts[0].id, revision: alternatives.drafts[0].revision }], createdAt: later });
+  let sentItem = sentBatch.items[0];
+  assert.equal(store.hasSentReplyForMessageGroup(db, sentGroup), false);
+  for (const status of ["selecting", "verified", "filled", "click_dispatched", "succeeded"]) {
+    sentItem = store.transitionMessageReplySendItem(db, { profileId: owner.profileId,
+      batchId: sentBatch.batch.id, itemId: sentItem.id, expectedStatus: sentItem.status, status,
+      ...(["click_dispatched", "succeeded"].includes(status) ? { clickCount: 1 } : {}), updatedAt: later });
+    assert.equal(store.hasSentReplyForMessageGroup(db, sentGroup), status === "succeeded",
+      "only verified success is a sent reply, even without a learned answer memory");
+  }
+  assert.equal(store.hasSentReplyForMessageGroup(db, { ...sentGroup, profileId: owner.profileId + 999 }), false);
+  assert.equal(store.hasSentReplyForMessageGroup(db, { ...sentGroup, messageGroupKey: digest("another-question") }), false);
 
   console.log("message_reply_send_store_smoke ok");
 

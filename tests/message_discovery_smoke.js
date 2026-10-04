@@ -40,6 +40,7 @@ const {
   recordUnresolvedMessageDiscoveryItem
 } = require("../src/core/message_preview_state");
 const { getMessageInboxItem, upsertMessageInboxItem } = require("../src/application/message_inbox");
+const { createMessageActionService } = require("../src/application/message_actions");
 
 const PRIVATE_BODY = "PRIVATE_HR_BODY";
 const PRIVATE_PREVIEW = "PRIVATE_CONVERSATION_PREVIEW";
@@ -78,6 +79,8 @@ async function main() {
   await previewChannelSmoke();
   await unsupportedPreviewSmoke();
   await classificationOutcomeSmoke();
+  await recruiterReceiptSmoke();
+  await resumeActionWithQuestionSmoke();
   await semanticRejectionSmoke();
   await directRejectionRoutingSmoke();
   await reopenedAfterRejectionSmoke();
@@ -2705,6 +2708,100 @@ async function unsupportedPreviewSmoke() {
   });
   assertStopped(summary, "BOSS_MESSAGE_CONTENT_UNSUPPORTED");
   assert.strictEqual(opens, 0);
+}
+
+async function resumeActionWithQuestionSmoke() {
+  for (const state of ["draft", "missing_fact", "manual_review", "already_sent", "already_sent_alternative", "new_message"]) {
+  const fixture = createFixture({ suffix: `resume-question-${state}`, title: `Resume Question ${state} Engineer` });
+  await runBossMessageDiscovery({ db, profileId: fixture.profileId,
+    reader: fakeReader([selectedConversation({ title: fixture.title, messages: [
+      message("friend", "123456789013990", "方便发下简历吗？另外，重复支付回调你是怎么处理的？")
+    ] })]), classifyMessageGroup: async () => state === "missing_fact"
+      ? { ...classification({ messages: [], stage: "needs_user_action" }),
+        missingFact: { key: "payment_callback_detail", question: "你的支付回调具体是怎样实现的？" } }
+      : state === "manual_review" ? classification({ messageIntent: "manual_review", stage: "needs_user_action", messages: [] })
+      : classification({ messages: state === "already_sent_alternative"
+        ? ["我实现交易号唯一约束并验证重复通知。", "交易号唯一约束避免重复通知重复入账。"]
+        : ["我实现交易号唯一约束并验证重复通知。"] }) });
+  const conversationKey = safeDigest(["conversation", "0"]);
+  const event = listMessageEvents(db, { profileId: fixture.profileId, platform: "boss", conversationKey })[0];
+  if (state.startsWith("already_sent")) {
+    const draft = listOpenMessageReplyDrafts(db, { profileId: fixture.profileId })[0];
+    completeMessageReplyDraft(db, { profileId: fixture.profileId, draftId: draft.id,
+      finalText: draft.currentText, completionKind: "sent", scope: { kind: "job", key: String(fixture.jobId) } });
+  }
+  const service = createMessageActionService({ db });
+  const action = service.confirm({ profileId: fixture.profileId, platform: "boss", conversationKey,
+    messageKey: event.messageKey, actionKind: "resume_request_accept", idempotencyKey: "de0e5541-90a5-4862-af86-46d55a5f75ad" });
+  for (const [expectedStatus, status] of [["confirmed", "selecting"], ["selecting", "verified"], ["verified", "click_dispatched"]]) {
+    service.transition({ profileId: fixture.profileId, actionId: action.id, expectedStatus, status,
+      ...(status === "click_dispatched" ? { clickCount: 1 } : {}) });
+  }
+  if (state === "new_message") {
+    const item = getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey });
+    upsertMessageInboxItem(db, { ...item, lastMessageId: "123456789013991", latestExcerpt: "明天下午可以面试吗？", observedAt: new Date().toISOString() });
+  }
+  assert.strictEqual(service.completeVerified({ profileId: fixture.profileId, actionId: action.id,
+    evidence: { verification: "synthetic fixture" } }).status, "succeeded");
+  assert.strictEqual(getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey }).actionGroup,
+    state.startsWith("already_sent") ? "done" : "needs_action", `resume completion must respect remaining reply state: ${state}`);
+  if (state === "already_sent_alternative") {
+    assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).length, 1);
+    await runBossMessageDiscovery({ db, profileId: fixture.profileId, reader: fakeReader([]),
+      classifyMessageGroup: async () => { throw new Error("sent alternatives must not be reanalysed"); } });
+    assert.strictEqual(getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey }).actionGroup,
+      "done", "a sent answer must not be revived by its open alternative draft");
+  }
+  }
+}
+
+async function recruiterReceiptSmoke() {
+  const fixture = createFixture({ suffix: "recruiter-receipt", title: "Receipt Engineer" });
+  const receipt = "简历收到了，我先给技术负责人看一下，有反馈再联系你。";
+  const conversation = () => selectedConversation({ title: fixture.title,
+    messages: [message("friend", "123456789013901", receipt)] });
+  let calls = 0;
+  const classifyMessageGroup = async () => { calls += 1; return classification({
+    messageIntent: "information_update", messageCategory: "other", messages: ["好的，谢谢，等您反馈。"]
+  }); };
+  const run = () => runBossMessageDiscovery({ db, profileId: fixture.profileId,
+    reader: fakeReader([conversation()]), classifyMessageGroup });
+  const summary = await run();
+  const conversationKey = safeDigest(["conversation", "0"]);
+  const item = () => getMessageInboxItem(db, { profileId: fixture.profileId, platform: "boss", conversationKey });
+  assert.strictEqual(item().actionGroup, "waiting", "a receipt with no question must not require a reply");
+  assert.strictEqual(summary.results[0].stage, "waiting_reply");
+  assert.strictEqual(item().unread, false);
+  const draftIds = listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).map(draft => draft.id);
+  assert.strictEqual(draftIds.length, 1, "keep an optional acknowledgement draft");
+  transitionProgressCard(db, { cardId: fixture.card.id, expectedStage: "waiting_reply", stage: "reply_ready", now: NOW });
+  upsertMessageInboxItem(db, { ...item(), actionGroup: "done", actionCode: "", reasonCode: "", observedAt: NOW });
+  await run();
+  assert.strictEqual(calls, 1, "unchanged receipt must not regenerate a draft");
+  assert.strictEqual(item().actionGroup, "waiting");
+  assert.strictEqual(getProgressCardForJob(db, { profileId: fixture.profileId, jobId: fixture.jobId }).stage, "waiting_reply",
+    "sync should repair a receipt saved as actionable by the old version");
+  assert.deepStrictEqual(listOpenMessageReplyDrafts(db, { profileId: fixture.profileId }).map(draft => draft.id), draftIds);
+  await runBossMessageDiscovery({ db, profileId: fixture.profileId,
+    reader: fakeReader([selectedConversation({ title: fixture.title, messages: [
+      message("friend", "123456789013901", receipt),
+      message("friend", "123456789013902", "技术负责人想确认：支付回调是你具体实现的吗？")
+    ] })]), classifyMessageGroup: async () => classification({ messages: ["支付回调接口和联调由我实现。"] }) });
+  assert.strictEqual(item().actionGroup, "needs_action", "a later HR question must become actionable again");
+  upsertMessageInboxItem(db, { ...item(), actionGroup: "done", actionCode: "", reasonCode: "", observedAt: NOW });
+  await runBossMessageDiscovery({ db, profileId: fixture.profileId,
+    reader: fakeReader([selectedConversation({ title: fixture.title, messages: [
+      message("friend", "123456789013901", receipt),
+      message("friend", "123456789013902", "技术负责人想确认：支付回调是你具体实现的吗？")
+    ] })]), classifyMessageGroup: async () => { throw new Error("unchanged question must not call the model again"); } });
+  assert.strictEqual(item().actionGroup, "needs_action", "a stale unread row must not clear an unanswered question");
+  const mixed = createFixture({ suffix: "receipt-mixed", title: "Mixed Receipt Engineer" });
+  await runBossMessageDiscovery({ db, profileId: mixed.profileId,
+    reader: fakeReader([selectedConversation({ title: mixed.title, messages: [
+      message("friend", "123456789013903", "简历收到了，有反馈再联系你。请补充你参与支付项目的职责。")
+    ] })]), classifyMessageGroup: async () => classification({ messageIntent: "information_update", messages: ["我负责接口实现与联调。"] }) });
+  assert.strictEqual(getMessageInboxItem(db, { profileId: mixed.profileId, platform: "boss", conversationKey }).actionGroup,
+    "needs_action", "a receipt plus an actual request must stay actionable even if labelled an update");
 }
 
 async function classificationOutcomeSmoke() {

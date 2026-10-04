@@ -44,4 +44,15 @@ function isClearlyUnmatchedMessageJob(job = {}) {
     || normalizeRecommendationTier(analysis.recommendation, Number(analysis.recommendationSchemaVersion || 1)) === "not_recommended";
 }
 
-module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob };
+function isRecruiterReceiptUpdate(classification = {}, messages = []) {
+  if (classification.messageIntent !== "information_update" || classification.missingFact
+    || (classification.manualActions || []).length || (classification.requiredFactKeys || []).length
+    || (classification.responseItems || []).length) return false;
+  const text = messages.map(message => String(message?.text || "")).join(" ");
+  // A receipt combined with a question or request still requires a reply.
+  return /(?:简历|资料)(?:已经|已)?(?:收到了|收到)/.test(text)
+    && /(?:有反馈|有消息|有结果|后续).{0,12}(?:联系|通知)/.test(text)
+    && !/[?？]|(?:没|未)(?:有)?收到|请|麻烦|方便|能否|是否|补充|回复|确认/.test(text);
+}
+
+module.exports = { isCompetitionPromotion, isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob, isRecruiterReceiptUpdate };

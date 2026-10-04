@@ -1429,7 +1429,7 @@ function presentInboxItem(item) {
   const expired = item.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED";
   const presentation = {
     needs_action: { statusText: "需要你处理", label: "查看建议回复" },
-    waiting: { statusText: "已回复，等待对方消息", label: "查看会话" },
+    waiting: { statusText: "等待对方反馈", label: "查看会话" },
     needs_review: { statusText: "消息已读取，回复建议待生成", label: "查看消息" },
     done: { statusText: "已经处理", label: "查看记录" }
   }[item.actionGroup];

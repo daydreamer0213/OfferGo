@@ -138,7 +138,7 @@ try {
     now: new Date("2026-09-17T02:10:30.000Z")
   });
   assert.equal(pageState.groups.needsAction[0].primaryAction.label, "查看建议回复");
-  assert.equal(pageState.groups.waiting[0].statusText, "已回复，等待对方消息");
+  assert.equal(pageState.groups.waiting[0].statusText, "等待对方反馈");
   assert.deepEqual(pageState.groups.needsReview, []);
   assert.equal(pageState.freshness.boss.label, "刚刚同步");
   assert.equal(pageState.counts.total, 3);
