@@ -178,7 +178,10 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboa
     ]) {
       const migratedPage = await getText(baseUrl, pathname);
       assert.strictEqual(migratedPage.status, 200, `${name} must keep its HTML response`);
-      assertSharedFrame(migratedPage.body, `/plan?profileId=${queueFixture.profileId}&amp;planId=${queueFixture.planId}`, name);
+      const expectedCurrentPath = ['profile', 'resume versions'].includes(name)
+        ? pathname : `/plan?profileId=${queueFixture.profileId}&amp;planId=${queueFixture.planId}`;
+      assertSharedFrame(migratedPage.body, expectedCurrentPath, name);
+      if (['profile', 'resume versions'].includes(name)) assertCurrentLink(migratedPage.body, pathname, '简历工作室');
       assert.strictEqual((migratedPage.body.match(/<main(?:\s|>)/g) || []).length, 1, `${name} must use exactly one main region`);
       assert.match(migratedPage.body, /<main id="main-content">/, `${name} must preserve the shared main-content target`);
       const primaryNavigation = migratedPage.body.match(/<nav class="primary-nav"[^>]*>([\s\S]*?)<\/nav>/);

@@ -963,10 +963,11 @@ function createMessageDiscoveryController(deps = {}) {
       || (row.source === "boss"
         && String(row.description || "").trim().length >= 120
         && hasPublishableMessageAnalysis(rowAnalysis));
-    const job = projectMessageDecisionCard(trusted || (row.source === "zhaopin" ? { title: row.title, company: row.company, salary: row.salary } : {
+    const job = projectMessageDecisionCard(trusted || (row.source === "zhaopin" ? { title: row.title, company: row.company, salary: row.salary, location: row.location } : {
       title: row.title,
       company: row.company,
       salary: row.salary,
+      location: row.location,
       description: row.description,
       qualityTags: parseArray(row.quality_tags_json),
       risks: parseArray(row.risks_json),
@@ -1203,6 +1204,7 @@ function sanitizeJobUnderstanding(value) {
   return {
     title: safeInlineText(job.title, 160),
     company: safeInlineText(job.company, 160),
+    ...(safeInlineText(job.location, 160) ? { location: safeInlineText(job.location, 160) } : {}),
     roleSummary: safeInlineText(job.roleSummary, 300),
     roleTasks: safeInlineList(job.roleTasks, 4, 240),
     companyBusiness: safeInlineText(job.companyBusiness, 300),
@@ -1227,6 +1229,7 @@ function mergeCurrentDecisionNarrative(savedValue, currentValue) {
   const current = currentValue && typeof currentValue === "object" && !Array.isArray(currentValue) ? currentValue : {};
   return {
     ...saved,
+    location: current.location || saved.location,
     roleSummary: current.roleSummary || saved.roleSummary,
     roleTasks: Array.isArray(current.roleTasks) && current.roleTasks.length
       ? current.roleTasks : saved.roleTasks,

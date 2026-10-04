@@ -2403,11 +2403,13 @@ function durableDraftRecoverySmoke() {
         recommendation: "not_recommended", fitLevel: "no_fit", decisionSource: "hard_boundary", ruleAdjusted: true,
         fitReasons: ["已确认的基础条件不满足。", "知识库项目与岗位职责匹配"]
       }), jobId);
+    durableDb.prepare("UPDATE jobs SET location = '广州番禺' WHERE id = ?").run(jobId);
     const pageState = controller.pageState(profileId);
     assert.strictEqual(pageState.status, "completed");
     assert.strictEqual(pageState.results[0].drafts[0].id, draft.id);
     assert.strictEqual(pageState.results[0].drafts[0].text, PRIVATE_DRAFT);
     assert.strictEqual(pageState.results[0].job.title, "持久化岗位");
+    assert.strictEqual(pageState.results[0].job.location, '广州番禺', 'persisted message details must retain the saved work location');
     assert.match(pageState.results[0].job.opportunitySummary, /6-8K.*低于期望下限/, "restart must retain concrete BOSS exclusion evidence");
     assert.strictEqual(pageState.results[0].job.fitLabel, "");
     assert.match(pageState.results[0].job.fitSummary, /知识库项目/);
@@ -2418,7 +2420,7 @@ function durableDraftRecoverySmoke() {
     const trustedBatchId = createBatch(durableDb, "boss", "durable-context", "test", { profileId, searchPlanId: planId });
     const savedAnalysis = JSON.parse(durableDb.prepare("SELECT analysis_json FROM jobs WHERE id = ?").get(jobId).analysis_json);
     upsertJob(durableDb, {
-      source: "boss", sourceId: "durable-job", title: "持久化岗位", company: "持久化公司", salary: "6-8K",
+      source: "boss", sourceId: "durable-job", title: "持久化岗位", company: "持久化公司", salary: "6-8K", location: "广州番禺",
       description: "完整岗位职责与要求。".repeat(25), qualityTags: ["salary_out_of_range"], risks: ["薪资低于期望下限"],
       analysis: { ...savedAnalysis, semanticStatus: "complete" }
     }, trustedBatchId);
@@ -2427,6 +2429,7 @@ function durableDraftRecoverySmoke() {
     const recoveredJob = createMessageDiscoveryController({ db: durableDb }).pageState(profileId).results[0].job;
     assert.match(recoveredJob.opportunitySummary, /6-8K.*低于期望下限/, "a newer failed job row must not replace the draft's trusted plan-scoped evidence after restart");
     assert.strictEqual(recoveredJob.salary, "6-8K");
+    assert.strictEqual(recoveredJob.location, '广州番禺', 'trusted observation context must retain its location after restart');
     controller.clearDraftForCard(profileId, cardId);
     assert.strictEqual(controller.pageState(profileId).results.length, 0);
     assert.strictEqual(getMessageInboundContext(durableDb, {

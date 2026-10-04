@@ -6,7 +6,7 @@ const { selectRelevantCandidateMaterial } = require('../../core/candidate_eviden
 const { mergeCandidateFacts, currentCandidateMaterial, factStatus } = require('../../core/candidate_fact_policy');
 const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
 const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
-  saveResumeOptimizationDraft, activateResumeOptimization } = require("../../storage/resume_optimization_store");
+  saveResumeOptimizationDraft, activateResumeOptimization, findEditableResumeCopy } = require("../../storage/resume_optimization_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   buildResumeEvidenceCatalog,
@@ -24,6 +24,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
 
   return Object.freeze({
     createDraft,
+    copyDraft,
     getDraft,
     listDrafts,
     saveDraft,
@@ -130,6 +131,25 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
         provider: String(adapter.provider || "unknown"),
         model: String(adapter.model || "")
       }
+    });
+  }
+
+  function copyDraft({ profileId, planId, draftId } = {}) {
+    const owned = getDraft({ profileId, draftId });
+    if (!owned) throw serviceError('RESUME_OPTIMIZATION_NOT_FOUND', '简历版本不存在');
+    const plan = ownedPlan(owned.profileId, planId);
+    if (owned.planId !== plan.id) throw serviceError('RESUME_OPTIMIZATION_PLAN_MISMATCH', '请从这份简历所属的方案继续编辑');
+    if (owned.status !== 'activated' || owned.draftFormat !== 'whole_draft') {
+      throw serviceError('RESUME_OPTIMIZATION_CLOSED', '请选择已启用的完整简历版本');
+    }
+    const existing = findEditableResumeCopy(db, { profileId: owned.profileId, planId: plan.id, draftId: owned.id });
+    if (existing) return existing;
+    return createResumeOptimization(db, {
+      profileId: owned.profileId, planId: plan.id, sourceResumeVersionId: owned.sourceResumeVersionId,
+      mode: owned.mode, targetDirection: owned.targetDirection, targetJobIds: owned.targetJobIds,
+      generatedText: owned.generatedText, finalText: owned.finalText,
+      headline: owned.headline, suggestions: owned.changeLedger, evidenceCatalog: owned.evidenceCatalog,
+      modelIdentity: { ...owned.modelIdentity, copiedFromDraftId: owned.id }
     });
   }
 

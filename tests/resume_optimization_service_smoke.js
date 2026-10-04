@@ -324,6 +324,26 @@ try {
     .find((version) => version.id === activated.resultResumeVersionId);
   assert.strictEqual(activatedVersion.name, "AI 应用工程师定向版");
   assert.deepStrictEqual(activatedVersion.targetRoles, ["AI 应用工程师"]);
+  const modelCallsBeforeCopy = calls.length;
+  const copyInput = { profileId: owner.profileId, planId: owner.planId, draftId: draft.id };
+  const editableCopy = service.copyDraft(copyInput);
+  assert.notStrictEqual(editableCopy.id, draft.id);
+  assert.strictEqual(editableCopy.status, 'draft');
+  assert.strictEqual(editableCopy.finalText, saved.finalText, 'copy must include edits made before activation');
+  assert.strictEqual(editableCopy.generatedText, draft.generatedText, 'copy retains the generation baseline and evidence');
+  assert.deepStrictEqual(editableCopy.targetJobIds, draft.targetJobIds);
+  assert.strictEqual(service.copyDraft(copyInput).id, editableCopy.id, 'repeat click returns the existing editable copy');
+  for (let index = 0; index < 101; index++) require('../src/storage/resume_optimization_store').createResumeOptimization(db, {
+    ...draft, headline: '其他历史草稿', generatedText: draft.generatedText
+  });
+  assert.strictEqual(service.copyDraft(copyInput).id, editableCopy.id, 'an existing copy must not disappear behind the history display limit');
+  service.saveDraft({ ...copyInput, draftId: editableCopy.id, finalText: saved.finalText + '\n继续校对' });
+  assert.strictEqual(service.getDraft(copyInput).finalText, saved.finalText, 'editing the copy preserves the enabled snapshot');
+  assert.strictEqual(calls.length, modelCallsBeforeCopy, 'continuing edits does not regenerate through the model');
+  assert.throws(() => service.copyDraft({ ...copyInput, profileId: other.profileId }),
+    error => error.code === 'RESUME_OPTIMIZATION_NOT_FOUND');
+  assert.throws(() => service.copyDraft({ ...copyInput, planId: otherOwnerPlanId }),
+    error => error.code === 'RESUME_OPTIMIZATION_PLAN_MISMATCH');
   const strategyRound = storage.getActiveFunnelStrategyRound(db, {
     profileId: owner.profileId,
     planId: owner.planId

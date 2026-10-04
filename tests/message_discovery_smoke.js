@@ -487,6 +487,7 @@ async function uniqueCandidateAndPrivacySmoke() {
   assert.deepStrictEqual(summary.results[0].job, {
     title: "Java Engineer",
     company: "Fixture Company",
+    location: "Guangzhou",
     roleSummary: "负责企业 Java 服务交付",
     companyBusiness: "JD 显示该岗位服务于企业交易系统交付。",
     fitLabel: "中",

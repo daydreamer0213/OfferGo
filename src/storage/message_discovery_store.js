@@ -64,7 +64,7 @@ function getLatestInboundContextIdentity(db, cardId) {
 
 function getDurableMessageDraftContext(db, { profileId, cardId } = {}) {
   return db.prepare(`SELECT c.id AS card_id, c.job_id, c.plan_id, c.stage,
-    j.title, j.company, j.salary, j.description, j.analysis_json, j.quality_tags_json, j.risks_json,
+    j.title, j.company, j.location, j.salary, j.description, j.analysis_json, j.quality_tags_json, j.risks_json,
     j.source, j.source_id, c.source AS card_source
     FROM candidate_progress_cards c JOIN jobs j ON j.id = c.job_id
     WHERE c.id = ? AND c.profile_id = ?`).get(Number(cardId), Number(profileId)) || null;

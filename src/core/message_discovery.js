@@ -1464,6 +1464,7 @@ function projectMessageDecisionCard(job = {}) {
   return {
     title: safeProjectionText(job.title, 160),
     company: safeProjectionText(job.company, 160),
+    ...(safeProjectionText(job.location || job.city, 160) ? { location: safeProjectionText(job.location || job.city, 160) } : {}),
     roleSummary: safeProjectionText(analysis.roleSummary, 300),
     ...(roleTasks.length ? { roleTasks } : {}),
     ...companyDecisionSummary(analysis),

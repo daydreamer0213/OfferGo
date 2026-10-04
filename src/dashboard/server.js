@@ -1565,6 +1565,12 @@ function createDashboardServer({
         db,
         resumeOptimization: getResumeOptimizationService()
       });
+      if (req.method === "POST" && url.pathname === "/api/resume-optimization/copy") {
+        const params = parseBody(await readBody(req), req.headers["content-type"] || "");
+        const plan = requiredResumeOptimizationPlan(db, params.planId);
+        const draft = getResumeOptimizationService().copyDraft({ profileId: plan.profileId, planId: plan.id, draftId: Number(params.draftId) });
+        return redirect(res, `/resume-optimization?planId=${encodeURIComponent(plan.id)}&draftId=${encodeURIComponent(draft.id)}#resume-opt-draft-title`);
+      }
       if (req.method === "POST" && url.pathname === "/api/resume-optimization/export") return await handleResumeOptimizationExport(req, res, {
         db,
         resumeOptimization: getResumeOptimizationService()
@@ -4883,7 +4889,7 @@ function renderProfilePage({ db, searchParams }) {
   const planNotice = !activePlan
     ? `<form class="inline-form" method="post" action="/api/plan/recommend"><input type="hidden" name="profileId" value="${profile.id}"><button>生成本地筛选方案</button></form>`
     : dependency?.stale ? `<p class="setup-warning">当前筛选方案基于旧画像。请在筛选方案页检查并保存后再扫描；系统不会自动覆盖你的人工条件。</p>` : "";
-  return renderLegacyDashboardPage({ title: "画像摘要", currentPath: planPath, todayPath: planPath, planId: activePlan?.id || "", stage: "画像", body: `<main id="main-content">
+  return renderLegacyDashboardPage({ title: "画像摘要", currentPath: `/profile?profileId=${profile.id}`, todayPath: planPath, planId: activePlan?.id || "", stage: "画像", body: `<main id="main-content">
   <h1>画像摘要</h1>
   ${saved}
   ${planNotice}
@@ -4916,7 +4922,7 @@ function renderResumeVersionsPage({ db, searchParams }) {
   const planPath = `/plan?profileId=${profile.id}${activePlan ? `&planId=${activePlan.id}` : ""}`;
   const versions = listCandidateResumeVersions(db, profile.id);
   const saved = searchParams.get("saved") ? `<p class="notice">简历版本已保存，下一次扫描会优先用启用版本做匹配和推荐。</p>` : "";
-  return renderLegacyDashboardPage({ title: "简历版本", currentPath: planPath, todayPath: planPath, planId: activePlan?.id || "", stage: "简历", body: `<main id="main-content">
+  return renderLegacyDashboardPage({ title: "简历版本", currentPath: `/resumes?profileId=${profile.id}`, todayPath: planPath, planId: activePlan?.id || "", stage: "简历", body: `<main id="main-content">
   <h1>简历版本</h1>
   ${saved}
   <p class="hint">每个版本都可以限定适用方向、关键词和主推项目；停用版本不会参与下次匹配。投递版简历只用于岗位沟通与版本管理：新增、编辑或停用版本不会改变基础候选人画像，也不会替换当前匹配偏好卡。</p>

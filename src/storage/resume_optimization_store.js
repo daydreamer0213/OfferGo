@@ -86,6 +86,7 @@ function createResumeOptimization(db, input = {}) {
   const targetJobIds = jobIds(input.targetJobIds, mode);
   const targetDirection = mode === 'general' ? '' : boundedText(input.targetDirection, 160, "目标投递方向").trim();
   const generatedText = boundedText(input.generatedText, 200_000, "完整简历草稿");
+  const finalText = input.finalText == null ? generatedText : boundedText(input.finalText, 200_000, "最终简历文字");
   const evidenceCatalog = Array.isArray(input.evidenceCatalog) ? input.evidenceCatalog : [];
   const suggestions = Array.isArray(input.suggestions) ? input.suggestions : [];
   const sourceText = String(source.resume_text || "");
@@ -105,10 +106,10 @@ function createResumeOptimization(db, input = {}) {
   const result = db.prepare(`INSERT INTO resume_optimizations(
     profile_id, plan_id, source_resume_version_id, source_resume_document_id,
     source_content_hash, source_text, target_direction, target_job_ids_json, context_hash,
-    evidence_json, headline, suggestions_json, generated_text, final_text, draft_format, status,
+    evidence_json, headline, suggestions_json, generated_text, final_text, draft_format, user_edited_at, status,
     result_resume_document_id, result_resume_version_id, model_identity_json,
     strategy_round_id, activated_at, created_at, updated_at, optimization_mode
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'whole_draft', 'draft', NULL, NULL, ?, NULL, NULL, ?, ?, ?)`).run(
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'whole_draft', ?, 'draft', NULL, NULL, ?, NULL, NULL, ?, ?, ?)`).run(
     profileId,
     planId,
     sourceResumeVersionId,
@@ -122,7 +123,8 @@ function createResumeOptimization(db, input = {}) {
     String(input.headline || "").trim().slice(0, 300),
     JSON.stringify(suggestions),
     generatedText,
-    generatedText,
+    finalText,
+    comparableText(finalText) === comparableText(generatedText) ? null : now,
     JSON.stringify(input.modelIdentity || {}),
     now,
     now,
@@ -143,6 +145,14 @@ function listResumeOptimizations(db, profileId, limit = 30) {
     WHERE profile_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`)
     .all(positiveId(profileId, "profileId"), boundedLimit)
     .map(optimizationRow);
+}
+
+function findEditableResumeCopy(db, { profileId, planId, draftId }) {
+  return optimizationRow(db.prepare(`SELECT * FROM resume_optimizations
+    WHERE profile_id = ? AND plan_id = ? AND status = 'draft'
+      AND json_extract(model_identity_json, '$.copiedFromDraftId') = ?
+    ORDER BY updated_at DESC, id DESC LIMIT 1`).get(
+    positiveId(profileId, 'profileId'), positiveId(planId, 'planId'), positiveId(draftId, 'draftId')));
 }
 
 function saveResumeOptimizationDraft(db, input = {}) {
@@ -281,6 +291,7 @@ module.exports = {
   createResumeOptimization,
   getResumeOptimization,
   listResumeOptimizations,
+  findEditableResumeCopy,
   saveResumeOptimizationDraft,
   activateResumeOptimization
 };
