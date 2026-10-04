@@ -627,6 +627,8 @@ async function journey() {
     await page.reload(); await audit('paused');
     await page.goto(`${base}/plan?planId=${saved.planId}&site=boss`);
     assert.equal(storage.getWorkflowRun(db, runId).site, 'zhaopin', 'page selector cannot change frozen workflow source');
+    // Stop this test client's live polling before closing and reopening its synthetic server.
+    await page.goto('about:blank');
     await new Promise(resolve => server.close(resolve)); server = null; db.close();
     db = storage.openDb(dbPath);
     base = await startServer();
