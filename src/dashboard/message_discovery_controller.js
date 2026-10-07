@@ -45,6 +45,9 @@ const { getCandidateProfile } = require("../application/candidate_queries");
 const { getJob } = require("../application/job_queries");
 const { isClearlyUnmatchedMessageCard } = require("../application/message_discovery/run");
 const {
+  messageReplyWindowExpired,
+  assertMessageReplyWindowOpen,
+  getConfirmedFutureInterview,
   getPersistedCardJobIdentity,
   getLatestInboundContextIdentity,
   getDurableMessageDraftContext,
@@ -472,6 +475,20 @@ function createMessageDiscoveryController(deps = {}) {
       .map((item) => `${item.platform}\0${item.conversationKey}`));
     const nowMs = nowDate().getTime();
     const results = state.results.map((result) => {
+      if (!inboxKeys.has(`${result.platform}\0${result.conversationKey}`)) {
+        const interview = getConfirmedFutureInterview(db, { profileId, cardId: result.cardId,
+          messageGroupKey: result.messageGroupKey, now: new Date(nowMs) });
+        if (interview) {
+          return { ...result, legacyWaitingForRecruiter: true, legacyScheduledAt: interview.scheduledAt };
+        }
+        try {
+          assertMessageReplyWindowOpen(db, { profileId, cardId: result.cardId,
+            messageGroupKey: result.messageGroupKey, now: new Date(nowMs) });
+        } catch (error) {
+          if (error.code !== "MESSAGE_REPLY_WINDOW_EXPIRED") throw error;
+          return { ...result, legacyActionExpired: true };
+        }
+      }
       if (result.platform !== "zhaopin" || result.contextComplete !== true
         || !result.manualActions?.some((item) => item.kind === "resume_request")
         || inboxKeys.has(`${result.platform}\0${result.conversationKey}`)) return result;
@@ -1385,6 +1402,13 @@ function buildMessageInboxPageState(db, { profileId, platformRuns = [], now = ne
     .filter((item) => !isClearlyUnmatchedMessageCard(db, {
       profileId, cardId: item.cardId, jobId: item.jobId
     }))
+    .map((item) => {
+      const interview = ["needs_action", "needs_review", "waiting"].includes(item.actionGroup)
+        ? getConfirmedFutureInterview(db, { profileId, cardId: item.cardId, lastActivityAt: item.lastActivityAt, now: current }) : null;
+      if (interview) return { ...item, actionGroup: "waiting", actionCode: "wait", reasonCode: "", scheduledAt: interview.scheduledAt, unread: false };
+      return messageReplyWindowExpired(item, current)
+        ? { ...item, actionGroup: "done", actionCode: "", reasonCode: "MESSAGE_REPLY_WINDOW_EXPIRED", unread: false } : item;
+    })
     .map((item) => presentInboxItem({
     ...item,
     timeline: projectActionableTimeline(item.platform, listMessageEvents(db, {

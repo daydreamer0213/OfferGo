@@ -1,6 +1,5 @@
 const {
   saveProfileAnalysis,
-  getCandidateProfile,
   getActiveMatchingCard,
   getActiveSearchPlan,
   saveSearchPlan,
@@ -47,9 +46,12 @@ async function processOnboardingRun({
   heartbeat.unref?.();
   try {
     let context = getOnboardingRunContext(db, run.id);
-    let profile = context.run.profileVersionId
-      ? getCandidateProfile(db, context.run.profileId)?.profile
-      : null;
+    if (context.run.profileVersionId && (!context.profileVersion?.profile
+      || context.profileVersion.resumeContentHash !== context.document.contentHash)) {
+      throw Object.assign(new Error("已保存的画像检查点与本次简历不一致，无法继续该次处理。"),
+        { code: "ONBOARDING_PROFILE_VERSION_INVALID" });
+    }
+    let profile = context.profileVersion?.profile || null;
 
     if (!context.run.profileVersionId) {
       checkpointOnboardingRun(db, {
@@ -90,7 +92,7 @@ async function processOnboardingRun({
     }
 
     context = getOnboardingRunContext(db, run.id);
-    profile = modelSafeProfile(profile || getCandidateProfile(db, context.run.profileId)?.profile || {});
+    profile = modelSafeProfile(context.profileVersion?.profile || profile || {});
     if (!context.run.matchingCardId) {
       let card;
       try {
@@ -128,7 +130,9 @@ async function processOnboardingRun({
     if (!context.run.searchPlanId) {
       const activeCard = getActiveMatchingCard(db, context.run.profileId);
       const activePlan = getActiveSearchPlan(db, context.run.profileId);
-      if (activeCard && activePlan) {
+      if (activeCard?.profileVersionId === context.run.profileVersionId
+        && activeCard.resumeContentHash === context.document.contentHash
+        && activePlan?.profileVersionId === context.run.profileVersionId) {
         run = checkpointOnboardingRun(db, {
           id: run.id,
           status: "completed",
@@ -144,6 +148,7 @@ async function processOnboardingRun({
           const planId = saveSearchPlan(db, {
             profileId: context.run.profileId,
             profileVersionId: context.run.profileVersionId,
+            activate: !activeCard,
             plan
           });
           run = checkpointOnboardingRun(db, {

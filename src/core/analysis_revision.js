@@ -4,9 +4,9 @@ const { normalizeThinkingMode, normalizeReasoningEffort } = require("./model_set
 
 const PIPELINE_VERSIONS = Object.freeze({
   understandJob: "job-understanding-v19",
-  matchJob: "match-decision-v44",
-  decisionRules: "four-tier-weighted-v4.8-screening-v1",
-  communication: "communication-v2"
+  matchJob: "match-decision-v45-effect-evidence",
+  decisionRules: "four-tier-weighted-v4.8-screening-v2-effect",
+  communication: "communication-v3-candidate-speaker"
 });
 
 function stableHash(value) {

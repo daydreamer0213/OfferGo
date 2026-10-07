@@ -61,7 +61,7 @@ function renderCreatePanel(dashboard, modelReady) {
       <div data-resume-job-panel hidden><label>想投的岗位<select name="jobId" disabled><option value="">请选择岗位</option>${jobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.title || "未命名岗位")} · ${escapeHtml(job.company || "公司未记录")}${job.platform ? ` · ${escapeHtml(job.platform === "boss" ? "BOSS" : job.platform === "zhaopin" ? "智联" : job.platform)}` : ""}</option>`).join("")}</select><small>只参考你选的这份岗位，不混入其他岗位的要求。</small></label></div>
       ${jobs.length ? "" : '<p class="muted resume-opt-create-note">现在可以直接整理简历。发现完整岗位后，也可以为某一份岗位调整。</p>'}
       <div class="button-row"><button data-resume-create-ready="${ready}"${ready ? "" : " disabled"}>生成完整草稿</button><span class="hint">生成后可以编辑全文，再启用为新的简历版本。</span></div>
-      <p class="alert" data-resume-error role="alert"></p>
+      <div class="alert" data-resume-error role="alert" style="grid-column:1/-1"></div>
     </form>
   </section>${RESUME_SAMPLE_PREVIEW_SCRIPT}`;
 }
@@ -96,12 +96,12 @@ function renderWholeDraft(dashboard, draft, evidence) {
   const planId = dashboard.plan?.id || "";
   const activated = draft.status === "activated";
   return `<div class="resume-workbench-columns"><form class="card pad resume-opt-editor" method="post" action="/api/resume-optimization/save" data-resume-editor data-resume-submit data-resume-success-target="resume-opt-draft-title">
-    <input type="hidden" name="planId" value="${escapeAttr(planId)}"><input type="hidden" name="draftId" value="${escapeAttr(draft.id)}">
+    <input type="hidden" name="planId" value="${escapeAttr(planId)}"><input type="hidden" name="draftId" value="${escapeAttr(draft.id)}"><input type="hidden" name="expectedRevision" value="${escapeAttr(draft.revision || '')}">
     <div class="resume-opt-section-head"><div><p class="section-label">完整简历草稿</p><h2>${draft.userEditedAt ? "用户已修改" : "系统生成版本"}</h2></div><button class="secondary" type="button" data-copy-resume>复制当前全文</button></div>
     <label class="resume-opt-full-editor" for="resume-opt-final-text">当前全文<textarea id="resume-opt-final-text" name="finalText" rows="22"${activated ? " readonly" : ""}>${escapeHtml(draft.finalText || draft.generatedText || "")}</textarea></label>
     <div class="button-row"><button class="secondary" type="submit" name="format" value="print" formaction="/api/resume-optimization/export" formtarget="_blank">打印 / 保存 PDF</button><button class="secondary" type="submit" name="format" value="text" formaction="/api/resume-optimization/export">下载文字版</button></div><p class="hint">导出当前全文。启用新版本后，OfferGo 会参考它；招聘平台上的简历附件仍需更新。</p>
     ${renderResumeIntegrity(dashboard.selectedIntegrity)}
-    ${activated ? `<p class="notice">当前全文为已启用版本，只读保留。</p>` : `<p class="notice" data-resume-recovery hidden>另有一份未保存的本机修改。<button type="button" class="secondary" data-resume-restore>恢复这份修改</button></p><div class="resume-opt-savebar"><span data-resume-save-status aria-live="polite">修改后会自动保存。</span><div class="button-row"><button class="secondary" type="submit" data-resume-success-target="resume-opt-draft-title">保存草稿</button><button type="submit" formaction="/api/resume-optimization/activate" data-resume-success-target="resume-opt-activated">启用为新版本</button></div></div>`}
+    ${activated ? `<p class="notice">当前全文为已启用版本，只读保留。</p>` : `<p class="notice" data-resume-recovery hidden>另有一份未保存的本机修改。<button type="button" class="secondary" data-resume-restore>恢复这份修改</button></p><div class="notice" data-resume-conflict hidden><p>其他页面已更新这份简历，本页修改仍保留。请先复制当前全文，再查看最新内容并合并。</p><a href="/resume-optimization?planId=${escapeAttr(planId)}&amp;draftId=${escapeAttr(draft.id)}" target="_blank" rel="noopener">在新页面查看最新版本</a> <button type="button" class="secondary" data-resume-reload>重新载入最新版本</button></div><div class="resume-opt-savebar"><div data-resume-save-status aria-live="polite">修改后会自动保存。</div><div class="button-row"><button class="secondary" type="submit" data-resume-success-target="resume-opt-draft-title">保存草稿</button><button type="submit" formaction="/api/resume-optimization/activate" data-resume-success-target="resume-opt-activated">启用为新版本</button></div></div>`}
   </form>${renderChangeLedger(draft.changeLedger || draft.suggestions || [], evidence, Boolean(draft.userEditedAt))}</div>`;
 }
 
@@ -140,7 +140,7 @@ function renderLegacyDraft(draft, evidence) {
 }
 
 function renderActivatedNotice(dashboard, draft) {
-  return `<section id="resume-opt-activated" class="alert good"><strong>这份草稿已经启用</strong><p>已保存为可用于求职的新版本。还想修改时，可以继续编辑一份副本，原版本保留。</p>${draft.draftFormat === 'whole_draft' ? `<form method="post" action="/api/resume-optimization/copy" data-resume-submit data-resume-success-target="resume-opt-draft-title"><input type="hidden" name="planId" value="${escapeAttr(dashboard.plan?.id || draft.planId)}"><input type="hidden" name="draftId" value="${escapeAttr(draft.id)}"><button class="secondary">以此版本继续编辑</button><p data-resume-error role="alert"></p></form>` : ''}<a href="/resumes?profileId=${escapeAttr(dashboard.profile?.id || draft.profileId)}">查看全部简历版本</a></section>`;
+  return `<section id="resume-opt-activated" class="alert good"><strong>这份草稿已经启用</strong><p>已保存为可用于求职的新版本。还想修改时，可以继续编辑一份副本，原版本保留。</p>${draft.draftFormat === 'whole_draft' ? `<form method="post" action="/api/resume-optimization/copy" data-resume-submit data-resume-success-target="resume-opt-draft-title"><input type="hidden" name="planId" value="${escapeAttr(dashboard.plan?.id || draft.planId)}"><input type="hidden" name="draftId" value="${escapeAttr(draft.id)}"><button class="secondary">以此版本继续编辑</button><div data-resume-error role="alert" style="grid-column:1/-1"></div></form>` : ''}<a href="/resumes?profileId=${escapeAttr(dashboard.profile?.id || draft.profileId)}">查看全部简历版本</a></section>`;
 }
 
 function renderHistory(dashboard, selected) {
@@ -164,22 +164,27 @@ const integrity=document.querySelector('[data-resume-integrity]');
 const planId=form?.elements.planId?.value||'';
 const draftId=form?.elements.draftId?.value||'';
 const backupKey='offergo:resume-draft:'+planId+':'+draftId;
-let timer=0,chain=Promise.resolve(),version=0,savedText=editor?.value||'';
+let timer=0,chain=Promise.resolve(),version=0,savedText=editor?.value||'',savedRevision=form?.elements.expectedRevision?.value||'',conflicted=false;
 const setStatus=text=>{if(status)status.textContent=text;};
+const failureFrom=payload=>{const code=payload.errorCode||payload.code||'';const reason=code==='MODEL_TIMEOUT'?'模型响应超时，本次生成未完成。请稍后重试，当前输入仍保留。':payload.error||'操作失败，请稍后重试。';const failure=new Error(reason);failure.code=code;failure.requestId=payload.requestId;failure.issues=payload.issues;return failure;};
+const displayFailure=(target,failure)=>{if(!target)return;target.textContent=failure.message||'操作失败，请稍后重试。';if((failure.requestId||failure.code)&&typeof document.createElement==='function'){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='排错信息';details.append(summary);const technical=document.createElement('p');technical.textContent=[failure.requestId?'排错编号：'+failure.requestId:'',failure.code?'错误代码：'+failure.code:''].filter(Boolean).join('；');details.append(technical);if(failure.requestId){const link=document.createElement('a');link.textContent='查看运行诊断';link.href='/diagnostics?requestId='+encodeURIComponent(failure.requestId);details.append(link);}target.append(details);}};
+const showConflict=()=>{conflicted=true;clearTimeout(timer);const notice=form?.querySelector('[data-resume-conflict]');if(notice)notice.hidden=false;remember();};
 const remember=(reset=false)=>{if(!editable)return;try{if(editor.value===savedText){const backup=JSON.parse(localStorage.getItem(backupKey)||'null');if(backup?.text===savedText||(reset===true&&backup?.baseText===savedText))localStorage.removeItem(backupKey);}else localStorage.setItem(backupKey,JSON.stringify({baseText:savedText,text:editor.value}));}catch{}};
 const updateIntegrity=(value={})=>{if(!integrity)return;const errors=Array.isArray(value.errors)?value.errors:[];const warnings=Array.isArray(value.warnings)?value.warnings:[];const seen=new Set();const messages=[];for(const item of [...errors,...warnings]){const code=String(item?.code||'');if(issueMessages[code]&&!seen.has(code)){seen.add(code);messages.push(issueMessages[code]);}}integrity.hidden=!messages.length;integrity.dataset.state=errors.some(item=>issueMessages[String(item?.code||'')])?'error':'warning';integrity.innerHTML=messages.length?'<ul>'+messages.map(message=>'<li>'+message+'</li>').join('')+'</ul>':'';};
 const readPayload=async response=>{const text=await response.text();try{return JSON.parse(text)}catch{return {};}};
 const enqueue=(text,revision)=>{chain=chain.then(async()=>{
+  if(conflicted)return false;
   setStatus('正在保存…');
-  const response=await fetch('/api/resume-optimization/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({planId,draftId,finalText:text})});
-  const payload=await readPayload(response);if(!response.ok)throw new Error('save failed');
-  savedText=text;remember();updateIntegrity(payload.integrity);
+  const response=await fetch('/api/resume-optimization/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({planId,draftId,finalText:text,...(savedRevision?{expectedRevision:savedRevision}:{baseText:savedText})})});
+  const payload=await readPayload(response);if(!response.ok)throw failureFrom(payload);
+  savedText=text;savedRevision=payload.revision||'';if(form?.elements.expectedRevision)form.elements.expectedRevision.value=savedRevision;remember();updateIntegrity(payload.integrity);
   setStatus(revision===version?'已自动保存':'有更新待保存');return true;
-}).catch(()=>{setStatus('保存失败，修改仍保留在本机。请点击“保存草稿”重试。');return false;});return chain;};
-const changed=()=>{version+=1;remember(true);setStatus('有修改待保存');clearTimeout(timer);timer=setTimeout(()=>enqueue(editor.value,version),600);};
+}).catch(failure=>{if(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT')showConflict();setStatus(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT'?failure.message:'保存失败，修改仍保留在本机。请点击“保存草稿”重试。');return false;});return chain;};
+const changed=()=>{version+=1;remember(true);if(conflicted){setStatus('本页有未保存修改，请查看最新版本并合并。');return;}setStatus('有修改待保存');clearTimeout(timer);timer=setTimeout(()=>enqueue(editor.value,version),600);};
 const flush=async()=>{clearTimeout(timer);await chain;while(editor.value!==savedText){if(!await enqueue(editor.value,version))return false;clearTimeout(timer);}return true;};
 const navigate=(url,target)=>{const base=String(url||'').split('#')[0];const destination=base+(target?'#'+target:'');if(location.href.split('#')[0]===base){location.hash=target;location.reload();}else location.assign(destination);};
 if(editable){
+  form.querySelector('[data-resume-reload]')?.addEventListener('click',()=>{remember();location.reload();});
   editor.addEventListener('input',changed);
   try{const backup=JSON.parse(localStorage.getItem(backupKey)||'null');
     if(backup&&typeof backup.text==='string'&&backup.text!==savedText){
@@ -211,13 +216,18 @@ for(const submitForm of document.querySelectorAll('[data-resume-submit]'))submit
   try{
     if(editable){if(submitForm===form)await chain;else if(!await flush())throw new Error('保存失败，请先重试保存当前简历。');}
     const body=new URLSearchParams(new FormData(submitForm));
+    if(submitForm===form&&editable){if(conflicted)throw new Error('这份简历已在其他页面更新，请先查看最新版本并合并。本页修改仍保留。');if(savedRevision)body.set('expectedRevision',savedRevision);else{body.delete('expectedRevision');body.set('baseText',savedText);}}
+    let operationKey='';
+    if(action.endsWith('/resume-optimization')){operationKey='offergo:pending-generation:'+action+':'+body.toString();let operationId;try{operationId=localStorage.getItem(operationKey);}catch{}if(operationId){const query=new URLSearchParams({planId:body.get('planId'),operationId});let response,payload;try{response=await fetch('/api/resume-optimization/operation?'+query,{cache:'no-store'});payload=await readPayload(response);}catch{throw new Error('暂时无法确认上次生成是否完成，请稍后重试。当前输入与操作编号仍保留。');}if(!response.ok||typeof payload.saved!=='boolean')throw new Error('暂时无法确认上次生成是否完成，请稍后重试。当前输入与操作编号仍保留。');if(payload.saved){try{localStorage.removeItem(operationKey);}catch{}operationId=null;}}if(!operationId){operationId=typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);try{localStorage.setItem(operationKey,operationId);}catch{}}body.set('operationId',operationId);}
     const response=await fetch(action,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});
-    if(!response.ok){const payload=await readPayload(response);const failure=new Error(payload.error||'操作失败，请稍后重试。');failure.issues=payload.issues;throw failure;}
+    if(!response.ok){const payload=await readPayload(response);if(operationKey){try{localStorage.removeItem(operationKey);}catch{}}throw failureFrom(payload);}
+    if(operationKey){try{localStorage.removeItem(operationKey);}catch{}}
     if(submitForm===form&&editable){savedText=body.get('finalText');remember();}
     const target=button?.dataset.resumeSuccessTarget||submitForm.dataset.resumeSuccessTarget||'';navigate(response.url||action,target);
   }catch(failure){
+    if(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT')showConflict();
     if(Array.isArray(failure.issues))updateIntegrity({errors:failure.issues,warnings:[]});
-    if(error)error.textContent=failure.message||'操作失败，请稍后重试。';
+    displayFailure(error,failure);
     if(submitForm===form&&editable)editor.readOnly=false;
     if(button){button.disabled=false;button.textContent=label;}
   }

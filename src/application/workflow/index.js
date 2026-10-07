@@ -93,7 +93,7 @@ async function startWorkflow({ db, input = {}, deps = {} }) {
     profileId: plan.profileId,
     planId: plan.id,
     localDay: state.localDay,
-    sequence: state.runs.length + 1,
+    allocateSlot: true,
     targetSuccessCount: state.nextPlan.targetSuccessCount,
     inventoryCount: state.nextPlan.inventoryCount,
     candidateGap: state.nextPlan.candidateGap,
@@ -194,6 +194,7 @@ async function resumeWorkflow({ db, input = {}, deps = {} }) {
   const workflowRunId = String(input.workflowRunId || input.runId || "").trim();
   let workflow = getWorkflowRun(db, workflowRunId);
   if (!workflow) throw appError("WORKFLOW_RUN_NOT_FOUND", "本轮任务不存在。", { statusCode: 404 });
+  if (workflow.archived) throw appError('WORKFLOW_RUN_TERMINAL', '该次任务已停止并归档，不能继续；请打开当前任务。', { statusCode: 409 });
   const scopeChoice = String(input.scopeChoice || "").trim();
   if (scopeChoice && !["new", "original"].includes(scopeChoice)) {
     throw appError("WORKFLOW_SEARCH_SCOPE_CHOICE_INVALID", "请选择按新条件重新开始，或继续开始时的条件。", { statusCode: 400 });
@@ -419,6 +420,7 @@ async function controlWorkflow({ db, input = {}, deps = {} }) {
   }
   let workflow = getWorkflowRun(db, workflowRunId);
   if (!workflow) throw appError("WORKFLOW_CONTROL_TARGET_MISMATCH", "指定的工作流不存在。", { statusCode: 409 });
+  if (workflow.archived) throw appError('WORKFLOW_RUN_TERMINAL', '该次任务已停止并归档，不能再控制；请打开当前任务。', { statusCode: 409 });
   const now = new Date().toISOString();
   let activeRun = exactActiveWorkflowRun(input.scanRuns, workflow);
   const persistedExecutionRunning = exactPersistedWorkflowRunIsRunning(db, workflow);

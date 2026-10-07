@@ -17,7 +17,7 @@ async function reassessBatch({ db, batchId, planId, createConfigs, logger, clean
   if (!profileRecord) throw new Error(`Search Plan #${planId} 对应的候选人画像不存在。`);
 
   // 与扫描使用同一套已确认匹配上下文；未确认的新简历不能影响重评。
-  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId);
+  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId, { includeResumeEvidence: true });
   assertSearchPlanReady(
     planRecord,
     matchingContext?.candidateProfile || {},

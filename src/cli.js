@@ -901,7 +901,7 @@ async function scan(
     if (!planRecord) throw new Error(`未找到 Search Plan #${args.plan}`);
     const profileRecord = getCandidateProfile(db, planRecord.profileId);
     if (!profileRecord) throw new Error(`Search Plan #${args.plan} 对应的候选人画像不存在。`);
-    matchingContext = getCandidateMatchingContext(db, planRecord.profileId);
+    matchingContext = getCandidateMatchingContext(db, planRecord.profileId, { includeResumeEvidence: true });
   }
   const workflowRun = resolveWorkflowScanContext(db, args, planRecord);
   let runtimePlanRecord = planRecord;
@@ -1892,7 +1892,7 @@ async function refreshDetails(db, args, { signal = null, execution = null } = {}
   if (!planRecord) throw new Error(`未找到 Search Plan #${planId}`);
   const profileRecord = getCandidateProfile(db, planRecord.profileId);
   if (!profileRecord) throw new Error(`Search Plan #${planId} 对应的候选人画像不存在。`);
-  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId);
+  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId, { includeResumeEvidence: true });
   assertSearchPlanReady(
     planRecord,
     matchingContext?.candidateProfile || {},
@@ -2749,7 +2749,7 @@ function rescorePlan(db, args) {
   const profileRecord = getCandidateProfile(db, planRecord.profileId);
   if (!profileRecord) throw new Error(`Search Plan #${planId} 对应的候选人画像不存在`);
   // 重算与扫描使用同一套已确认匹配上下文：未确认的新简历不得影响重算结果。
-  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId);
+  const matchingContext = getCandidateMatchingContext(db, planRecord.profileId, { includeResumeEvidence: true });
   assertSearchPlanReady(
     planRecord,
     matchingContext?.candidateProfile || {},

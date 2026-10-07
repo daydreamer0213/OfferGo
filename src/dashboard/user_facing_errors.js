@@ -1,6 +1,16 @@
 "use strict";
 
 const ERROR_GUIDANCE = Object.freeze({
+  MODEL_TIMEOUT: {
+    title: "本次模型响应超时",
+    impact: "这次请求没有完成；已有资料仍保留。",
+    nextAction: "稍后重试本次操作。如果反复超时，请到“模型与设置”检查连接。"
+  },
+  RESUME_OPTIMIZATION_REVISION_CONFLICT: {
+    title: "这份简历已在另一页面修改",
+    impact: "本次没有覆盖已保存的内容，你的输入仍保留在当前页面。",
+    nextAction: "先查看最新内容，再合并修改。"
+  },
   INTERNAL_ERROR: {
     title: "操作没有完成",
     impact: "当前进度已保留，OfferGo 不会自动执行下一步。",

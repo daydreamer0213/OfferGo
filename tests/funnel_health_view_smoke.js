@@ -88,4 +88,19 @@ assert.deepStrictEqual(view.stale, {
 assert.equal(view.diagnosis.title, "先检查招呼语和岗位匹配");
 assert.match(view.diagnosis.detail, /7.*5/);
 
+const dualPlatform = buildHealthView({
+  platforms: [{ site: 'boss', currentRound: { started: 35,
+    priorityCheck: '优先检查岗位匹配和开场表达，不必立即重写简历。' } },
+  { site: 'zhaopin', currentRound: { started: 40,
+    priorityCheck: '优先检查消息回答质量和候选人事实是否完整。' } }],
+  advice: { site: 'zhaopin', stage: 'effectiveConversation', title: '先检查回复内容是否回答了HR的问题', numerator: 3, denominator: 20 },
+  priorityCheck: '根据各平台反馈检查当前方案。'
+});
+assert.equal(dualPlatform.diagnosis.siteLabel, '智联');
+assert.equal(dualPlatform.diagnosis.priorityCheck, '优先检查消息回答质量和候选人事实是否完整。',
+  'the selected diagnosis uses its own platform recommendation instead of the pooled fallback or the other platform');
+assert.doesNotMatch(dualPlatform.diagnosis.detail, /已读/, 'a Zhaopin conversation diagnosis must not imply observed read states');
+const waitingOnly = buildHealthView({ headline: '现有记录还不足以判断主要问题。', priorityCheck: '继续记录真实进展。' });
+assert.equal(waitingOnly.diagnosis.detail, '继续记录真实进展。');
+
 console.log("funnel_health_view_smoke ok");

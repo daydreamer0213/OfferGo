@@ -40,6 +40,8 @@ try {
   }
   const publicFailure = publicError(appError("RESUME_TEXT_TOO_SHORT", "too short"));
   assert.deepStrictEqual(publicFailure, { code: "RESUME_TEXT_TOO_SHORT", message: "too short", statusCode: 400 });
+  for (let i = 0; i < 130; i++) logger.info("routine_poll", { sequence: i });
+  assert(logger.listRecent(120, { levels: ["warn", "error"] }).some(row => row.event === "request_failed"), "normal polling must not hide earlier failures");
   console.log("observability_smoke ok");
 } finally {
   fs.rmSync(root, { recursive: true, force: true });

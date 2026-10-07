@@ -26,12 +26,12 @@ const ITEM_EDGES = new Map([
   ["stopped", new Set()]
 ]);
 
-function loadReplySendBatch(db, { profileId, batchId } = {}) {
+function loadReplySendBatch(db, { profileId, batchId, checkReplyWindowItemId = null, now } = {}) {
   const batch = getMessageReplySendBatch(db, { profileId, batchId });
   if (!batch) throw replySendError("MESSAGE_REPLY_SEND_BATCH_NOT_FOUND", "message reply send batch was not found");
   return {
     batch,
-    items: listMessageReplySendItems(db, { profileId, batchId })
+    items: listMessageReplySendItems(db, { profileId, batchId, checkReplyWindowItemId, now })
   };
 }
 

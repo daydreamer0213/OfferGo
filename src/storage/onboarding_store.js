@@ -134,15 +134,54 @@ function getLatestReusableOnboardingRunByContentHash(db, contentHash) {
   `).get(hash));
 }
 
+function bindReusedOnboardingRun(db, { operationId, sourceRunId, contentHash } = {}) {
+  return immediateTransaction(db, () => {
+    const existing = getOnboardingRunContext(db, operationId);
+    if (existing) {
+      if (existing.document.contentHash !== contentHash) {
+        throw Object.assign(new Error("操作编号已用于另一份简历；新一轮请生成新的操作编号。"), {
+          code: "AGENT_OPERATION_ID_CONFLICT"
+        });
+      }
+      return existing.run;
+    }
+    const source = getOnboardingRunContext(db, sourceRunId);
+    if (!source || source.document.contentHash !== contentHash || source.run.status !== "completed"
+      || !source.run.profileVersionId || !source.run.matchingCardId || !source.run.searchPlanId) {
+      throw new Error("reusable onboarding run was not found");
+    }
+    const at = nowIso();
+    // The legacy run table has one run per document. Keep a bound document snapshot
+    // for this new operation while retaining the same profile and generated results.
+    const documentId = Number(db.prepare(`INSERT INTO resume_documents(
+      profile_id, original_file_name, format, content_hash, resume_text,
+      text_truncated, diagnostics_json, stored_file_path, created_at
+    ) SELECT profile_id, original_file_name, format, content_hash, resume_text,
+      text_truncated, diagnostics_json, stored_file_path, ?
+      FROM resume_documents WHERE id = ?`).run(at, source.run.resumeDocumentId).lastInsertRowid);
+    db.prepare(`INSERT INTO onboarding_runs(
+      id, profile_id, resume_document_id, status, stage, progress_revision,
+      profile_version_id, matching_card_id, search_plan_id, created_at, updated_at, finished_at
+    ) VALUES (?, ?, ?, 'completed', ?, 0, ?, ?, ?, ?, ?, ?)`)
+      .run(operationId, source.run.profileId, documentId, source.run.stage,
+        source.run.profileVersionId, source.run.matchingCardId, source.run.searchPlanId, at, at, at);
+    return getOnboardingRun(db, operationId);
+  });
+}
+
 function getOnboardingRunContext(db, id) {
   const row = db.prepare(`
     SELECT runs.*, profiles.display_name, profiles.is_ready,
       documents.original_file_name, documents.format, documents.content_hash,
       documents.resume_text, documents.text_truncated, documents.diagnostics_json,
-      documents.stored_file_path
+      documents.stored_file_path,
+      versions.id AS version_id, versions.profile_json AS version_profile_json,
+      version_documents.content_hash AS version_content_hash
     FROM onboarding_runs runs
     JOIN candidate_profiles profiles ON profiles.id = runs.profile_id
     JOIN resume_documents documents ON documents.id = runs.resume_document_id
+    LEFT JOIN profile_versions versions ON versions.id = runs.profile_version_id AND versions.profile_id = runs.profile_id
+    LEFT JOIN resume_documents version_documents ON version_documents.id = versions.resume_document_id
     WHERE runs.id = ?
   `).get(String(id || ""));
   if (!row) return null;
@@ -150,6 +189,11 @@ function getOnboardingRunContext(db, id) {
     run: onboardingRunRow(row),
     displayName: safeDisplayName(row.display_name),
     profileReady: Boolean(row.is_ready),
+    profileVersion: row.version_id == null ? null : {
+      id: Number(row.version_id),
+      profile: parseJson(row.version_profile_json, null),
+      resumeContentHash: row.version_content_hash || ""
+    },
     document: {
       id: Number(row.resume_document_id),
       profileId: Number(row.profile_id),
@@ -416,6 +460,7 @@ module.exports = {
   createOnboardingRun,
   getOnboardingRun,
   getLatestReusableOnboardingRunByContentHash,
+  bindReusedOnboardingRun,
   getOnboardingRunContext,
   getMatchingCardOnboardingGate,
   claimOnboardingRun,

@@ -1,5 +1,6 @@
 const { createHash } = require("node:crypto");
 const { immediateTransaction, nowIso, parseJson, storageError } = require("./storage_shared");
+const { assertMessageReplyWindowOpen } = require("./message_discovery_store");
 
 const BATCH_STATUSES = new Set(["confirmed", "running", "completed", "stopped", "interrupted"]);
 const ITEM_STATUSES = new Set([
@@ -98,7 +99,7 @@ function createMessageReplySendBatch(db, input = {}) {
   const requested = normalizeBatchItems(input.items);
   try {
     return immediateTransaction(db, () => {
-      const frozen = requested.map((item) => freezeDraft(db, profileId, item));
+      const frozen = requested.map((item) => freezeDraft(db, profileId, item, createdAt));
       if (new Set(frozen.map((item) => item.platform)).size !== 1) {
         throw storageError("MESSAGE_REPLY_SEND_MIXED_PLATFORM", "one reply batch must contain exactly one platform");
       }
@@ -215,14 +216,23 @@ function listActiveFollowUpCardIds(db, profileId) {
     .all(Number(profileId), Number(profileId)).map((row) => Number(row.id));
 }
 
-function listMessageReplySendItems(db, { profileId, batchId } = {}) {
-  return db.prepare(`SELECT items.* FROM message_reply_send_items items
+function listMessageReplySendItems(db, { profileId, batchId, checkReplyWindowItemId = null, now = new Date() } = {}) {
+  const rows = db.prepare(`SELECT items.*, batches.status AS batch_status FROM message_reply_send_items items
     JOIN message_reply_send_batches batches ON batches.id = items.batch_id
     WHERE items.batch_id = ? AND batches.profile_id = ?
     ORDER BY items.position, items.id`).all(
     positiveInteger(batchId, "batchId"),
     positiveInteger(profileId, "profileId")
-  ).map(mapItem);
+  );
+  const guarded = rows.find((row) => Number(row.id) === Number(checkReplyWindowItemId)
+    && row.batch_status === "running" && ["pending", "selecting", "verified", "filled"].includes(row.status));
+  if (guarded) {
+    const draft = db.prepare("SELECT message_group_key FROM message_reply_drafts WHERE id = ? AND profile_id = ?")
+      .get(guarded.draft_id, profileId);
+    if (draft) assertMessageReplyWindowOpen(db, { profileId, cardId: guarded.card_id,
+      messageGroupKey: draft.message_group_key, expectedLastMessageId: guarded.expected_last_message_id, now });
+  }
+  return rows.map(mapItem);
 }
 
 function transitionMessageReplySendBatch(db, input = {}) {
@@ -297,7 +307,7 @@ function stopPendingMessageReplySendItems(db, input = {}) {
     .run(code, message, updatedAt, batchId, "pending", "selecting", "verified", "filled").changes);
 }
 
-function freezeDraft(db, profileId, item) {
+function freezeDraft(db, profileId, item, createdAt) {
   const blocking = db.prepare(`SELECT id FROM message_reply_send_items
     WHERE draft_id = ? AND status IN (${BLOCKING_ITEM_STATUSES.map(() => "?").join(",")}) LIMIT 1`)
     .get(item.draftId, ...BLOCKING_ITEM_STATUSES);
@@ -328,6 +338,8 @@ function freezeDraft(db, profileId, item) {
   if (!context) {
     throw storageError("MESSAGE_REPLY_SEND_CONTEXT_REQUIRED", "message inbound context is required");
   }
+  assertMessageReplyWindowOpen(db, { profileId, cardId: draft.card_id,
+    messageGroupKey: draft.message_group_key, now: createdAt });
   const replyText = replyTextValue(draft.current_text);
   return {
     draftId: Number(draft.id),

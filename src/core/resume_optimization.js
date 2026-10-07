@@ -17,10 +17,14 @@ const {
 } = require("./message_draft_quality");
 const PLACEHOLDER_PATTERNS = Object.freeze([
   /X{3,}/i,
-  /待(?:填写|补充|确认)/,
+  // Pending workflow states in prose are facts, not unfinished template values.
+  /(?:^|\n)[ \t]*(?![^：:\n]{0,38}状态[ \t]*[:：])(?:[^：:\n]{1,40}[:：]\s*)?待(?:填写|补充|确认)\s*(?=\n|$)/,
+  /(?:^|\n)\s*待(?:填写|补充|确认)\s*(?:姓名|手机|电话|邮箱|公司|学校|成果)/,
+  /[\[【<]\s*待(?:填写|补充|确认)\s*[\]】>]/,
   /TODO/i,
-  /(?:手机|电话|邮箱)[:：]?\s*(?:无|未填|示例)/
+  /(?:手机|电话|邮箱)[:：]?\s*(?:无|未填|示例|待填写|待补充|待确认)/
 ]);
+const EDUCATION_HEADING = /(?:^|\n)\s*(?:教育(?:经历|背景)?|学历(?:信息)?)(?:[:：\s]|$)/;
 
 function cleanText(value, maxLength, label, { required = true } = {}) {
   const text = String(value ?? "").trim();
@@ -96,8 +100,9 @@ function numericTokens(text) {
 }
 
 function positiveRoleClaim(text, marker) {
+  const literalMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return String(text || "").split(/[，。；\n]|但是|但|不过/).some(clause =>
-    clause.includes(marker) && !new RegExp(`(?:没有|并未|从未|未曾|不是|并非|未|没|非|不)[^，。；\\n]{0,10}${marker}`).test(clause));
+    clause.includes(marker) && !new RegExp(`(?:没有|并未|从未|未曾|不是|并非|未|没|非|不)[^，。；\\n]{0,10}${literalMarker}`).test(clause));
 }
 
 function validateGrounding(suggestion, evidenceText) {
@@ -107,6 +112,26 @@ function validateGrounding(suggestion, evidenceText) {
   const escalatedMarker = STRONG_ROLE_MARKERS.find(marker => positiveRoleClaim(suggestion.proposedText, marker)
     && !positiveRoleClaim(evidenceText, marker));
   if (escalatedMarker) throw new Error(`建议扩大了候选人的职责边界：${escalatedMarker}`);
+
+  for (const [, object] of String(suggestion.originalText || '').matchAll(/参与([^，。；\n]+)/g)) {
+    const responsibility = `负责${object}`;
+    if (positiveRoleClaim(suggestion.proposedText, responsibility)
+      && !['负责', '完成', '实现', '编写', '设计'].some(action => positiveRoleClaim(evidenceText, `${action}${object}`))) {
+      throw new Error(`建议扩大了候选人的职责边界：${responsibility}`);
+    }
+  }
+
+  const namedSkills = [...String(suggestion.proposedText || '').matchAll(
+    /(?:熟悉|熟练|精通|掌握)\s*(?:使用)?([A-Za-z][A-Za-z0-9.+#-]*)/g
+  )].map(match => match[1]);
+  for (const [, skills] of String(suggestion.proposedText || '').matchAll(
+    /(?:^|\n)\s*(?:技术栈|技能|语言|框架|数据库|工具)[:：]([^\n]+)/g
+  )) namedSkills.push(...(skills.match(/[A-Za-z][A-Za-z0-9.+#-]*/g) || []));
+  const unsupportedSkill = namedSkills.find(skill => {
+    const literalSkill = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !new RegExp(`(?<![A-Za-z0-9])${literalSkill}(?![A-Za-z0-9])`, 'i').test(evidenceText.normalize('NFKC'));
+  });
+  if (unsupportedSkill) throw new Error(`建议包含没有证据支持的技能：${unsupportedSkill}`);
 }
 
 function validateResumeOptimizationDraft(raw, context = {}) {
@@ -117,11 +142,11 @@ function validateResumeOptimizationDraft(raw, context = {}) {
   for (const item of catalog) {
     const id = cleanText(item?.id, 40, "证据 ID");
     if (evidenceById.has(id)) throw new Error(`证据 ID 重复：${id}`);
-    evidenceById.set(id, cleanText(item?.text, 20_000, "证据文字"));
+    evidenceById.set(id, { kind: item?.kind, text: cleanText(item?.text, 20_000, "证据文字") });
   }
 
-  if (!Array.isArray(raw.suggestions) || raw.suggestions.length < 1 || raw.suggestions.length > MAX_SUGGESTIONS) {
-    throw new Error(`修改建议必须为 1-${MAX_SUGGESTIONS} 条`);
+  if (!Array.isArray(raw.suggestions) || raw.suggestions.length > MAX_SUGGESTIONS) {
+    throw new Error(`修改建议必须为 0-${MAX_SUGGESTIONS} 条`);
   }
 
   const seenIds = new Set();
@@ -148,10 +173,13 @@ function validateResumeOptimizationDraft(raw, context = {}) {
     const citedText = evidenceIds.map((evidenceId) => {
       if (!evidenceById.has(evidenceId)) throw new Error(`建议引用了不存在的证据：${evidenceId}`);
       return evidenceById.get(evidenceId);
-    }).join("\n");
+    }).filter(candidateEvidenceItem).map(item => item.text).join("\n");
     const range = exactRange(sourceText, originalText);
     ranges.push({ ...range, id });
-    validateGrounding({ proposedText }, citedText);
+    if (operation !== 'insert_after' && EDUCATION_HEADING.test(originalText) && !EDUCATION_HEADING.test(proposedText)) {
+      throw new Error('建议不能删除教育分类或将教育信息改为其他经历');
+    }
+    validateGrounding({ originalText, proposedText }, `${originalText}\n${citedText}`);
 
     return { id, operation, originalText, proposedText, reason, evidenceIds, editingPrinciple, decision: "accepted", userText: "" };
   });
@@ -207,11 +235,27 @@ function renderOptimizedResume(sourceText, suggestions) {
     const replacement = suggestion.operation === "insert_after"
       ? `${suggestion.originalText}${isWholeLineAnchor ? "\n" : ""}${content}`
       : content;
-    operations.push({ ...targetRange, replacement });
+    const removedTailTerminator = suggestion.operation === "remove" && suggestion.decision === "accepted"
+      && (range.end === result.length || result[range.end] === "\n")
+      && /[，,；;]/.test(result[range.start - 1] || "")
+      ? suggestion.originalText.match(/[。.!！?？]$/)?.[0] : null;
+    operations.push({ ...targetRange, replacement, removedTailTerminator });
   }
 
+  for (const operation of operations) {
+    if (!operation.removedTailTerminator) continue;
+    const adjacent = operations.find(other => other !== operation && other.end === operation.start
+      && other.start < operation.start && /[，,；;]$/.test(other.replacement));
+    if (adjacent) {
+      adjacent.replacement = adjacent.replacement.slice(0, -1) + operation.removedTailTerminator;
+      operation.removedTailTerminator = null;
+    }
+  }
   operations.sort((left, right) => right.start - left.start);
   for (const operation of operations) {
+    if (operation.removedTailTerminator) {
+      result = result.slice(0, operation.start - 1) + operation.removedTailTerminator + result.slice(operation.start);
+    }
     result = `${result.slice(0, operation.start)}${operation.replacement}${result.slice(operation.end)}`;
   }
   return result;

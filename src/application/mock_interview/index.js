@@ -5,7 +5,7 @@ const { selectRelevantCandidateMaterial } = require("../../core/candidate_eviden
 const { mergeCandidateFacts, currentCandidateMaterial } = require('../../core/candidate_fact_policy');
 const { listDecisionPool } = require("../../storage/job_store");
 const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
-  answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry } = require("../../storage/mock_interview_store");
+  answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry, findMockInterviewOperation } = require("../../storage/mock_interview_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   normalizeInterviewSettings,
@@ -16,10 +16,13 @@ const {
   validateInterviewReport,
   validateRetryReview
 } = require("../../core/mock_interview");
+const { createHash } = require('node:crypto');
+const interviewFlights = new WeakMap();
 
 function createMockInterviewService({ db, adapter = null } = {}) {
   if (!db) throw new Error("mock interview service requires db");
-  const finishFlights = new Map();
+  if (!interviewFlights.has(db)) interviewFlights.set(db, new Map());
+  const finishFlights = interviewFlights.get(db);
 
   return Object.freeze({
     startSession,
@@ -28,11 +31,33 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     retryTurn,
     confirmEvidence,
     getSession,
+    getOperation,
     listSessions,
     dashboard
   });
 
+  function getOperation(input = {}) {
+    const profileId = requiredId(input.profileId, 'profileId');
+    const plan = ownedPlan(profileId, input.planId);
+    const operationId = requiredText(input.operationId, '生成操作编号', 128);
+    const result = findMockInterviewOperation(db, { profileId, planId: plan.id, operationId });
+    return { saved: Boolean(result), resultId: result?.id || null };
+  }
+
   async function startSession(input = {}) {
+    return generationOperation('start', input, async identity => {
+      if (identity.operationId) {
+        const prior = findMockInterviewOperation(db, { profileId: input.profileId, planId: input.planId, operationId: identity.operationId });
+        if (prior) {
+          assertOperationInput(prior.modelIdentity, identity);
+          return prior;
+        }
+      }
+      return generateSession(input, identity);
+    });
+  }
+
+  async function generateSession(input, operationIdentity) {
     requireAdapterMethod("generateMockInterviewStep");
     const profileId = requiredId(input.profileId, "profileId");
     const plan = ownedPlan(profileId, input.planId);
@@ -54,7 +79,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
       context,
       settings,
       initialQuestion: step.nextQuestion,
-      modelIdentity: { provider: String(adapter.provider || "unknown"), model: String(adapter.model || "") }
+      modelIdentity: { ...operationIdentity, provider: String(adapter.provider || "unknown"), model: String(adapter.model || "") }
     });
     return getSession({ profileId, planId: plan.id, sessionId: session.id });
   }
@@ -113,7 +138,7 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     if (!session) throw serviceError("MOCK_INTERVIEW_NOT_FOUND", "面试会话不存在");
     if (session.status === "completed" && session.report) return session;
     if (session.status !== "active") throw serviceError("MOCK_INTERVIEW_COMPLETED", "面试已经结束");
-    const flightKey = `${profileId}:${planId}:${sessionId}`;
+    const flightKey = `finish:${profileId}:${planId}:${sessionId}`;
     if (finishFlights.has(flightKey)) return finishFlights.get(flightKey);
     const operation = (async () => {
       requireAdapterMethod("reviewMockInterview");
@@ -143,6 +168,17 @@ function createMockInterviewService({ db, adapter = null } = {}) {
   }
 
   async function retryTurn(input = {}) {
+    return generationOperation('retry', input, async identity => {
+      if (identity.operationId) {
+        const session = getSession(input);
+        const prior = session?.turns.flatMap(turn => turn.retries).find(retry => retry.review?.operationId === identity.operationId);
+        if (prior) { assertOperationInput(prior.review, identity); return prior; }
+      }
+      return generateRetry(input, identity);
+    });
+  }
+
+  async function generateRetry(input, operationIdentity) {
     const profileId = requiredId(input.profileId, "profileId");
     const planId = requiredId(input.planId, "planId");
     const sessionId = requiredId(input.sessionId, "sessionId");
@@ -170,8 +206,26 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         earlierRetries: turn.retries
       }
     });
-    const review = validateRetryReview(rawReview, { turnNumber });
+    const review = { ...validateRetryReview(rawReview, { turnNumber }), ...operationIdentity };
     return recordMockInterviewRetry(db, { profileId, planId, sessionId, turnNumber, answerText, review });
+  }
+
+  function assertOperationInput(existing, identity) {
+    if (existing.operationInputHash !== identity.operationInputHash) throw serviceError('GENERATION_OPERATION_MISMATCH', '本次生成的输入已改变，请重新发起生成。');
+  }
+
+  async function generationOperation(kind, input, execute) {
+    const { operationId, ...parameters } = input;
+    if (operationId !== undefined && (!String(operationId).trim() || String(operationId).length > 128)) throw serviceError('GENERATION_OPERATION_INVALID', '生成操作编号无效，请重新打开页面。');
+    const operationInputHash = createHash('sha256').update(JSON.stringify(parameters, (_, value) =>
+      value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest('hex');
+    const key = `${kind}:${requiredId(input.profileId, 'profileId')}:${requiredId(input.planId, 'planId')}:${operationId || operationInputHash}`;
+    const active = finishFlights.get(key);
+    if (active) { assertOperationInput(active.identity, { operationInputHash }); return active.promise; }
+    const identity = { operationId: operationId ? String(operationId) : null, operationInputHash };
+    const promise = Promise.resolve().then(() => execute(identity));
+    finishFlights.set(key, { identity, promise });
+    try { return await promise; } finally { if (finishFlights.get(key)?.promise === promise) finishFlights.delete(key); }
   }
 
   function confirmEvidence(input = {}) {
@@ -370,9 +424,15 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     try {
       return validateInterviewStep(rawStep, validationContext);
     } catch (error) {
-      if (!['MOCK_INTERVIEW_REPEATED_QUESTION', 'MOCK_INTERVIEW_LOGISTICS_QUESTION', 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY'].includes(error.code)) throw error;
+      if (!['MOCK_INTERVIEW_REPEATED_QUESTION', 'MOCK_INTERVIEW_LOGISTICS_QUESTION', 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY',
+        'MOCK_INTERVIEW_QUESTION_KIND_INVALID', 'MOCK_INTERVIEW_ANSWER_REVIEW_REQUIRED'].includes(error.code)) throw error;
+      const invalidKind = error.code === 'MOCK_INTERVIEW_QUESTION_KIND_INVALID';
+      const missingReview = error.code === 'MOCK_INTERVIEW_ANSWER_REVIEW_REQUIRED';
       const questionRevision = { reason: error.code,
-        avoidQuestions: [...new Set([...progress.askedQuestions, String(rawStep.nextQuestion?.text || '').trim()].filter(Boolean))] };
+        avoidQuestions: [...new Set([...progress.askedQuestions,
+          ...(!invalidKind && !missingReview ? [String(rawStep.nextQuestion?.text || '').trim()] : [])].filter(Boolean))],
+        ...(invalidKind ? { allowedQuestionKinds: ['follow_up', 'topic_transition'], rejectedQuestion: rawStep.nextQuestion } : {}),
+        ...(missingReview ? { rejectedQuestion: rawStep.nextQuestion, requiredReviewTurnNumber: turns.at(-1).turnNumber } : {}) };
       const revised = await adapter.generateMockInterviewStep({ ...input, questionRevision });
       return validateInterviewStep(revised, validationContext);
     }

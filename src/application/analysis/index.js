@@ -30,7 +30,7 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
   const planId = Number(input.planId);
   const plan = getSearchPlan(db, planId);
   if (!plan) throw new Error("Search Plan 不存在。");
-  const matchingContext = getCandidateMatchingContext(db, plan.profileId);
+  const matchingContext = getCandidateMatchingContext(db, plan.profileId, { includeResumeEvidence: true });
   if (!matchingContext) {
     throw appError("MATCHING_CARD_CONFIRMATION_REQUIRED", "重试语义分析前，请先在工作台确认匹配偏好卡。", {
       statusCode: 409,

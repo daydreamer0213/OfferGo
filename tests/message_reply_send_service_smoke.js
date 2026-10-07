@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const storage = require("../src/core/storage");
+const { listPendingMessageReplyLearning, getMessageReplyLearningStatus } = require("../src/storage/message_learning_store");
 const { createMessageReplyLearningService } = require("../src/application/message_learning");
 const { createMessageReplySendingService } = require("../src/application/message_reply_sending");
 const {
@@ -9,6 +10,13 @@ const {
 } = require("../src/core/message_reply_send_batches");
 
 const db = storage.openDb(":memory:");
+let assertionsFinished = false;
+process.once('beforeExit', () => {
+  if (!assertionsFinished) {
+    console.error('message reply service checks exited with unfinished asynchronous assertions');
+    process.exitCode = 1;
+  }
+});
 
 (async () => {
   try {
@@ -305,6 +313,19 @@ const db = storage.openDb(":memory:");
       messageGroupKey: atomic.groupKey
     }), "rolled-back local completion must retain the open HR context");
     db.exec("DROP TRIGGER fail_reply_send_progress");
+    db.exec(`CREATE TEMP TRIGGER fail_reply_send_cleanup
+      BEFORE DELETE ON message_inbound_contexts
+      WHEN OLD.card_id = ${atomic.cardId}
+      BEGIN SELECT RAISE(ABORT, 'forced reply context cleanup failure'); END`);
+    await assert.rejects(() => service.completeVerifiedItem({ batchId: atomicBatch.batch.id,
+      itemId: atomicItem.id }), /forced reply context cleanup failure/);
+    assert.equal(storage.listMessageReplySendItems(db, { profileId: owner.profileId,
+      batchId: atomicBatch.batch.id })[0].status, 'click_dispatched');
+    assert.equal(storage.getMessageReplyDraft(db, { profileId: owner.profileId,
+      draftId: atomic.draft.id }).closedAt, '');
+    assert.equal(countMemories(db, atomic.draft.id), 0);
+    assert.equal(countSentEvents(db, atomic.cardId), 0);
+    db.exec('DROP TRIGGER fail_reply_send_cleanup');
 
     const stopFirst = seedDraft(db, owner, "stop-first", "第一条待停止", now);
     const stopSecond = seedDraft(db, owner, "stop-second", "第二条待停止", now);
@@ -406,6 +427,9 @@ const db = storage.openDb(":memory:");
     assert.equal(supportedBatch.batch.status, "confirmed", "a current candidate fact should support the untouched model draft");
 
     await sentAfterLearningOptOutSmoke({ db, owner, learningService, service, now });
+    await verifiedSendPersistsBeforeLearningSmoke({ db, owner, now });
+    await verifiedSendLearningFailureSmoke({ db, owner, now });
+    await verifiedSendBypassesCopiedLearningSmoke({ db, owner, now });
     await sentDuringLearningRaceSmoke({ db, owner, now });
     await manualSentAfterCloseSmoke({ db, owner, learningService, now });
 
@@ -416,7 +440,7 @@ const db = storage.openDb(":memory:");
 })().catch((error) => {
   console.error(error.stack || error.message);
   process.exitCode = 1;
-});
+}).finally(() => { assertionsFinished = true; });
 
 function createOwner(database, now, suffix = "main") {
   const profileId = Number(database.prepare(`INSERT INTO candidate_profiles(
@@ -556,8 +580,12 @@ async function sentDuringLearningRaceSmoke({ db: database, owner, now }) {
     const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
       draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
     let release;
+    let started;
+    const learningStarted = new Promise(resolve => { started = resolve; });
     const slowLearning = createMessageReplyLearningService({ db: database, now: () => now,
-      adapter: { extractReplyEditFacts: () => new Promise(resolve => { release = () => resolve({ facts: [] }); }) } });
+      adapter: { extractReplyEditFacts: () => new Promise(resolve => {
+        release = () => resolve({ facts: [] }); started();
+      }) } });
     const fastLearning = createMessageReplyLearningService({ db: database, now: () => now,
       adapter: { async extractReplyEditFacts() { return { facts: [] }; } } });
     const sender = createMessageReplySendingService({ db: database, learningService: slowLearning,
@@ -574,19 +602,187 @@ async function sentDuringLearningRaceSmoke({ db: database, owner, now }) {
     item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
       itemId: item.id, expectedStatus: 'filled', status: 'click_dispatched', clickCount: 1, updatedAt: now });
     const finishing = sender.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
-    const intervening = await fastLearning.completeDraft({ profileId: owner.profileId, draftId: edited.id,
-      finalText: mode === 'withdrawn' ? '我目前在深圳。' : '我目前在珠海。', completionKind: 'copied' });
-    if (mode === 'withdrawn') fastLearning.withdrawMemory({ profileId: owner.profileId,
-      memoryId: intervening.memoryId });
-    release();
+    await learningStarted;
     const completed = await finishing;
+    assert.equal(storage.listMessageReplySendItems(database, { profileId: owner.profileId,
+      batchId: batch.batch.id })[0].status, 'succeeded');
+    if (mode === 'withdrawn') fastLearning.withdrawMemory({ profileId: owner.profileId,
+      memoryId: completed.learning.memoryId });
+    else await fastLearning.reviseMemory({ profileId: owner.profileId,
+      memoryId: completed.learning.memoryId, finalText: '我目前在珠海。' });
+    release();
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(completed.item.status, 'succeeded', `${mode} during extraction must not block verified send`);
-    assert.equal(completed.learning.learningSkipped, mode);
     assert.equal(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).currentText,
-      '我目前在深圳。');
+      mode === 'withdrawn' ? '我目前在深圳。' : '我目前在珠海。');
+    assert.equal(storage.listMessageReplySendItems(database, { profileId: owner.profileId,
+      batchId: batch.batch.id })[0].replyText, '我目前在深圳。', 'later profile edits do not change the sent snapshot');
     assert.equal(countSentEvents(database, entry.cardId), 1);
-    assert.equal(countMemories(database, edited.id), 1, 'late model result cannot create a ghost memory');
+    assert.equal(countMemories(database, edited.id), mode === 'withdrawn' ? 1 : 2,
+      'late model result cannot create a ghost memory');
   }
+}
+
+async function verifiedSendPersistsBeforeLearningSmoke({ db: database, owner, now }) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { runMessageReplySendBatch } = require('../src/core/message_reply_send_executor');
+  const { createMessageReplySendController } = require('../src/dashboard/message_reply_send_controller');
+  const entry = seedDraft(database, owner, 'verified-learning-delay', '我目前在广州。', now);
+  saveContext(database, owner, entry, '378917037748799', now);
+  const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
+    draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
+  let release;
+  let started;
+  const learningStarted = new Promise(resolve => { started = resolve; });
+  const learning = createMessageReplyLearningService({ db: database, now: () => now,
+    adapter: { async extractReplyEditFacts(input) {
+      started();
+      await new Promise(resolve => { release = resolve; });
+      return { scope: input.scope, facts: [] };
+    } } });
+  const service = createMessageReplySendingService({ db: database, learningService: learning,
+    now: () => now, executeBatch() {} });
+  const batch = service.confirmBatch({ profileId: owner.profileId,
+    items: [{ draftId: edited.id, revision: edited.revision }] });
+  let clicks = 0;
+  const execution = runMessageReplySendBatch({ db: database, batchId: batch.batch.id,
+    now: () => now,
+    sender: { async inspectReplyTarget() { return {}; }, async fillReply() { return {}; },
+      async dispatchReply() { clicks++; }, async clearPreparedReply() {},
+      async verifyReplyResult() { return { state: 'succeeded', evidence: { verified: true } }; } },
+    accessController: { async reserve() {} },
+    onVerifiedSuccess: input => service.completeVerifiedItem(input) });
+  await learningStarted;
+  let restarted;
+  let controller;
+  const snapshotPath = path.join(os.tmpdir(), `offergo-verified-learning-${crypto.randomUUID()}.sqlite`);
+  try {
+    const item = storage.listMessageReplySendItems(database, { profileId: owner.profileId,
+      batchId: batch.batch.id })[0];
+    assert.equal(item.status, 'succeeded', 'platform success must persist before learning finishes');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    assert(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).closedAt);
+    assert.equal(storage.getMessageInboundContext(database, { profileId: owner.profileId,
+      cardId: entry.cardId, messageGroupKey: entry.groupKey }), null);
+    const pending = listPendingMessageReplyLearning(database, { profileId: owner.profileId, limit: 5 });
+    assert.equal(pending.length, 1, 'the existing pending-learning path must retain the committed edit');
+    const completed = await execution;
+    assert.equal(completed.batch.status, 'completed', 'learning must not hold the send batch open');
+    database.prepare('VACUUM INTO ?').run(snapshotPath);
+    restarted = storage.openDb(snapshotPath);
+    const resumedLearning = createMessageReplyLearningService({ db: restarted, now: () => now,
+      adapter: { async extractReplyEditFacts(input) { return { scope: input.scope,
+        facts: [{ factKey: 'current_city', factValue: '深圳', evidenceText: '我目前在深圳。' }] }; } } });
+    controller = createMessageReplySendController({ db: restarted, learningService: resumedLearning,
+      browserFactory: async () => { throw new Error('verified send must never reopen the platform'); } });
+    const restored = controller.status({ profileId: owner.profileId, batchId: batch.batch.id });
+    assert.equal(restored.batch.status, 'completed');
+    assert.equal(restored.items[0].status, 'succeeded');
+    await resumedLearning.retryPendingLearning({ profileId: owner.profileId, limit: 5 });
+    assert.equal(listPendingMessageReplyLearning(restarted, { profileId: owner.profileId }).length, 0);
+    assert.equal(countSentEvents(restarted, entry.cardId), 1);
+    const replay = await runMessageReplySendBatch({ db: restarted, batchId: batch.batch.id,
+      now: () => now,
+      sender: { async inspectReplyTarget() {}, async fillReply() {}, async dispatchReply() { clicks++; },
+        async verifyReplyResult() {}, async clearPreparedReply() {} },
+      accessController: { async reserve() {} }, onVerifiedSuccess() {} });
+    assert.equal(replay.batch.status, 'completed');
+    assert.equal(clicks, 1, 'restarting and retrying learning must not send again');
+  } finally {
+    release();
+    await execution;
+    await new Promise(resolve => setImmediate(resolve));
+    await controller?.close();
+    restarted?.close();
+    fs.rmSync(snapshotPath, { force: true });
+  }
+}
+
+async function verifiedSendLearningFailureSmoke({ db: database, owner, now }) {
+  for (const unexpected of [false, true]) {
+    const entry = seedDraft(database, owner, `verified-learning-failure-${unexpected}`, '我目前在广州。', now);
+    saveContext(database, owner, entry, unexpected ? '378917037748797' : '378917037748798', now);
+    const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
+      draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
+    const learning = createMessageReplyLearningService({ db: database, now: () => now,
+      adapter: { async extractReplyEditFacts() { throw new Error('synthetic learning failure'); } } });
+    if (unexpected) learning.retryLearning = async () => { throw new Error('synthetic retry failure'); };
+    const service = createMessageReplySendingService({ db: database, learningService: learning,
+      now: () => now, executeBatch() {} });
+    const batch = service.confirmBatch({ profileId: owner.profileId,
+      items: [{ draftId: edited.id, revision: edited.revision }] });
+    transitionReplySendBatch(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      expectedStatus: 'confirmed', status: 'running', updatedAt: now });
+    let item = batch.items[0];
+    for (const status of ['selecting', 'verified', 'filled', 'click_dispatched']) {
+      item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+        itemId: item.id, expectedStatus: item.status, status,
+        clickCount: status === 'click_dispatched' ? 1 : 0, updatedAt: now });
+    }
+    const completed = await service.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completed.item.status, 'succeeded');
+    assert.equal(storage.listMessageReplySendItems(database, { profileId: owner.profileId,
+      batchId: batch.batch.id })[0].status, 'succeeded', 'learning errors cannot undo verified sends');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    assert(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).closedAt);
+    assert.equal(getMessageReplyLearningStatus(database, { profileId: owner.profileId,
+      memoryId: completed.learning.memoryId }).status, unexpected ? 'unavailable' : 'failed');
+    assert(listPendingMessageReplyLearning(database, { profileId: owner.profileId, limit: 5 })
+      .includes(completed.learning.memoryId));
+    await service.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+    assert.equal(countMemories(database, edited.id), 1);
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+  }
+}
+
+async function verifiedSendBypassesCopiedLearningSmoke({ db: database, owner, now }) {
+  const entry = seedDraft(database, owner, 'verified-while-copy-learning', '我目前在广州。', now);
+  saveContext(database, owner, entry, '378917037748796', now);
+  const edited = storage.saveMessageReplyDraftEdit(database, { profileId: owner.profileId,
+    draftId: entry.draft.id, text: '我目前在深圳。', updatedAt: now });
+  let started;
+  let release;
+  let attempts = 0;
+  const learningStarted = new Promise(resolve => { started = resolve; });
+  const learning = createMessageReplyLearningService({ db: database, now: () => now,
+    adapter: { async extractReplyEditFacts(input) {
+      if (++attempts === 1) {
+        started();
+        await new Promise(resolve => { release = resolve; });
+      }
+      return { scope: input.scope, facts: [] };
+    } } });
+  const copying = learning.completeDraft({ profileId: owner.profileId, draftId: edited.id,
+    finalText: edited.currentText, completionKind: 'copied' });
+  await learningStarted;
+  const service = createMessageReplySendingService({ db: database, learningService: learning,
+    now: () => now, executeBatch() {} });
+  const batch = service.confirmBatch({ profileId: owner.profileId,
+    items: [{ draftId: edited.id, revision: edited.revision }] });
+  transitionReplySendBatch(database, { profileId: owner.profileId, batchId: batch.batch.id,
+    expectedStatus: 'confirmed', status: 'running', updatedAt: now });
+  let item = batch.items[0];
+  for (const status of ['selecting', 'verified', 'filled', 'click_dispatched']) {
+    item = transitionReplySendItem(database, { profileId: owner.profileId, batchId: batch.batch.id,
+      itemId: item.id, expectedStatus: item.status, status,
+      clickCount: status === 'click_dispatched' ? 1 : 0, updatedAt: now });
+  }
+  const completion = service.completeVerifiedItem({ batchId: batch.batch.id, itemId: item.id });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(storage.listMessageReplySendItems(database, { profileId: owner.profileId,
+      batchId: batch.batch.id })[0].status, 'succeeded', 'pending copy learning cannot block verified send commit');
+    assert.equal(countSentEvents(database, entry.cardId), 1);
+    assert(storage.getMessageReplyDraft(database, { profileId: owner.profileId, draftId: edited.id }).closedAt);
+  } finally {
+    release();
+    await Promise.all([copying, completion]);
+  }
+  assert.equal(countSentEvents(database, entry.cardId), 1);
+  assert.equal(countMemories(database, edited.id), 1, 'copy learning must reuse the already committed sent answer');
 }
 
 async function manualSentAfterCloseSmoke({ db: database, owner, learningService, now }) {

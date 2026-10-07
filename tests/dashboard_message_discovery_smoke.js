@@ -1708,7 +1708,7 @@ function modelUnavailablePresentationSmoke() {
       direction: "friend", kind: "text", text: messageText,
       occurredAt: "2026-08-11T08:00:00.000Z", metadata: {} }]
   });
-  const inbox = buildMessageInboxPageState(db, { profileId: fixture.profileId });
+  const inbox = buildMessageInboxPageState(db, { profileId: fixture.profileId, now: "2026-08-11T08:00:00.000Z" });
   assert.strictEqual(inbox.groups.needsReview.length, 1);
   const html = renderMessageDiscoveryPage({
     db, searchParams: new URLSearchParams({ profileId: fixture.profileId }),
@@ -2418,7 +2418,7 @@ function durableDraftRecoverySmoke() {
       createdAt: now,
       updatedAt: now
     });
-    const controller = createMessageDiscoveryController({ db: durableDb });
+    const controller = createMessageDiscoveryController({ db: durableDb, now: () => new Date(now) });
     durableDb.prepare("UPDATE jobs SET salary = ?, quality_tags_json = ?, risks_json = ?, analysis_json = ? WHERE id = ?")
       .run("6-8K", JSON.stringify(["salary_out_of_range"]), JSON.stringify(["薪资低于期望下限"]), JSON.stringify({
         recommendation: "not_recommended", fitLevel: "no_fit", decisionSource: "hard_boundary", ruleAdjusted: true,
@@ -2447,7 +2447,7 @@ function durableDraftRecoverySmoke() {
     }, trustedBatchId);
     durableDb.prepare("UPDATE jobs SET salary = '99-100K', risks_json = '[]', quality_tags_json = '[]', analysis_json = ? WHERE id = ?")
       .run(JSON.stringify({ semanticStatus: "failed", recommendation: "analysis_pending" }), jobId);
-    const recoveredJob = createMessageDiscoveryController({ db: durableDb }).pageState(profileId).results[0].job;
+    const recoveredJob = createMessageDiscoveryController({ db: durableDb, now: () => new Date(now) }).pageState(profileId).results[0].job;
     assert.match(recoveredJob.opportunitySummary, /6-8K.*低于期望下限/, "a newer failed job row must not replace the draft's trusted plan-scoped evidence after restart");
     assert.strictEqual(recoveredJob.salary, "6-8K");
     assert.strictEqual(recoveredJob.location, '广州番禺', 'trusted observation context must retain its location after restart');
@@ -2739,7 +2739,7 @@ async function durableMissingFactRecoverySmoke() {
       createdAt: now,
       updatedAt: now
     });
-    const controller = createMessageDiscoveryController({ db: durableDb });
+    const controller = createMessageDiscoveryController({ db: durableDb, now: () => new Date(now) });
     const pageState = controller.pageState(profileId);
     assert.strictEqual(pageState.results.length, 1,
       "a missing-fact context without a current inbox record must not return as actionable after restart");
@@ -2761,7 +2761,7 @@ async function durableMissingFactRecoverySmoke() {
       inboundMessages: [{ kind: "text", text: "在哪家公司实习过？" }], manualActions: [],
       createdAt: "2026-09-17T03:00:00.000Z", updatedAt: "2026-09-19T03:00:00.000Z"
     });
-    const recovered = createMessageDiscoveryController({ db: durableDb }).pageState(profileId).results[0];
+    const recovered = createMessageDiscoveryController({ db: durableDb, now: () => new Date(now) }).pageState(profileId).results[0];
     assert.equal(recovered.messageGroupKey, messageGroupKey, "inbox latest message wins even when an older context was edited more recently");
     assert.equal(recovered.missingFactKey, "availability_date", "an old open draft must not mask the latest question");
     assert.deepEqual(recovered.drafts, []);
@@ -2791,6 +2791,7 @@ async function durableMissingFactRecoverySmoke() {
       version: { name: '第一版', isActive: true } });
     const answering = createMessageDiscoveryController({
       db: durableDb,
+      now: () => new Date(now),
       modelReady: () => true,
       getModelConfig: () => ({ provider: "mock", providers: { mock: {} } }),
       createAnalyzer: () => async (input) => {

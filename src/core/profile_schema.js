@@ -31,6 +31,8 @@ function normalizeCandidateProfile(input = {}, meta = {}) {
       provider: text(source.provider || meta.provider || ""),
       model: text(source.model || meta.model || ""),
       resumeTextLength: Number(source.resumeTextLength || meta.resumeTextLength || 0),
+      ...(meta.resumeEvidenceText !== undefined || source.resumeEvidenceText !== undefined
+        ? { resumeEvidenceText: text(meta.resumeEvidenceText ?? source.resumeEvidenceText) } : {}),
       inputMethod: text(source.inputMethod || meta.inputMethod || "unknown"),
       inputTrust: text(source.inputTrust || meta.inputTrust || "user_provided"),
       generatedAt: new Date().toISOString()

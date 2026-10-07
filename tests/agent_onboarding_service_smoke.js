@@ -9,7 +9,7 @@ const {
   confirmAgentMatchingCard
 } = require("../src/application/onboarding/agent_onboarding");
 const { requireAgentOperationId } = require("../src/commands/agent_onboarding");
-const { createOnboardingRun } = require("../src/storage/onboarding_store");
+const { createOnboardingRun, getOnboardingRunContext } = require("../src/storage/onboarding_store");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "offergo-agent-onboarding-service-"));
 const db = openDb(path.join(root, "jobs.sqlite"));
@@ -114,11 +114,21 @@ async function main() {
     runtimeDependencies: failingRuntime("unchanged resume must reuse prior analysis")
   });
   assert.strictEqual(reused.operationId, reusedOperationId);
-  assert.strictEqual(reused.runId, first.runId);
+  assert.strictEqual(reused.runId, reusedOperationId);
   assert.strictEqual(reused.reused, true);
   assert.strictEqual(reused.profileId, first.profileId);
   assert.strictEqual(reused.matchingCardId, first.matchingCardId);
   assert.strictEqual(reused.searchPlanId, first.searchPlanId);
+  assert.strictEqual(getOnboardingRunContext(db, reusedOperationId).document.contentHash, resume.contentHash);
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM candidate_profiles").get().n, 1,
+    "binding a reuse operation must not create another profile");
+  const reusedRetry = await runAgentOnboarding({ db, operationId: reusedOperationId,
+    document: resume, runtimeDependencies: failingRuntime("reuse retry must not rerun") });
+  assert.strictEqual(reusedRetry.runId, reusedOperationId);
+  assert.strictEqual(reusedRetry.profileId, first.profileId);
+  await assert.rejects(runAgentOnboarding({ db, operationId: reusedOperationId,
+    document: differentResume, runtimeDependencies: successfulRuntime() }),
+  error => error.code === "AGENT_OPERATION_ID_CONFLICT");
 
   const refreshed = await runAgentOnboarding({
     db,

@@ -39,7 +39,94 @@ function safeReply(overrides = {}) {
   };
 }
 
+async function questionCoverageEffect() {
+  const projectReply = safeReply({
+    messageCategory: 'project_fact', messageSummary: '对方询问订单项目中本人具体负责的工作。',
+    requiredFactKeys: [], usedFactKeys: [], usedEvidenceIds: [51],
+    responseItems: [{ id: 'ticket_project_duties', kind: 'question', required: true }],
+    coverage: [{ responseItemId: 'ticket_project_duties', covered: true }],
+    messages: ['我主要负责接口幂等和重试，参与联调。']
+  });
+  const analyzer = createMessageReplyAnalyzer({ adapter: {
+    async draftMessageGroup() { return projectReply; }
+  } });
+  const draft = await analyzer({
+    currentResume: { text: '订单项目中负责接口幂等和重试，参与联调。' },
+    job: { id: 2, title: '后端开发', description: '订单接口与稳定性' },
+    messages: [{ text: '订单项目你具体负责了哪些工作？' }],
+    candidateEvidence: [{ id: 51, text: '订单项目中负责接口幂等和重试，参与联调。',
+      source: 'user_confirmed', updatedAt: NOW, scope: { kind: 'global' } }], now: NOW
+  });
+  assert.deepStrictEqual(draft.messages, ['我主要负责接口幂等和重试，参与联调。'],
+    'a covered question id is not a missing candidate fact');
+  assert.throws(() => validateMessageReply({ ...projectReply, usedEvidenceIds: [52] }, {
+    candidateEvidence: [{ id: 51 }], now: NOW
+  }), error => error.code === 'MESSAGE_REPLY_EVIDENCE_NOT_SUPPLIED');
+  assert.throws(() => validateMessageReply({ ...projectReply,
+    coverage: [{ responseItemId: 'ticket_project_duties', covered: false }]
+  }, { candidateEvidence: [{ id: 51 }], now: NOW }),
+  error => error.code === 'MESSAGE_REPLY_COVERAGE_INCOMPLETE');
+
+  const methodQuestion = safeReply({
+    messageCategory: 'project_fact', messageSummary: '对方询问原型采用了什么需求验证方法。',
+    requiredFactKeys: ['prototype_validation_method'], usedFactKeys: [],
+    responseItems: [{ id: 'prototype_validation', kind: 'question', required: true }],
+    coverage: [{ responseItemId: 'prototype_validation', covered: false }],
+    missingFact: { key: 'prototype_validation_method', question: '当时你具体用什么方法验证原型需求？' },
+    messages: []
+  });
+  const pending = validateMessageReply(methodQuestion, { facts: [], now: NOW });
+  assert.deepStrictEqual(pending.messages, []);
+  assert.strictEqual(pending.missingFact.question, '当时你具体用什么方法验证原型需求？');
+  const methodDraft = { ...methodQuestion, missingFact: null,
+    usedFactKeys: ['prototype_validation_method'],
+    coverage: [{ responseItemId: 'prototype_validation', covered: true }],
+    messages: ['我通过原型走查验证需求。'] };
+  assert.throws(() => validateMessageReply(methodDraft, { facts: [], now: NOW }),
+    error => error.code === 'MESSAGE_REPLY_UNKNOWN_FACT', 'question ids do not authorize invented methods');
+  assert.throws(() => validateMessageReply(methodDraft, {
+    facts: [{ key: 'prototype_validation_method', value: '原型走查', source: 'model_generated', updatedAt: NOW }], now: NOW
+  }), error => error.code === 'MESSAGE_REPLY_UNKNOWN_FACT');
+  assert.throws(() => validateMessageReply({ ...methodDraft, usedFactKeys: [] }, { facts: [], now: NOW }),
+    error => error.code === 'MESSAGE_REPLY_UNKNOWN_FACT', 'required facts still require real supplied facts');
+  const confirmed = validateMessageReply(methodDraft, {
+    facts: [{ key: 'prototype_validation_method', value: '原型走查', source: 'user_provided', updatedAt: NOW }], now: NOW
+  });
+  assert.deepStrictEqual(confirmed.messages, ['我通过原型走查验证需求。']);
+}
+
+async function semanticSummaryEffect() {
+  for (const example of [
+    { key: 'employment_status', value: '在职', question: '目前还在职吗？',
+      summary: '对方正在确认候选人目前是否在职。', draft: '我目前还在职。', category: 'availability' },
+    { key: 'accepts_travel', value: '不能接受长期出差', question: '能接受长期出差吗？',
+      summary: '对方正在确认候选人是否能接受长期出差。', draft: '长期出差暂时不太方便。', category: 'availability' },
+    { key: 'expected_salary', value: '税前22–25k', question: '期望薪资多少？',
+      summary: '对方在询问候选人的期望薪资。', draft: '我的期望是税前月薪22–25k。', category: 'salary' }
+  ]) {
+    const analyzer = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup() {
+      return safeReply({ messageCategory: example.category, messageSummary: example.summary,
+        requiredFactKeys: [example.key], usedFactKeys: [example.key],
+        responseItems: [{ id: example.key, kind: 'question', required: true }],
+        coverage: [{ responseItemId: example.key, covered: true }], messages: [example.draft] });
+    } } });
+    const result = await analyzer({ messages: [{ text: example.question }],
+      facts: [{ key: example.key, value: example.value, source: 'user_provided', updatedAt: NOW }], now: NOW });
+    assert.strictEqual(result.messageSummary, example.summary, 'the summary must preserve the actual HR concern');
+    assert.deepStrictEqual(result.messages, [example.draft], 'normal employment conditions must remain answerable');
+  }
+}
+
 async function main() {
+  const effectChecks = await Promise.allSettled([
+    questionCoverageEffect(),
+    semanticSummaryEffect()
+  ]);
+  const effectFailures = effectChecks.filter(check => check.status === 'rejected');
+  if (effectFailures.length) {
+    for (const check of effectFailures) console.error(check.reason.stack || check.reason);
+    throw new Error(`${effectFailures.length} reply effect regression(s) failed`);
+  }
   assert.strictEqual(isExplicitRecruiterRejection([
     { direction: "friend", text: "不好意思，不太合适哦" }
   ]), true);
@@ -61,8 +148,10 @@ async function main() {
   });
   assert.deepStrictEqual(validated.messages, ["complete draft"]);
   const rawSummary = "请问你什么时候可以到岗？";
-  const sanitizedSummary = validateMessageReply(safeReply({ messageSummary: rawSummary }), { facts: validFacts, now: NOW });
-  assert.strictEqual(sanitizedSummary.messageSummary, "对方正在确认候选人的到岗时间。");
+  const sanitizedSummary = validateMessageReply(safeReply({ messageSummary: rawSummary }), {
+    facts: validFacts, now: NOW, sourceMessages: [rawSummary]
+  });
+  assert.strictEqual(sanitizedSummary.messageSummary, "对方正在确认候选人的工作状态、时间或安排。");
   assert.notStrictEqual(sanitizedSummary.messageSummary, rawSummary, "raw recruiter text must never become the durable message summary");
   const memoryContext = [{
     id: 7,
@@ -97,8 +186,8 @@ async function main() {
   );
 
   assert.throws(
-    () => validateMessageReply(safeReply({ responseItems: [{ id: "PRIVATE_HR_RAW_TEXT", kind: "question", required: true }] }), { facts: validFacts, now: NOW }),
-    (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT"
+    () => validateMessageReply(safeReply({ responseItems: [{ id: "PRIVATE HR RAW TEXT", kind: "question", required: true }] }), { facts: validFacts, now: NOW }),
+    (error) => error.code === "MESSAGE_REPLY_INVALID"
   );
   const englishReply = safeReply({
     messageCategory: "qualification",
@@ -506,8 +595,8 @@ async function main() {
   });
   assert.strictEqual(semantic.messageCategory, "other");
   assert.strictEqual(semantic.messageIntent, "information_update");
-  assert.strictEqual(semantic.messageSummary, "对方正在补充当前岗位、项目或流程信息。");
-  assert(!semantic.messageSummary.includes("线上面试与简历管理能力"), "model-provided recruiter wording must not become durable summary text");
+  assert.strictEqual(semantic.messageSummary, "对方在介绍项目提供的线上面试和简历管理能力。",
+    "a semantic summary must retain the actual work being described");
   assert.deepStrictEqual(semantic.messages, ["了解了，这部分业务与我的项目方向有一定关联。"]);
   assert.strictEqual(semanticMessages[0].text, "");
 

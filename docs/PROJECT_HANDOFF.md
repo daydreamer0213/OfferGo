@@ -1,6 +1,6 @@
 # OfferGo 当前项目交接
 
-> 核对日期：2026-10-04。最新三模块生成格式修复见[本轮回执](superpowers/reports/2026-10-04-generated-format-recovery.md)，之前的使用体验修复见[前轮回执](superpowers/reports/2026-10-04-three-module-user-experience.md)。版本和门禁结果以实际 Git 状态与回执中的验证文件为准。2026-09-10 以前的交接原文保存在 [历史交接](PROJECT_HANDOFF_2026-09-10.md)，不能作为当前待办或验收结论。
+> 源码与验收范围核对日期：2026-10-08。[最新效果审查](superpowers/reports/2026-10-08-deep-effect-acceptance.md)先独立定义好结果，再以合成资料真实模型输出及本地页面判断效果。此前生成格式修复见[10 月 4 日回执](superpowers/reports/2026-10-04-generated-format-recovery.md)，使用体验修复见[前轮回执](superpowers/reports/2026-10-04-three-module-user-experience.md)。版本和门禁结果以实际 Git 状态及验证文件为准；本轮未重新查询公开 Release。2026-09-10 以前的交接原文保存在 [历史交接](PROJECT_HANDOFF_2026-09-10.md)，不能作为当前待办或验收结论。
 
 ## 先分清两个版本
 
@@ -20,7 +20,8 @@
 
 ## 验证与安全边界
 
-- 当前 `tests/test_manifest.js` 注册 186 项检查，分为 fast 38、integration 143、package 5。`npm test` 是完整离线门禁；发布构建使用 `npm run test:release`，并要求实际浏览器检查。数字只说明本次核对的清单，不能代替下一提交的运行结果。
+- 当前 `tests/test_manifest.js` 注册 195 项检查，分为 fast 40、integration 150、package 5。`npm test` 是完整离线门禁；发布构建使用 `npm run test:release`，并要求实际浏览器检查。人工真实内容采样入口不在离线门禁内；数字不能代替内容审查或下一提交的运行结果。
+- 本轮效果修复保留三背景九岗位中的合理直接/迁移机会，修复简历残句/因果、面试复盘误批、跟进身份、匹配卡职业范围、资料更正/撤回及版本恢复。真实输出页面为隔离 SQLite 的原输出重放，0 外网；本轮没有可连接的已登录平台 Edge，不能证明当前 BOSS/智联读取或动作适配。详细初测、复验及保留边界见最新效果报告，精确版本最终门禁以该报告链接的独立验证记录为准。
 - 本次文档核对没有访问真实 BOSS 或智联，没有发送消息、简历或投递，也没有替换已安装的验收环境。离线检查与旧安装版的结果不能证明新源码已完成真实用户路径验收。
 - BOSS 的固定搜索页、沟通页、串行读取、随机间隔、额度、风控停止及具体批次授权仍以根目录 [AGENTS.md](../AGENTS.md) 为准；历史验收不构成新一轮对外发送授权。
 

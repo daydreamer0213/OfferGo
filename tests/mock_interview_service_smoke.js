@@ -3,6 +3,8 @@ const { createHash } = require("node:crypto");
 const storage = require("../src/core/storage");
 const { createMockInterviewService } = require("../src/application/mock_interview");
 const { projectInterviewFacts } = require("../src/core/mock_interview");
+require('./mock_interview_feedback_regressions');
+require('./mock_model_quality_regressions');
 
 function profile(name) {
   return {
@@ -663,6 +665,60 @@ const db = storage.openDb(":memory:");
     assert.strictEqual(reusedDuty.turns[0].questionText, '你负责的接口联调有哪些关键取舍？');
     assert.deepStrictEqual(dutyCalls.at(-1).context.candidateEvidence.find(item => item.id === dutyEvidence.id).resumeEvidenceIds, ['R2']);
     assert.deepStrictEqual(storage.listMockInterviewSessions(db, {profileId:owner.profileId,sessionIds:[dutySession.id]}), [], 'source filter still enforces candidate ownership');
+    // A style returned as questionKind is invalid, but the existing bounded correction must work at start and after an answer.
+    for (const stage of ['start', 'answer']) {
+      const kindInputs = [];
+      const kindService = createMockInterviewService({ db, adapter: { ...adapter,
+        async generateMockInterviewStep(input) {
+          const raw = await adapter.generateMockInterviewStep(input);
+          const needsKindRepair = stage === 'start' ? !input.turns.length : input.turns.length === 1;
+          if (needsKindRepair) {
+            kindInputs.push(JSON.parse(JSON.stringify(input)));
+            raw.nextQuestion.questionKind = input.questionRevision
+              ? (input.turns.length ? 'follow_up' : 'topic_transition') : 'behavioral';
+          }
+          return raw;
+        }
+      } });
+      let kindSession = await kindService.startSession({ ...dutyBase, settings: { type: 'behavioral', plannedQuestions: 3 } });
+      if (stage === 'answer') kindSession = await kindService.answerTurn({ profileId: dutyOwner.profileId,
+        planId: dutyOwner.planId, sessionId: kindSession.id, turnNumber: 1, answerText: '我比较接口日志并与同事共同排查问题。' });
+      assert.strictEqual(kindInputs.length, 2, 'one invalid kind receives exactly one correction');
+      assert.strictEqual(kindInputs[1].questionRevision.reason, 'MOCK_INTERVIEW_QUESTION_KIND_INVALID');
+      assert.deepStrictEqual(kindInputs[1].questionRevision.allowedQuestionKinds, ['follow_up', 'topic_transition']);
+      assert.deepStrictEqual(kindInputs[1].turns, kindInputs[0].turns, 'kind correction keeps the original answer context');
+      assert.strictEqual(kindSession.settings.type, 'behavioral', 'style setting is independent of dialogue kind');
+      assert.strictEqual(kindSession.turns.length, stage === 'start' ? 1 : 2);
+      if (stage === 'answer') assert.strictEqual(kindSession.turns[0].answerText, '我比较接口日志并与同事共同排查问题。');
+    }
+    for (const invalidKind of ['behavioral', 'arbitrary_invalid_kind']) for (const stage of ['start', 'answer']) {
+      let invalidKindAttempts = 0;
+      const invalidKindService = createMockInterviewService({ db, adapter: { ...adapter,
+        async generateMockInterviewStep(input) {
+          const raw = await adapter.generateMockInterviewStep(input);
+          if (stage === 'start' || input.turns.length) {
+            invalidKindAttempts += 1;
+            raw.nextQuestion.questionKind = invalidKind;
+          }
+          return raw;
+        }
+      } });
+      const pendingKindSession = stage === 'answer' ? await invalidKindService.startSession(dutyBase) : null;
+      const countSessions = () => Number(db.prepare('SELECT count(*) AS n FROM mock_interview_sessions WHERE profile_id = ? AND plan_id = ?')
+        .get(dutyOwner.profileId, dutyOwner.planId).n);
+      const sessionCount = countSessions();
+      await assert.rejects(() => stage === 'start' ? invalidKindService.startSession(dutyBase)
+        : invalidKindService.answerTurn({ profileId: dutyOwner.profileId, planId: dutyOwner.planId,
+          sessionId: pendingKindSession.id, turnNumber: 1, answerText: '我比较日志并与同事排查问题。' }),
+        error => error.code === 'MOCK_INTERVIEW_QUESTION_KIND_INVALID');
+      assert.strictEqual(invalidKindAttempts, 2, 'a second invalid result stops rather than retries or coercing it');
+      assert.strictEqual(countSessions(), sessionCount, 'failed correction must not create a partial session');
+      if (stage === 'answer') {
+        const unchanged = invalidKindService.getSession({ profileId: dutyOwner.profileId, planId: dutyOwner.planId, sessionId: pendingKindSession.id });
+        assert.strictEqual(unchanged.turns.length, 1);
+        assert.strictEqual(unchanged.turns[0].answerText, '', 'failed kind correction must not partially save an answer');
+      }
+    }
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();

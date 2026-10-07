@@ -1,5 +1,6 @@
 const { createHash } = require("node:crypto");
 const { isKnownFactKey } = require("./message_reply_contract");
+const { assessMessageDraftQuality } = require('./message_draft_quality');
 
 const VALID_SCOPE_KINDS = new Set(["global", "job", "company", "experience"]);
 
@@ -56,6 +57,25 @@ function validateReplyEditFactExtraction(value, options = {}) {
     const evidenceText = String(item.evidenceText || "").trim().slice(0, 2000);
     if (!factKey || !isKnownFactKey(factKey) || !factValue || !evidenceText) continue;
     if (!evidenceSource.includes(evidenceText)) continue;
+    let supportingText = evidenceSource.split(/[，,。；;\n]/).filter(clause => clause.includes(evidenceText)).join('\n') || evidenceText;
+    const adoptedText = normalizeReplyDraftText(options.finalText || '');
+    const editStart = adoptedText.indexOf(evidenceSource);
+    if (editStart >= 0 && adoptedText.indexOf(evidenceSource, editStart + 1) < 0) {
+      const quoteStart = editStart + evidenceSource.indexOf(evidenceText);
+      const quoteEnd = quoteStart + evidenceText.length;
+      const before = adoptedText.slice(0, quoteStart).split(/[，,。；;\n]/).pop();
+      const after = adoptedText.slice(quoteEnd).split(/[，,。；;\n]/)[0];
+      supportingText = before + adoptedText.slice(quoteStart, quoteEnd) + after;
+    }
+    const conditionObject = { accepts_travel: '出差', accepts_overtime: '加班', accepts_relocation: '搬迁' }[factKey];
+    let claim = '';
+    if (conditionObject) {
+      claim = factValue.includes(conditionObject) || (factKey === 'accepts_relocation' && factValue.includes('异地'))
+        ? factValue : `${factValue}${conditionObject}`;
+    }
+    if (factKey === 'employment_status' && /在职|离职/.test(supportingText)) claim = `目前${factValue}`;
+    if (factKey === 'availability_date' && /到岗|入职/.test(supportingText)) claim = /到岗|入职/.test(factValue) ? factValue : `${factValue}到岗`;
+    if (claim && !assessMessageDraftQuality({ text: claim, evidenceTexts: [supportingText] }).valid) continue;
     byKey.set(factKey, { factKey, factValue, evidenceText });
   }
   const experiences = (Array.isArray(extraction.experiences) ? extraction.experiences : []).slice(0, 3).flatMap(item => {

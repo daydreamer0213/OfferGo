@@ -47,6 +47,12 @@ assert.deepStrictEqual(profile.evidenceGaps, []);
 
 const roleKeywordCases = [
   {
+    targetTitles: ["产品经理实习生"],
+    proposed: ["产品实习生", "产品助理", "Agent 工具调用", "需求访谈"],
+    directions: ["产品经理实习生"],
+    expected: ["产品经理实习生", "产品实习生", "产品助理"]
+  },
+  {
     targetTitles: ["AI应用开发工程师"],
     proposed: ["Agent 工具调用", "Function Calling", "AI应用开发", "Agent开发工程师", "RAG工程师", "AI求职工具开发"],
     directions: ["Agent 智能体开发", "AI 求职工具开发"],
@@ -296,6 +302,15 @@ adapter.chatJson = async (prompt) => {
 };
 
 (async () => {
+  const internshipProfile = normalizeCandidateProfile({
+    candidate: { targetTitles: ["产品经理实习生"], city: "广州" }
+  });
+  const internshipPlan = await recommendPlanForProfile({ profile: internshipProfile,
+    analyzerFactory: () => ({ recommendSearchPlan: async () => ({ keywords: ["产品经理实习生"],
+      platform: { generated: { jobTypes: ["全职"] } } }) }) });
+  assert(internshipPlan.platform.generated.jobTypes.includes("实习"), "模型默认全职不能排除候选人明确的实习目标");
+  const explicitlyFullTime = normalizeSearchPlan({ jobTypes: ["全职"] }, internshipProfile);
+  assert.deepStrictEqual(explicitlyFullTime.platform.generated.jobTypes, ["全职"], "用户明确保存的全职条件仍保留");
   const parsedResume = await new MockModelAdapter().analyzeResume({ resumeText: "求职意向：AI应用开发工程师 / Python 后端 / RAG 工程师" });
   assert.deepStrictEqual(parsedResume.candidate.targetTitles, ["AI应用开发工程师", "RAG工程师", "Python后端"]);
   await adapter.analyzeResume({});

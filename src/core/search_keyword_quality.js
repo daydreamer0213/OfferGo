@@ -1,5 +1,5 @@
 // Model-generated search terms must describe jobs. Skills and project actions belong in matching.
-const ROLE_ENDING = /(?:工程师|架构师|分析师|设计师|研究员|科学家|咨询师|会计师|审计师|教师|医生|护士|律师|经理|主管|总监|专员|助理|顾问|运营|测试|运维|后端|前端|算法|会计|财务|法务|行政|人事|招聘|采购|销售|客服|编辑|策划|翻译|厨师)$/i;
+const ROLE_ENDING = /(?:工程师|架构师|分析师|设计师|研究员|科学家|咨询师|会计师|审计师|教师|医生|护士|律师|经理|主管|总监|专员|助理|顾问|运营|测试|运维|后端|前端|算法|会计|财务|法务|行政|人事|招聘|采购|销售|客服|编辑|策划|翻译|厨师|实习生)$/i;
 const SHORT_ROLE_TITLE = /^(?:(?:数据|商业|市场|业务|财务|用户|供应链|风险|增长)分析|(?:平面|视觉|交互|室内|服装|工业|UI|UX|产品|游戏)设计)$/i;
 
 function selectGeneratedRoleKeywords(profile = {}, proposal = {}) {

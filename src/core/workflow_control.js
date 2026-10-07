@@ -353,6 +353,7 @@ function releaseWorkflowScanLease(db, run) {
 
 function requiredWorkflowRun(db, workflowRunId) {
   const run = getWorkflowRun(db, workflowRunId);
+  if (run?.archived) throw controlError('WORKFLOW_RUN_TERMINAL', 'archived workflow attempt is read-only');
   if (!run) {
     throw controlError(
       "WORKFLOW_CONTROL_TARGET_MISMATCH",

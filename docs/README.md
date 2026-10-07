@@ -37,6 +37,8 @@
 
 ## 历史记录
 
+- [`superpowers/reports/2026-10-08-deep-effect-acceptance.md`](superpowers/reports/2026-10-08-deep-effect-acceptance.md)：全模块独立效果标准、真实合成资料输出、修复与未验证范围；不代表真实招聘平台验收或新安装版发布。
+
 以下内容保留当时的设计、计划与验收证据，不代表当前版本状态：
 
 - `runtime_flow_review.md`

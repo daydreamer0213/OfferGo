@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const storage = require("../src/core/storage");
 const { createFunnelAnalysisService } = require("../src/application/funnel_analysis");
+const { renderFunnelPage } = require("../src/dashboard/pages/funnel");
 
 const NOW = "2026-09-05T02:00:00.000Z";
 const db = storage.openDb(":memory:");
@@ -24,13 +25,22 @@ try {
   const preliminary = createOwner(db, "preliminary");
   seedEntries(db, preliminary, 35, (index) => [
     readEvent(index),
-    ...(index < 5 ? [replyEvent(index)] : [])
+    ...(index < 8 ? [replyEvent(index)] : [])
   ]);
   const preliminaryDashboard = service.getDashboard({ profileId: preliminary.profileId, planId: preliminary.planId });
   assert.equal(preliminaryDashboard.currentRound.strength, "preliminary");
   assert.match(preliminaryDashboard.headline, /初步观察/);
   assert.match(preliminaryDashboard.headline, /已读到回复/);
   assert.match(preliminaryDashboard.priorityCheck, /岗位匹配|开场表达/);
+  assert.equal(preliminaryDashboard.health.diagnosis.siteLabel, 'BOSS');
+  assert.equal(preliminaryDashboard.health.diagnosis.priorityCheck, '优先检查岗位匹配和开场表达，不必立即重写简历。');
+  const preliminaryHtml = renderFunnelPage({ plan: { id: preliminary.planId }, dashboard: preliminaryDashboard });
+  const diagnosisHtml = preliminaryHtml.match(/<section class="health-diagnosis"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(diagnosisHtml, /BOSS/);
+  assert.match(diagnosisHtml, /35 个已读岗位中，8 个进入下一步/);
+  assert.match(diagnosisHtml, /优先检查岗位匹配和开场表达，不必立即重写简历/,
+    'the real analysis recommendation must reach the visible diagnosis, not just numeric feedback');
+  assert.match(diagnosisHtml, new RegExp(`/queue\\?planId=${preliminary.planId}&amp;site=boss&amp;pool=waiting_reply`));
 
   const replyWindow = createOwner(db, "reply-window");
   seedEntries(db, replyWindow, 30, (index) => [

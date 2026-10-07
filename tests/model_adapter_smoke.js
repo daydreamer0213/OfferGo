@@ -199,9 +199,8 @@ server.listen(0, "127.0.0.1", async () => {
     const mockResumeDraft = await new MockModelAdapter().generateResumeOptimization({
       evidenceCatalog: [{ id: "R1", kind: "resume", text: "参与知识库开发" }]
     });
-    assert.strictEqual(mockResumeDraft.suggestions[0].originalText, "参与知识库开发");
-    assert.deepStrictEqual(mockResumeDraft.suggestions[0].evidenceIds, ["R1"]);
-    assert.strictEqual(mockResumeDraft.suggestions[0].editingPrinciple, "structure");
+    assert.deepStrictEqual(mockResumeDraft.suggestions, []);
+    assert(mockResumeDraft.headline.includes("Mock"));
 
     const interviewAdapter = new OpenAICompatibleAdapter({
       baseUrl: "https://example.invalid",
@@ -1696,7 +1695,7 @@ server.listen(0, "127.0.0.1", async () => {
       "missingFact 只能是 null 或 {key,question}",
       "interest_check 本身不需要候选人事实",
       "必须返回 1-2 条自然草稿",
-      "responseItems 只列招聘方要求候选人回答的事实项",
+      "responseItems 列招聘方需要得到回应的问题或说明",
       "kind 只能是 question 或 statement",
       "interest_check 的 responseItems 和 coverage 必须为空数组",
       "messageSummary 必须用一句中文概括对方本轮的主要意思和要求的行动，最多 160 个字符。",

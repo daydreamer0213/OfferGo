@@ -728,10 +728,8 @@ function validateSparseMatchEvidence(value, context = {}) {
   else recommendation = "apply";
   const confidence = completeDirect ? 0.9 : hasPositiveEvidence && !decisionUnknownRequirements.length && !unknownEligibility.length ? 0.72 : 0.45;
   const fitLevel = recommendation === "skip" ? "D" : recommendation === "review" ? "C" : recommendation === "caution" ? "B" : "A";
-  const fitReasons = [
-    ...requirementMatches.filter((item) => ["matched", "transferable"].includes(item.state))
-      .map((item) => `${item.requirement}：${item.state === "matched" ? "有直接简历证据" : "有可迁移简历证据"}`)
-  ].slice(0, 8);
+  const fitReasons = evidenceFitReasons({ responsibilityMatches, requirementMatches,
+    roleSummary: selected.roleSummary, ...roleAlignmentEvidence });
   const softGaps = [
     ...transferable.map((item) => `${item.requirement}目前只有可迁移证据`),
     ...softMissing.map((item) => `${item.requirement}缺少直接简历证据`),
@@ -748,11 +746,15 @@ function validateSparseMatchEvidence(value, context = {}) {
   const directionResumeEvidence = selectedTrackDirectionEvidence
     ? roleAlignmentEvidence.roleResumeEvidence
     : [];
+  const evidencedResponsibilities = responsibilityMatches
+    .filter((item) => ["matched", "transferable", "missing"].includes(item.state));
   const jdEvidence = directionJdEvidence
     .concat(requirementMatches.filter((item) => ["matched", "transferable", "missing"].includes(item.state)).map((item) => item.jdEvidence))
-    .concat(hardBlockers.filter((item) => item.kind === "eligibility").map((item) => item.jdEvidence), list(jobUnderstanding.hiddenRisks).map((item) => text(item?.evidence)).filter(Boolean), list(jobQuality.concerns).map((item) => text(item?.evidence)).filter(Boolean)).slice(0, 6);
+    .concat(hardBlockers.filter((item) => item.kind === "eligibility").map((item) => item.jdEvidence), list(jobUnderstanding.hiddenRisks).map((item) => text(item?.evidence)).filter(Boolean), list(jobQuality.concerns).map((item) => text(item?.evidence)).filter(Boolean))
+    .concat(evidencedResponsibilities.map((item) => item.jdEvidence)).slice(0, 6);
   const resumeEvidence = [...new Set(directionResumeEvidence
     .concat([...matches, ...normalizedEligibility].map((item) => item.resumeEvidence))
+    .concat(evidencedResponsibilities.map((item) => item.resumeEvidence))
     .filter(Boolean))].slice(0, 6);
   return {
     selectedTrackId: selected.selectedTrackId,
@@ -768,6 +770,38 @@ function validateSparseMatchEvidence(value, context = {}) {
     missingPoints: softGaps, blockingGaps: hardBlockers.map((item) => item.requirement), riskQuestions: questionsToVerify,
     recommendedResumeVersion: "", primaryProjects: [], greetingAngle: "", evidence: { jd: jdEvidence, resume: resumeEvidence }, hrPrep: {}
   };
+}
+
+function evidenceFitReasons(analysis = {}) {
+  const reasons = [];
+  const seenEvidence = new Set();
+  const add = (resumeEvidence, target, state) => {
+    const resume = text(resumeEvidence).replace(/^简历[:：]\s*/, '').replace(/[。.]$/, '');
+    const work = text(target).replace(/^JD[:：]\s*/, '').replace(/[。.]$/, '');
+    if (!resume || !work || seenEvidence.has(resume) || isAbsentResumeEvidence(resume)) return;
+    seenEvidence.add(resume);
+    const relation = state === 'transferable' ? '可作为相近经验支持' : '可支持';
+    reasons.push(`你的相关经历：${resume}。${relation}本岗需要的“${work}”。`);
+  };
+  for (const item of list(analysis.responsibilityMatches)) {
+    if (['matched', 'transferable'].includes(item?.state)) add(item.resumeEvidence, item.jdEvidence, item.state);
+  }
+  if (['aligned', 'mostly_aligned', 'partially_aligned'].includes(analysis.roleAlignment)) {
+    for (const evidence of list(analysis.roleResumeEvidence)) {
+      add(evidence, analysis.roleSummary, analysis.roleAlignment === 'aligned' ? 'matched' : 'transferable');
+    }
+  }
+  const requirements = list(analysis.requirementMatches).filter(item => ['matched', 'transferable'].includes(item?.state));
+  requirements.sort((a, b) => Number(Boolean(b.central || b.foundation)) - Number(Boolean(a.central || a.foundation)));
+  for (const item of requirements) add(item.resumeEvidence, item.requirement, item.state);
+  return [...new Set(reasons.concat(list(analysis.fitReasons).map(text).filter(Boolean)))].slice(0, 8);
+}
+
+function isAbsentResumeEvidence(value) {
+  const evidence = text(value).replace(/^简历[:：]\s*/, '').replace(/[。.]$/, '');
+  // A real action with a stated limitation is evidence; do not erase either clause.
+  if (/[，,；;。！？!?]|但|不过/.test(evidence)) return false;
+  return /^(?:简历(?:中)?(?:缺少|未提及)|(?:未|没有|尚未)(?:直接|明确)?(?:提及|体现|证明|提供|做过|参与|负责)|缺少(?:直接|相关|明确)?(?:经历|经验|证据)|无(?:直接|相关|明确|项目|经验|证据))/.test(evidence);
 }
 
 function validateRoleAlignmentEvidence(value, jobUnderstanding) {
@@ -964,10 +998,7 @@ function validateCompactMatchEvidence(value, context = {}) {
         ? "B"
         : "A";
   const confidence = value.certainty === "high" ? 0.9 : value.certainty === "medium" ? 0.72 : 0.45;
-  const fitReasons = requirementMatches
-    .filter((item) => ["matched", "transferable"].includes(item.state))
-    .map((item) => `${item.requirement}：${item.state === "matched" ? "有直接简历证据" : "有可迁移简历证据"}`)
-    .slice(0, 8);
+  const fitReasons = evidenceFitReasons({ requirementMatches });
   const softGaps = [
     ...transferable.map((item) => `${item.requirement}目前只有可迁移证据`),
     ...softMissing.map((item) => `${item.requirement}未找到直接简历证据`),
@@ -1835,6 +1866,8 @@ function isExplicitlyOptionalRequirement(item = {}) {
 module.exports = {
   ModelContractError,
   validateModelResult,
+  evidenceFitReasons,
+  isAbsentResumeEvidence,
   effectiveHardBlockers,
   decisionHardBlockers,
   roleCoreEvidenceState,

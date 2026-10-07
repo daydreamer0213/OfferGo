@@ -46,7 +46,7 @@ function createScopedLogger(state, context = {}) {
     error: (event, context) => write("error", event, context),
     child: (context) => createScopedLogger(state, mergeDefined(loggerContext, context)),
     requestId: () => `${state.sessionId}-${++state.sequence}`,
-    listRecent: (limit = 120) => listRecentLogs(state.logDir, limit),
+    listRecent: (limit = 120, options = {}) => listRecentLogs(state.logDir, limit, options),
     logDir: state.logDir
   };
 }
@@ -88,7 +88,7 @@ function publicError(error, { fallbackCode = "REQUEST_FAILED", fallbackMessage =
   return { code, message, statusCode: safeStatus };
 }
 
-function listRecentLogs(logDir, limit = 120) {
+function listRecentLogs(logDir, limit = 120, { levels = null, requestId = "" } = {}) {
   if (!fs.existsSync(logDir)) return [];
   const count = Math.max(1, Math.min(500, Number(limit) || 120));
   const files = fs.readdirSync(logDir)
@@ -99,7 +99,10 @@ function listRecentLogs(logDir, limit = 120) {
   for (const file of files) {
     const lines = fs.readFileSync(path.join(logDir, file), "utf8").trim().split(/\r?\n/).reverse();
     for (const line of lines) {
-      try { rows.push(JSON.parse(line)); } catch { /* ignore a partial final write */ }
+      try {
+        const row = JSON.parse(line);
+        if ((!levels || levels.includes(row.level)) && (!requestId || row.requestId === requestId)) rows.push(row);
+      } catch { /* ignore a partial final write */ }
       if (rows.length >= count) return rows;
     }
   }

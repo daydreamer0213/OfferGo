@@ -56,6 +56,38 @@ const WORKFLOW_TRANSITIONS = Object.freeze({
 
 
 function createWorkflowRun(db, input = {}) {
+  if (input.allocateSlot === true) {
+    return immediateTransaction(db, () => {
+      const profileId = optionalPositiveInteger(input.profileId, 'profileId');
+      const localDay = String(input.localDay || '').trim();
+      const site = normalizeWorkflowSite(input.site);
+      const rows = db.prepare(`SELECT * FROM workflow_runs WHERE profile_id = ? AND local_day = ? AND site = ?
+        ORDER BY sequence`).all(profileId, localDay, site);
+      if (getActiveWorkflowRun(db, { profileId, site })) {
+        throw workflowRunError('WORKFLOW_SCAN_ALREADY_RUNNING', '同一候选人在该平台已有未完成的任务，请先完成或停止本轮。');
+      }
+      let sequence = [1, 2, 3].find(value => !rows.some(row => Number(row.sequence) === value));
+      if (!sequence) {
+        const released = rows.find(row => canReleaseEmptyWorkflowSlot(db, row));
+        if (released) {
+          // Keep the old UUID and complete row in the audit log. A new attempt
+          // receives a new UUID, so a stale control request cannot target it.
+          db.prepare(`INSERT INTO events(job_id, event_type, payload_json, created_at)
+            VALUES (NULL, 'workflow_empty_slot_released', ?, ?)`)
+            .run(JSON.stringify({ version: 1, row: released }), String(input.createdAt || nowIso()));
+          db.prepare('DELETE FROM workflow_runs WHERE id = ?').run(released.id);
+          sequence = Number(released.sequence);
+        }
+      }
+      if (!sequence) {
+        const hasEmptyStop = rows.some(row => row.status === 'stopped' && !row.platform_access_started_at
+          && !workflowRowHasAccess(row));
+        throw workflowRunError(hasEmptyStop ? 'WORKFLOW_RUN_SLOT_UNAVAILABLE' : 'WORKFLOW_DAILY_RUN_LIMIT',
+          hasEmptyStop ? '停止的任务仍有输出或未结束的子进程，暂不能释放空位，请先核对该任务。' : '今天在该平台的三轮任务已经用完。');
+      }
+      return createWorkflowRun(db, { ...input, allocateSlot: false, sequence });
+    });
+  }
   const id = String(input.id || crypto.randomUUID()).trim();
   const profileId = optionalPositiveInteger(input.profileId, "profileId");
   const planId = optionalPositiveInteger(input.planId, "planId");
@@ -63,6 +95,7 @@ function createWorkflowRun(db, input = {}) {
   const sequence = optionalPositiveInteger(input.sequence, "sequence");
   const site = normalizeWorkflowSite(input.site);
   if (!id) throw workflowRunError("WORKFLOW_RUN_ID_REQUIRED", "workflow run id is required");
+  if (archivedWorkflowRow(db, id)) throw workflowRunError('WORKFLOW_RUN_ID_EXISTS', 'workflow run id belongs to an archived attempt');
   if (!profileId || !planId) throw workflowRunError("WORKFLOW_OWNER_REQUIRED", "workflow run profile and plan are required");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(localDay)) {
     throw workflowRunError("WORKFLOW_LOCAL_DAY_INVALID", "workflow local day must use YYYY-MM-DD");
@@ -119,7 +152,42 @@ function getWorkflowRun(db, id) {
   const normalizedId = String(id || "").trim();
   if (!normalizedId) return null;
   const row = db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(normalizedId);
-  return row ? workflowRunRow(row) : null;
+  if (row) return workflowRunRow(row);
+  const history = archivedWorkflowRow(db, normalizedId);
+  return history ? { ...workflowRunRow(history), archived: true } : null;
+}
+
+function archivedWorkflowRow(db, id) {
+  const event = db.prepare(`SELECT payload_json FROM events
+    WHERE event_type = 'workflow_empty_slot_released' AND json_valid(payload_json)
+      AND json_extract(payload_json, '$.row.id') = ? ORDER BY id DESC LIMIT 1`).get(id);
+  return event ? parseJson(event.payload_json, {}).row || null : null;
+}
+
+function workflowRowHasAccess(row) {
+  const access = parseJson(row.metrics_json, {}).access;
+  return ['details', 'pages', 'scrolls'].some(key => Number(access?.[key] || 0) > 0);
+}
+
+function canReleaseEmptyWorkflowSlot(db, row) {
+  if (row.status !== 'stopped' || !row.scan_needed || row.platform_access_started_at || workflowRowHasAccess(row)
+    || row.communication_batch_id || row.review_ready_at || row.successful_count || row.inventory_count) return false;
+  if (db.prepare('SELECT 1 FROM workflow_job_tasks WHERE workflow_run_id = ? LIMIT 1').get(row.id)
+    || db.prepare('SELECT 1 FROM job_analysis_attempts WHERE workflow_run_id = ? LIMIT 1').get(row.id)) return false;
+  const batchIds = new Set(row.scan_batch_id ? [row.scan_batch_id] : []);
+  if (row.scan_run_id) {
+    const scan = db.prepare('SELECT * FROM scan_runs WHERE id = ?').get(row.scan_run_id);
+    if (!scan || scan.status === 'running' || (scan.process_id && scan.process_exit_code === null && !scan.process_signal)) return false;
+    if (scan.batch_id) batchIds.add(scan.batch_id);
+    if (db.prepare(`SELECT 1 FROM events WHERE event_type = 'site_access' AND json_valid(payload_json)
+      AND json_extract(payload_json, '$.runId') IN (?, ?) LIMIT 1`).get(row.scan_run_id, row.id)) return false;
+    if (db.prepare('SELECT 1 FROM site_scan_leases WHERE site = ? AND expires_at > ? LIMIT 1').get(row.site, nowIso())) return false;
+  }
+  for (const batchId of batchIds) {
+    if (db.prepare('SELECT 1 FROM job_observations WHERE batch_id = ? LIMIT 1').get(batchId)
+      || db.prepare('SELECT 1 FROM scan_target_results WHERE batch_id = ? LIMIT 1').get(batchId)) return false;
+  }
+  return true;
 }
 
 function getWorkflowRunByCommunicationBatch(db, communicationBatchId) {
@@ -168,6 +236,7 @@ function transitionWorkflowRun(db, input = {}) {
   const nextStatus = String(input.status || "").trim();
   const current = getWorkflowRun(db, id);
   if (!current) throw workflowRunError("WORKFLOW_RUN_NOT_FOUND", "workflow run was not found");
+  if (current.archived) throw workflowRunError('WORKFLOW_RUN_TERMINAL', 'archived workflow attempt is read-only');
   if (!WORKFLOW_RUN_STATUSES.includes(nextStatus)) {
     throw workflowRunError("WORKFLOW_STATUS_INVALID", "workflow run status is invalid");
   }

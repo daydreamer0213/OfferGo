@@ -10,6 +10,7 @@ const {
 } = require("../src/application/workflow");
 const { resolveNewWorkflowBrowser } = require("../src/dashboard/server");
 const { createDashboardWorkflowService } = require("../src/application/workflow/dashboard_service");
+require('./workflow_slot_regressions');
 
 async function main() {
   dashboardAuthorityResolverRejectsRequestDrift();

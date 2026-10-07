@@ -45,6 +45,7 @@ const NOW = "2026-08-29T06:00:00.000Z";
       browserAuthority: { browserMode: "portable", cdpPort: 9222, profilePath: path.join(root, "profile") },
       forceMock: true,
       messageReplyActionToken: TOKEN,
+      messageDiscoveryDependencies: { now: () => new Date(NOW) },
       logger: quietLogger(),
       browserFactory() {
         const browser = { disconnected: false, async disconnect() { this.disconnected = true; } };
@@ -52,6 +53,7 @@ const NOW = "2026-08-29T06:00:00.000Z";
         return browser;
       },
       messageReplySendDependencies: {
+        now: () => new Date(NOW),
         createReader: () => ({}),
         createSender: () => ({}),
         createAccessController: () => ({ async reserve() { return {}; } }),
@@ -69,6 +71,21 @@ const NOW = "2026-08-29T06:00:00.000Z";
     });
     await listen(server);
     const base = `http://127.0.0.1:${server.address().port}`;
+    const expiredFixture = seedDrafts(db, 1, "expired-confirmation");
+    const expiredAt = new Date(Date.parse(NOW) - 8 * 86400000).toISOString();
+    db.prepare("UPDATE message_inbound_contexts SET created_at = ?, updated_at = ? WHERE profile_id = ?")
+      .run(expiredAt, NOW, expiredFixture.profileId);
+    const expiredPage = await request(base, `/messages?profileId=${expiredFixture.profileId}`);
+    assert.match(expiredPage.body, /超过 7 天/);
+    assert.doesNotMatch(expiredPage.body, /data-send-single="\d+"|data-send-select="\d+"/);
+    const expiredConfirmation = await postJson(base, "/api/message-reply-send-batch", {
+      profileId: expiredFixture.profileId,
+      items: expiredFixture.drafts.map((draft) => ({ draftId: draft.id, revision: draft.revision }))
+    }, TOKEN);
+    assert.equal(expiredConfirmation.status, 409);
+    assert.equal(expiredConfirmation.body.errorCode, "MESSAGE_REPLY_WINDOW_EXPIRED");
+    assert.match(expiredConfirmation.body.error, /超过一周未回复/);
+    assert.equal(browsers.length, 0, "an expired stale-page confirmation must not start browser execution");
 
     const incompleteFixture = seedDrafts(db, 1, "dashboard-incomplete-reply", false);
     const incompletePage = await request(base, `/messages?profileId=${incompleteFixture.profileId}`);

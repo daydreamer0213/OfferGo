@@ -115,7 +115,7 @@ async function runAgentOnboard(operationId, { refreshProfile = false } = {}) {
 
   const second = await runAgentOnboard(secondOperationId);
   assert.deepStrictEqual(second.requests, [], "unchanged resume must reuse its prepared profile and plan");
-  assert.strictEqual(second.completion.result.runId, first.completion.result.runId);
+  assert.strictEqual(second.completion.result.runId, secondOperationId);
   assert.strictEqual(second.completion.result.reused, true);
   assert.strictEqual(second.completion.result.profileId, first.completion.result.profileId);
   assert.strictEqual(second.completion.result.matchingCardId, first.completion.result.matchingCardId);

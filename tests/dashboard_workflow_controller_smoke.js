@@ -76,6 +76,14 @@ async function main() {
   assert.match(scope.body, /scope-token/);
   assert.match(scope.body, /workflow-existing/);
 
+  const originalResume = service.resume;
+  service.resume = async () => ({ workflow: { id: "zhaopin-existing", site: "zhaopin" }, scopeChange: { expectedScopeToken: "zhaopin-scope" } });
+  const zhaopinScope = responseRecorder();
+  await controller.resume(request("workflowRunId=zhaopin-existing"), zhaopinScope);
+  assert.match(zhaopinScope.body, /当前智联搜索页/);
+  assert.doesNotMatch(zhaopinScope.body, /当前 BOSS 搜索页/);
+  service.resume = originalResume;
+
   const resumed = responseRecorder();
   await controller.resume(
     request("workflowRunId=workflow-existing&browserMode=edge&scopeChoice=original"),

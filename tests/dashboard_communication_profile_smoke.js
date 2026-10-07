@@ -87,6 +87,16 @@ async function main() {
   assert(!JSON.stringify(response.body).includes("广州"));
   assert.strictEqual(getMessageReplyDraft(db, { profileId: fixture.profileId, draftId: fixture.draft.id }).currentText, "我目前在广州，可以一周内到岗。");
 
+  response = await postJson(base, '/api/message-reply-draft', { action:'save', profileId:fixture.profileId,
+    draftId:fixture.draft.id, text:'另一个旧页面的输入', expectedRevision:fixture.draft.revision });
+  assert.equal(response.status,409);
+  assert.equal(response.body.errorCode,'MESSAGE_REPLY_DRAFT_CONFLICT');
+  assert.equal(getMessageReplyDraft(db,{profileId:fixture.profileId,draftId:fixture.draft.id}).currentText,'我目前在广州，可以一周内到岗。');
+  response = await postJson(base, '/api/message-reply-draft', { action:'complete',completionKind:'copied',profileId:fixture.profileId,
+    draftId:fixture.draft.id,text:'复制旧页面输入也不能覆盖',expectedRevision:fixture.draft.revision });
+  assert.equal(response.status,409);
+  assert.equal(response.body.errorCode,'MESSAGE_REPLY_DRAFT_CONFLICT');
+
   response = await postJson(base, "/api/message-reply-draft", {
     action: "save",
     profileId: fixture.otherProfileId,
@@ -417,6 +427,7 @@ async function editableDraftClientSmoke(markup, draftId) {
   const timers = new Map();
   let nextTimer = 1;
   let completeFailure = false;
+  let saveConflict = false;
   let extractionStatus = 'succeeded';
   let holdSave = false;
   let releaseHeldSave = null;
@@ -442,6 +453,7 @@ async function editableDraftClientSmoke(markup, draftId) {
       const body = JSON.parse(options.body);
       requests.push({ url, body });
       order.push(["fetch", body.action]);
+      if(saveConflict && body.action==='save') return jsonResponse(409,{errorCode:'MESSAGE_REPLY_DRAFT_CONFLICT'});
       if (holdSave && body.action === "save") {
         return new Promise((resolve) => { releaseHeldSave = () => resolve(jsonResponse(200, { ok: true, draftId, revision: 2 })); });
       }
@@ -467,6 +479,7 @@ async function editableDraftClientSmoke(markup, draftId) {
   assert.strictEqual(saveStatus.textContent, "已自动保存");
   assert.strictEqual(requests.filter((item) => item.body.action === "save").length, 1);
   assert.strictEqual(requests.at(-1).body.text, "最后一次修改");
+  assert.equal(requests.at(-1).body.expectedRevision,0,'first save sends the loaded revision');
 
   const raceStart = order.length;
   holdSave = true;
@@ -488,6 +501,17 @@ async function editableDraftClientSmoke(markup, draftId) {
   assert(clipboardIndex >= 0 && completeIndex > clipboardIndex, "clipboard write must finish before local completion starts");
   assert.strictEqual(requests.filter((item) => item.body.action === "complete").at(-1).body.text, "复制前的最后修改", "completion must persist the exact text copied, not later typing");
   assert.match(feedback.textContent, /已复制，修改后的回答和资料已保存/);
+  assert.equal(requests.filter(item=>item.body.action==='complete').at(-1).body.expectedRevision,2,'queued copy uses the successful preceding save revision');
+
+  saveConflict = true;
+  field.value = '旧页面未保存的输入';
+  fieldHandlers.get('input')();
+  await [...timers.values()].at(-1).callback();
+  assert.equal(field.value,'旧页面未保存的输入','conflict preserves current typing');
+  assert.equal(field.dataset.draftRevision,'2','conflict does not adopt a newer revision and silently overwrite on retry');
+  assert.match(saveStatus.textContent,/其他页面.*输入已保留/);
+  assert.match(feedback.textContent,/先复制.*刷新/);
+  saveConflict = false;
 
   extractionStatus = 'failed';
   field.value = '另一条需要补做的回答';

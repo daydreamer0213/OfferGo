@@ -107,6 +107,63 @@ function factPolicySmoke() {
 }
 
 function decisionCardProjectionSmoke() {
+  const rich = projectMessageDecisionCard({ title: '订单后端', analysis: {
+    fitLevel: 'A', recommendation: 'apply', roleAlignment: 'aligned', roleSummary: '开发订单接口并排查重复提交',
+    responsibilityEvidence: ['JD：负责订单接口幂等、重试和故障排查'],
+    roleResumeEvidence: ['简历：订单项目定位重复提交并改造接口幂等'],
+    fitReasons: ['本科：有直接简历证据', 'Python：有直接简历证据'],
+    responsibilityMatches: [{ state: 'matched', jdEvidence: 'JD：负责订单接口幂等、重试和故障排查',
+      resumeEvidence: '简历：订单项目定位重复提交并改造接口幂等' }]
+  } });
+  assert.match(rich.fitSummary, /订单项目定位重复提交.*订单接口幂等/);
+  assert.match(rich.matchHighlights[0], /订单项目定位重复提交.*订单接口幂等/);
+  assert.match(rich.resumeConnections[0], /订单接口幂等、重试和故障排查/,
+    'a responsibility connection must say which actual work it supports');
+  const unrelatedEmployer = projectMessageDecisionCard({ analysis: {
+    responsibilityMatches: [{ state: 'matched', jdEvidence: 'JD：整理需求和交付原型',
+      resumeEvidence: '简历：参与校园活动项目，整理报名需求并交付原型' }]
+  } });
+  assert(unrelatedEmployer.resumeConnections.length);
+  assert(!unrelatedEmployer.resumeConnections.join('').includes('德勤'),
+    'an action without an employer must never be assigned to a made-up company');
+  const denied = projectMessageDecisionCard({ analysis: { fitLevel: 'A', recommendation: 'apply',
+    fitReasons: ['已有后端经历'], responsibilityMatches: [
+      { state: 'unknown', jdEvidence: 'JD：管理研发团队', resumeEvidence: '' },
+      { state: 'matched', jdEvidence: 'JD：管理研发团队', resumeEvidence: '简历：未做过研发管理' }
+    ] } });
+  assert(!denied.matchHighlights.join('').includes('管理研发团队'));
+  assert.deepStrictEqual(denied.resumeConnections, []);
+  const crowded = projectMessageDecisionCard({ analysis: {
+    requirementMatches: Array.from({ length: 4 }, (_, index) => ({ state: 'matched', central: true,
+      requirement: `辅助能力${index}`, resumeEvidence: `简历：辅助项目${index}完成工具配置` })),
+    responsibilityMatches: [{ state: 'matched', jdEvidence: 'JD：开发订单重试接口',
+      resumeEvidence: '简历：订单项目负责重试和接口联调' }]
+  } });
+  assert.match(crowded.resumeConnections[0], /订单项目负责重试和接口联调/,
+    'actual responsibility evidence must not be squeezed out by tool evidence');
+  assert(crowded.resumeConnections.length <= 3);
+  const distinctActions = projectMessageDecisionCard({ analysis: { requirementMatches: [
+    { state: 'matched', central: true, requirement: '需求分析', resumeEvidence: '简历：OfferGo项目整理需求访谈记录' },
+    { state: 'matched', central: true, requirement: '故障排查', resumeEvidence: '简历：OfferGo项目定位竞态并修复重复任务' }
+  ] } });
+  assert(distinctActions.resumeConnections.some(item => item.includes('定位竞态') && item.includes('故障排查')),
+    'separate actions in one project must not be replaced by the first action when grouping evidence');
+  for (const example of [
+    { state: 'matched', evidence: '本人完成订单接口，但未负责云环境', pattern: /本人完成订单接口.*未负责云环境/ },
+    { state: 'transferable', evidence: '仅有个人FastAPI项目，未生产部署', pattern: /仅有个人.*FastAPI.*项目.*未生产部署/ }
+  ]) {
+    const qualified = projectMessageDecisionCard({ analysis: { fitLevel: 'B', recommendation: 'caution',
+      responsibilityMatches: [{ state: example.state, jdEvidence: 'JD：开发业务接口',
+        resumeEvidence: `简历：${example.evidence}` }] } });
+    assert(qualified.matchHighlights.some(item => example.pattern.test(item)), 'real candidate action must retain its stated limitation');
+    assert(qualified.resumeConnections.some(item => example.pattern.test(item)), 'connections must not remove evidence or its scope boundary');
+    assert.strictEqual(qualified.matchHighlights[0].includes('相近经验'), example.state === 'transferable');
+  }
+  const absent = projectMessageDecisionCard({ analysis: { responsibilityMatches: [
+    { state: 'matched', jdEvidence: 'JD：开发业务接口', resumeEvidence: '简历：未提供相关经历' }
+  ] } });
+  assert.deepStrictEqual(absent.matchHighlights, []);
+  assert.deepStrictEqual(absent.resumeConnections, []);
   const base = {
     title: "AI 应用开发工程师",
     company: "示例科技",
@@ -251,9 +308,9 @@ function decisionCardProjectionSmoke() {
     }
   });
   assert.deepStrictEqual(naturalNarrative.resumeConnections, [
-    "你在 OfferGo 中把大模型分析拆成岗位理解与人岗匹配，并用结构化校验和条件规则生成建议。这与岗位需要的需求分析和场景梳理、制定可验证的验收标准直接相关。",
-    "你在 OfferGo 中通过 GitHub Actions 做回归检查，并把安装包推进到实际使用验收。这能对应岗位从需求到验收的交付闭环。",
-    "你在德勤的 AI 应用工程师经历中，参与过 Agent 动态工具选择能力建设。这能说明你在用 AI 工具辅助调研和文档方面有实践基础。"
+    "你在 OfferGo 中通过 GitHub Actions 做回归检查，并把安装包推进到实际使用验收。这能作为相近经验支持岗位从需求到验收的交付闭环。",
+    "你在 OfferGo 中把大模型分析拆成岗位理解与人岗匹配，并用结构化校验和条件规则生成建议。这与岗位需要的需求分析和场景梳理直接相关。",
+    "你在 OfferGo 中结合结构化输出校验和明确条件规则生成分层建议。这与岗位需要的制定可验证的验收标准直接相关。"
   ]);
   assert.strictEqual(naturalNarrative.attentionPoint,
     "岗位会接触容器云、Kubernetes、云原生、AI 基础设施、模型部署及推理服务。你目前明确具备的相关基础主要是 Docker，简历里还没有直接体现这些平台的项目经验。沟通时最值得确认的是，公司需要入职后立即独立承担，还是接受有相关基础后再上手。");

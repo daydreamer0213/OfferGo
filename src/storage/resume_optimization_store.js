@@ -56,6 +56,7 @@ function optimizationRow(row) {
     suggestions: parseJson(row.suggestions_json, []),
     generatedText: row.generated_text || "",
     finalText: row.final_text || "",
+    revision: sha256(row.final_text || ""),
     draftFormat: row.draft_format || "legacy_suggestions",
     userEditedAt: row.user_edited_at || null,
     status: row.status,
@@ -139,6 +140,12 @@ function getResumeOptimization(db, { profileId, optimizationId }) {
   return optimizationRow(row);
 }
 
+function findResumeOptimizationOperation(db, { profileId, planId, operationId }) {
+  return optimizationRow(db.prepare(`SELECT * FROM resume_optimizations WHERE profile_id = ? AND plan_id = ?
+    AND json_extract(model_identity_json, '$.operationId') = ? ORDER BY id DESC LIMIT 1`)
+    .get(positiveId(profileId, 'profileId'), positiveId(planId, 'planId'), String(operationId)));
+}
+
 function listResumeOptimizations(db, profileId, limit = 30) {
   const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
   return db.prepare(`SELECT * FROM resume_optimizations
@@ -161,13 +168,14 @@ function saveResumeOptimizationDraft(db, input = {}) {
   const optimizationId = positiveId(input.optimizationId, "optimizationId");
   const finalText = boundedText(input.finalText, 200_000, "最终简历文字");
   return immediateTransaction(db, () => {
-    const existing = db.prepare("SELECT plan_id, status, generated_text FROM resume_optimizations WHERE id = ? AND profile_id = ?")
+    const existing = db.prepare("SELECT plan_id, status, generated_text, final_text FROM resume_optimizations WHERE id = ? AND profile_id = ?")
       .get(optimizationId, profileId);
     if (!existing) throw storageError("RESUME_OPTIMIZATION_NOT_FOUND", "定向简历草稿不存在");
     if (Number(existing.plan_id || 0) !== planId) {
       throw storageError("RESUME_OPTIMIZATION_PLAN_MISMATCH", "这份定向简历不属于当前投递方案，请返回原方案修改");
     }
     if (existing.status !== "draft") throw storageError("RESUME_OPTIMIZATION_CLOSED", "已启用的定向简历不能继续保存");
+    assertDraftRevision(existing, input);
     const updatedAt = String(input.updatedAt || nowIso());
     const userEditedAt = comparableText(finalText) === comparableText(existing.generated_text) ? null : updatedAt;
     db.prepare(`UPDATE resume_optimizations
@@ -202,6 +210,7 @@ function activateResumeOptimization(db, input = {}) {
       return optimizationRow(row);
     }
     if (row.status !== "draft") throw storageError("RESUME_OPTIMIZATION_CLOSED", "当前定向简历不能启用");
+    assertDraftRevision(row, input);
     const finalText = requestedFinalText;
 
     const sourceVersion = db.prepare("SELECT * FROM candidate_resume_versions WHERE id = ? AND profile_id = ?")
@@ -287,9 +296,19 @@ function activateResumeOptimization(db, input = {}) {
   });
 }
 
+function assertDraftRevision(row, input) {
+  if ((input.expectedRevision !== undefined && String(input.expectedRevision) !== sha256(row.final_text || ""))
+    || (input.baseText !== undefined && String(input.baseText) !== String(row.final_text || ""))) {
+    const error = storageError('RESUME_OPTIMIZATION_REVISION_CONFLICT', '这份简历已在其他页面更新。本页修改仍保留，请先查看最新版本，再合并修改。');
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
 module.exports = {
   createResumeOptimization,
   getResumeOptimization,
+  findResumeOptimizationOperation,
   listResumeOptimizations,
   findEditableResumeCopy,
   saveResumeOptimizationDraft,

@@ -1,5 +1,5 @@
 const { validateMessageReply } = require("./message_reply_contract");
-const { mergeCandidateFacts, currentCandidateMaterial, factStatus } = require("./candidate_fact_policy");
+const { mergeCandidateFacts, currentCandidateMaterial, currentFactValue, factStatus } = require("./candidate_fact_policy");
 const { selectRelevantCandidateMaterial } = require('./candidate_evidence');
 
 function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
@@ -10,6 +10,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     { profile, currentResume = null, job, platform = "", requestedActions = [], messages = [], facts = [], factRevisions = [], answerMemories = [], candidateEvidence = [], draftQualityRevision, now } = {},
     { signal = null } = {}
   ) {
+    now = now || new Date().toISOString();
     const normalizedFacts = mergeCandidateFacts(facts, candidateEvidence, { job, factRevisions }).map((fact) => ({
       key: String(fact.key || fact.factKey || ""),
       value: fact.value !== undefined ? fact.value : fact.factValue,
@@ -19,13 +20,14 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     }));
     const requestedSubjectKeys = deriveRequestedSubjectKeys(messages, normalizedFacts);
     const scopedFacts = normalizedFacts.filter((fact) => factMatchesRequestedScope(fact, requestedSubjectKeys)
-      && factStatus(now, fact).status === 'valid');
+      && factStatus(now, fact).status === 'valid').map(fact => ({...fact,value:currentFactValue(fact,now)}));
     const query = messages.map(message => String(message.text || '')).join('\n');
     const materialPolicy = { now, facts: normalizedFacts, factRevisions };
     const relevantEvidence = selectRelevantCandidateMaterial(currentCandidateMaterial(candidateEvidence, materialPolicy), { query, job, limit: 12, maxChars: 12000 });
     const activeMemories = normalizeAnswerMemories(selectRelevantCandidateMaterial(currentCandidateMaterial((Array.isArray(answerMemories) ? answerMemories : [])
       .filter((memory) => memoryMatchesContext(memory, job, requestedSubjectKeys)), materialPolicy), { query, job, limit: 12, maxChars: 8000 }));
     const input = {
+      now,
       profile,
       currentResume: currentResume ? { ...currentResume,
         text: currentCandidateMaterial([{ text: currentResume.text, source: 'active_resume' }], materialPolicy)[0]?.text || ''

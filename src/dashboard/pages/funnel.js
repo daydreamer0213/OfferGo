@@ -41,7 +41,7 @@ function renderCurrentHealth(health, advice, planId) {
   ];
   const destination = advice ? adviceDestination(advice, planId) : null;
   return `<div class="health-summary" aria-label="求职进展概览">${summaries.map(([label, value]) => `<div><strong>${count(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('')}</div>
-    <section class="health-diagnosis" aria-label="当前判断"><div><p class="section-label">现在最值得关注</p><h2>${escapeHtml(health.diagnosis?.title || '继续记录真实进展')}</h2><p>${escapeHtml(health.diagnosis?.detail || '')}</p></div>${destination ? `<a href="${escapeAttr(destination[0])}">${escapeHtml(destination[1])}</a>` : ''}</section>
+    <section class="health-diagnosis" aria-label="当前判断"><div><p class="section-label">${health.diagnosis?.siteLabel ? `${escapeHtml(health.diagnosis.siteLabel)} · ` : ''}现在最值得关注</p><h2>${escapeHtml(health.diagnosis?.title || '继续记录真实进展')}</h2><p>${escapeHtml(health.diagnosis?.detail || '')}</p>${health.diagnosis?.priorityCheck ? `<p>${escapeHtml(health.diagnosis.priorityCheck)}</p>` : ''}</div>${destination ? `<a href="${escapeAttr(destination[0])}">${escapeHtml(destination[1])}</a>` : ''}</section>
     <div class="health-platforms">${(health.platformFunnels || []).map(renderHealthPlatform).join('')}</div>
     <p class="feedback-footnote">等待中的岗位还没有到判断时间；状态未知表示平台没有提供可靠信息，不会算作失败。${count(health.stale?.total) ? ` 另有 ${count(health.stale.total)} 个岗位超过 7 天没有新进展。` : ''}</p>`;
 }

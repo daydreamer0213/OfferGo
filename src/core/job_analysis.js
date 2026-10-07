@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const { createLlmAnalyzer } = require("./llm_analyzer");
 const { explainJobMatch, hardBoundaryReason } = require("./match_explainer");
-const { validateModelResult, decisionHardBlockers, hardBlockerText } = require("./model_contract");
+const { validateModelResult, decisionHardBlockers, hardBlockerText, isAbsentResumeEvidence } = require("./model_contract");
 const {
   getModelCache,
   saveModelCache,
@@ -597,6 +597,11 @@ function applyRuleGuard(analysis, job) {
       "job_quality_risk_guard"
     );
   }
+  if (hasConfirmedPrimaryGap(analysis)) {
+    return addGuard(analysis, "not_recommended", "no_fit",
+      "岗位的主要工作和关键基础能力与目前经历有明确差距，暂不建议继续。",
+      analysis.semanticStatus, "confirmed_primary_gap");
+  }
   if (!DECISION_POLICY.matrix[analysis.roleAlignment]) {
     return needsRetry(analysis, "岗位方向证据不足，等待补充后重新判定。");
   }
@@ -695,6 +700,22 @@ function effectiveSemanticMatchingMode(configs = {}) {
   return mode;
 }
 
+function hasConfirmedPrimaryGap(analysis) {
+  if (analysis.roleAlignment !== 'insufficient_evidence') return false;
+  const evidenceBound = item => String(item?.jdEvidence || '').trim()
+    && String(item?.resumeEvidence || '').trim() && !isAbsentResumeEvidence(item.resumeEvidence);
+  const duties = analysis.responsibilityMatches || [];
+  const known = duties.filter(item => ['matched', 'transferable', 'missing'].includes(item.state) && evidenceBound(item));
+  const policy = DECISION_POLICY.responsibilityAlignment;
+  if (known.length < policy.minimumKnownCount || known.length / Math.max(1, duties.length) < policy.minimumKnownCoverage
+    || known.some(item => item.state !== 'missing')) return false;
+  const requirements = analysis.requirementMatches || [];
+  if (requirements.some(item => (item.central || item.foundation || item.indispensable)
+    && ['matched', 'transferable'].includes(item.state) && evidenceBound(item))) return false;
+  return requirements.some(item => item.central === true && item.foundation === true && item.state === 'missing'
+    && evidenceBound(item) && /不了解|不会|不能|不负责|未使用|没有.{0,24}(?:经历|经验)|由.{0,24}负责/.test(item.resumeEvidence));
+}
+
 function hasTransferableIndispensable(analysis) {
   return (analysis.requirementMatches || []).some((item) => (
     item?.state === "transferable" && item?.indispensable === true
@@ -781,6 +802,7 @@ function candidateProfileForJobMatch(profile) {
   delete candidate.adjustableSalary;
   return {
     candidate,
+    ...(profile?.source?.resumeEvidenceText ? { resumeEvidenceText: profile.source.resumeEvidenceText } : {}),
     education: profile?.education || [],
     experiences: profile?.experiences || [],
     skills: profile?.skills || [],

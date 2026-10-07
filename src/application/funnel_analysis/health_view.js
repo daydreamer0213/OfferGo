@@ -68,6 +68,9 @@ function buildPlatformFunnel(platform = {}) {
 function buildDiagnosis(dashboard) {
   const advice = dashboard.advice;
   if (advice) {
+    const site = String(advice.site || "");
+    const platform = (Array.isArray(dashboard.platforms) ? dashboard.platforms : [])
+      .find(item => item.site === site);
     const labels = {
       read: "有阅读状态的岗位",
       replied: "已读岗位",
@@ -80,7 +83,9 @@ function buildDiagnosis(dashboard) {
     return {
       title: String(advice.title || "查看当前最需要改善的环节"),
       detail: `${count(advice.denominator)} 个${labels[advice.stage] || "可核对岗位"}中，${count(advice.numerator)} 个进入下一步。`,
-      site: String(advice.site || ""),
+      priorityCheck: String(platform?.currentRound?.priorityCheck || dashboard.priorityCheck || ""),
+      siteLabel: PLATFORM_LABELS[site] || site,
+      site,
       stage: String(advice.stage || "")
     };
   }

@@ -125,7 +125,11 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
       roleSummary: "负责企业知识库与智能助手的落地交付",
       businessScenario: "企业知识管理",
       industryContext: "企业软件",
-      fitReasons: ["RAG 项目经验可以直接支持知识库交付", "具备 Python 服务开发经验"],
+      fitReasons: ["本科：有直接简历证据", "Python：有直接简历证据"],
+      roleAlignment: 'aligned',
+      roleResumeEvidence: ['简历：知识库项目拆分文档并联调问答接口'],
+      responsibilityMatches: [{ state: 'matched', jdEvidence: 'JD：整理企业文档并交付知识库问答接口',
+        resumeEvidence: '简历：知识库项目拆分文档并联调问答接口' }],
       jobQuality: { level: "normal", concerns: [] },
       hardBlockers: []
     }
@@ -166,7 +170,8 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
   }
   assert(main.includes("负责企业知识库与智能助手的落地交付"));
   assert(main.includes("企业知识管理"));
-  assert(main.includes("RAG 项目经验可以直接支持知识库交付"));
+  assert(main.includes('知识库项目拆分文档并联调问答接口'), 'stored candidate action must appear in the main matching explanation');
+  assert(main.includes('整理企业文档并交付知识库问答接口'), 'main matching explanation must connect that action to the actual role work');
   assert(main.includes("18-25K·14薪"));
   assert(!main.includes("决策来源"));
   assert(details.includes("决策来源"), "technical decision provenance must remain in details");

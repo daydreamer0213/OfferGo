@@ -39,6 +39,7 @@ async function analyzeResumeProfile({
     provider: modelConfig?.provider || "mock",
     model: modelConfig?.providers?.[modelConfig?.provider]?.model || "",
     resumeTextLength: resume.text.length,
+    resumeEvidenceText: modelInput.text,
     inputMethod: resume.diagnostics?.extractionMethod || resume.format || "unknown",
     inputTrust: "user_provided"
   });
@@ -53,7 +54,7 @@ async function recommendPlanForProfile({ modelConfig, profile, logger = null, an
     error.code = "SEARCH_PLAN_NO_ROLE_KEYWORDS";
     throw error;
   }
-  return normalizeSearchPlan({
+  const plan = normalizeSearchPlan({
     ...rawPlan,
     keywords,
     directions: keywords.map((item) => item.word),
@@ -66,6 +67,13 @@ async function recommendPlanForProfile({ modelConfig, profile, logger = null, an
       generated: { ...rawPlan.platform?.generated, salaryLanes: [] }
     }
   }, profile);
+  // This is a model recommendation, not a user-edited platform restriction.
+  // Do not let the model's default full-time value remove an explicit internship intent.
+  if ((profile.candidate?.targetTitles || []).some(title => /实习|\bintern(?:ship)?\b/i.test(String(title)))
+    && !plan.platform.generated.jobTypes.includes("实习")) {
+    plan.platform.generated.jobTypes.push("实习");
+  }
+  return plan;
 }
 
 async function buildCandidateMatchCard({ modelConfig, profile, logger = null, adapter = null }) {

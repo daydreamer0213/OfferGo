@@ -1,4 +1,5 @@
 const assert = require("assert");
+require("./legacy_matching_resume_evidence_regressions");
 
 const CANDIDATE_EXPORTS = [
   "saveProfileAnalysis",
@@ -111,7 +112,7 @@ try {
     document: document("resume-v1", "A".repeat(6100)),
     searchPlan: plan()
   }));
-  assert.deepStrictEqual(initialSave.statements, ["BEGIN IMMEDIATE", "COMMIT"], "profile save must reserve its write slot before reading so concurrent dashboard work cannot invalidate the snapshot");
+  assert.deepStrictEqual(initialSave.statements, ["BEGIN IMMEDIATE", "SAVEPOINT offergo_search_plan", "RELEASE offergo_search_plan", "COMMIT"], "profile save must reserve its write slot and own the final commit");
   const saved = initialSave.value;
   assert(saved.profileId > 0 && saved.profileVersionId > 0 && saved.resumeVersionId > 0 && saved.resumeDocumentId > 0 && saved.planId > 0);
   assert.strictEqual(storage.getCandidateProfile(db, saved.profileId).displayName, "Candidate One");
@@ -308,7 +309,7 @@ try {
     .map((table) => db.prepare(`SELECT count(*) AS count FROM ${table}`).get().count);
   db.exec("CREATE TRIGGER fail_late_profile_save BEFORE INSERT ON search_plans WHEN NEW.name = 'rollback' BEGIN SELECT RAISE(ABORT, 'forced rollback'); END");
   const rollback = observeTransaction(() => assert.throws(() => storage.saveProfileAnalysis(db, { profile: profile("Rollback Candidate"), document: document("rollback"), searchPlan: plan("rollback") }), /forced rollback/));
-  assert.deepStrictEqual(rollback.statements, ["BEGIN IMMEDIATE", "ROLLBACK"]);
+  assert.deepStrictEqual(rollback.statements, ["BEGIN IMMEDIATE", "SAVEPOINT offergo_search_plan", "ROLLBACK TO offergo_search_plan", "RELEASE offergo_search_plan", "ROLLBACK"]);
   assert.deepStrictEqual(["candidate_profiles", "resume_documents", "profile_versions", "candidate_resume_versions", "search_plans"]
     .map((table) => db.prepare(`SELECT count(*) AS count FROM ${table}`).get().count), countsBeforeRollback);
 
@@ -319,6 +320,15 @@ try {
   assert.throws(() => storage.saveSearchPlan(db, { profileId: saved.profileId, plan: circularPlan }), /circular/i);
   assert.strictEqual(storage.getActiveSearchPlan(db, saved.profileId).id, activePlanBeforePartialFailure, "invalid plan serialization must fail before changing the active plan");
   assert.strictEqual(storage.getSearchPlan(db, activePlanBeforePartialFailure).isActive, true);
+
+  for (const [event, id] of [["INSERT", null], ["UPDATE", activePlanBeforePartialFailure]]) {
+    const original = storage.getActiveSearchPlan(db, saved.profileId);
+    db.exec(`CREATE TRIGGER fail_standalone_plan BEFORE ${event} ON search_plans WHEN NEW.name = 'late failure' BEGIN SELECT RAISE(ABORT, 'late plan failure'); END`);
+    assert.throws(() => storage.saveSearchPlan(db, { id, profileId: saved.profileId, plan: { ...original.plan, name: "late failure" } }), /late plan failure/);
+    assert.strictEqual(storage.getActiveSearchPlan(db, saved.profileId)?.id, original.id, `${event} failure must retain the active plan`);
+    assert.deepStrictEqual(storage.getSearchPlan(db, original.id).plan, original.plan);
+    db.exec("DROP TRIGGER fail_standalone_plan");
+  }
 
   console.log("candidate_store_contract_smoke ok");
 } finally {

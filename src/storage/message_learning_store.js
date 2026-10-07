@@ -84,6 +84,7 @@ function saveMessageReplyDraftEdit(db, {
   profileId,
   draftId,
   text,
+  expectedRevision,
   updatedAt = nowIso()
 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
@@ -91,10 +92,20 @@ function saveMessageReplyDraftEdit(db, {
   const currentText = draftText(text, { allowEmpty: true });
   const occurredAt = isoText(updatedAt, "updatedAt");
   if (draft.closedAt) return draft;
+  // Older integrations may omit this field; ordinary editors always send it.
+  if (expectedRevision !== undefined && expectedRevision !== null
+    && (!Number.isSafeInteger(Number(expectedRevision)) || Number(expectedRevision) < 0
+      || Number(expectedRevision) !== draft.revision)) {
+    throw storageError('MESSAGE_REPLY_DRAFT_CONFLICT', '草稿已在另一个页面修改，本页输入已保留，请复制后查看最新草稿。');
+  }
   if (draft.currentText === currentText) return draft;
-  db.prepare(`UPDATE message_reply_drafts
+  const updated = db.prepare(`UPDATE message_reply_drafts
     SET current_text = ?, revision = revision + 1, updated_at = ?
-    WHERE id = ? AND profile_id = ?`).run(currentText, occurredAt, draft.id, profile);
+    WHERE id = ? AND profile_id = ? AND revision = ? AND closed_at IS NULL`)
+    .run(currentText, occurredAt, draft.id, profile, draft.revision);
+  if (!updated.changes) {
+    throw storageError('MESSAGE_REPLY_DRAFT_CONFLICT', '草稿已在另一个页面修改，本页输入已保留，请复制后查看最新草稿。');
+  }
   return requireDraft(db, profile, draft.id);
 }
 
@@ -137,6 +148,10 @@ function completeDraft(db, input, { forceEdited }) {
   const scope = normalizeScope(input.scope);
   const extractedFacts = changed ? normalizedExtractedFacts(input.extractedFacts) : [];
   return immediateTransaction(db, () => {
+    if (completionKind === 'copied' && input.expectedRevision !== undefined && input.expectedRevision !== null
+      && Number(input.expectedRevision) !== requireDraft(db,profileId,draft.id).revision) {
+      throw storageError('MESSAGE_REPLY_DRAFT_CONFLICT', '草稿已在另一个页面修改，本页输入已保留，请复制后查看最新草稿。');
+    }
     let existing = db.prepare(`SELECT * FROM candidate_answer_memories
       WHERE draft_id = ? AND final_digest = ?`).get(draft.id, finalDigest)
       || db.prepare(`SELECT * FROM candidate_answer_memories
@@ -218,7 +233,10 @@ function listCandidateAnswerMemories(db, {
   profileId,
   activeOnly = true,
   source = "",
-  limit = 100
+  limit = 100,
+  offset = 0,
+  search = "",
+  draftId = null
 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
   const sourceText = String(source || "").trim();
@@ -234,10 +252,41 @@ function listCandidateAnswerMemories(db, {
     conditions.push("m.source = ?");
     args.push(sourceText);
   }
+  if (draftId !== null) {
+    conditions.push('m.draft_id = ?');
+    args.push(positiveInteger(draftId, 'draftId'));
+  }
+  const query = String(search || '').trim().slice(0, 160);
+  if (query) {
+    conditions.push('(instr(m.question_summary, ?) > 0 OR instr(m.final_text, ?) > 0)');
+    args.push(query, query);
+  }
   args.push(boundedLimit(limit, 100, 500));
-  return db.prepare(`SELECT m.* FROM candidate_answer_memories m
+  args.push(Number.isSafeInteger(Number(offset)) && Number(offset) >= 0 ? Number(offset) : 0);
+  const memories = db.prepare(`SELECT m.* FROM candidate_answer_memories m
     WHERE ${conditions.join(" AND ")}
-    ORDER BY m.updated_at DESC, m.id DESC LIMIT ?`).all(...args).map(mapMemory);
+    ORDER BY m.updated_at DESC, m.id DESC LIMIT ? OFFSET ?`).all(...args).map(mapMemory);
+  if (!activeOnly || !memories.length) return memories;
+  // Keep raw history intact; current consumers receive source-bound changes for
+  // projection before model input or fact-quality checks.
+  const sourceIds = memories.filter(memory => memory.source === 'user_edited_reply').map(memory => `reply-edit:${memory.id}`);
+  if (!sourceIds.length) return memories;
+  const updates = db.prepare(`SELECT source_id, source_quote, evidence_text, withdrawn_at
+    FROM candidate_evidence_entries WHERE profile_id = ? AND source_kind = 'manual'
+      AND source_id IN (${sourceIds.map(() => '?').join(',')})
+      AND (withdrawn_at IS NOT NULL OR evidence_text != source_quote)
+    ORDER BY updated_at, id`).all(profile, ...sourceIds);
+  return memories.map(memory => {
+    const linked = updates.filter(entry => entry.source_id === `reply-edit:${memory.id}`)
+      .map(entry => ({ sourceQuote: entry.source_quote, text: entry.evidence_text, withdrawnAt: entry.withdrawn_at || '' }));
+    return linked.length ? { ...memory, sourceEvidenceUpdates: linked } : memory;
+  });
+}
+
+function getCandidateAnswerMemory(db, { profileId, memoryId } = {}) {
+  const row = db.prepare('SELECT * FROM candidate_answer_memories WHERE profile_id = ? AND id = ?')
+    .get(positiveInteger(profileId, 'profileId'), positiveInteger(memoryId, 'memoryId'));
+  return row ? mapMemory(row) : null;
 }
 
 function getCurrentCandidateAnswerMemory(db, { profileId, memoryId } = {}) {
@@ -459,6 +508,7 @@ function recordCandidateFactValue(db, {
   factKey,
   factValue,
   source = "user_provided",
+  reconfirm = false,
   occurredAt = nowIso()
 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
@@ -470,7 +520,7 @@ function recordCandidateFactValue(db, {
   return immediateTransaction(db, () => {
     const current = db.prepare(`SELECT fact_value, source FROM candidate_facts
       WHERE profile_id = ? AND fact_key = ?`).get(profile, key);
-    if (current?.fact_value === value && current?.source === sourceText) {
+    if (!reconfirm && current?.fact_value === value && current?.source === sourceText) {
       return { factKey: key, factValue: value, source: sourceText };
     }
     db.prepare(`INSERT INTO candidate_fact_revisions(
@@ -832,6 +882,7 @@ module.exports = {
   saveMessageReplyDraftEdit,
   completeMessageReplyDraft,
   listCandidateAnswerMemories,
+  getCandidateAnswerMemory,
   getCurrentCandidateAnswerMemory,
   findMessageReplyMemoryByText,
   recordSentMessageReplyDraftWithoutLearning,

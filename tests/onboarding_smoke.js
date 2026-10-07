@@ -598,6 +598,13 @@ const generatedReports = [];
   assert.strictEqual(confirmChanged.status, 303);
   assert.strictEqual(getCandidateMatchingContext(db, profileId)?.matchingCardId, changedCardId);
   assert.strictEqual(getSearchPlanDependency(db, planId).stale, true, "确认新卡后旧方案必须标记为待确认");
+  const changedPlanId = Number(db.prepare("SELECT search_plan_id FROM onboarding_runs WHERE matching_card_id = ? AND profile_id = ? ORDER BY created_at DESC LIMIT 1").get(changedCardId, profileId)?.search_plan_id);
+  assert(changedPlanId && changedPlanId !== planId, "新卡应有独立生成并绑定的新方案");
+  assert.strictEqual(getActiveSearchPlan(db, profileId)?.id, changedPlanId, "确认新卡应激活与该卡精确关联的新方案");
+  assert.strictEqual(getSearchPlanDependency(db, changedPlanId).stale, false);
+  const changedPlanScan = runCliScan(changedPlanId);
+  assert.strictEqual(changedPlanScan.status, 0, changedPlanScan.stderr || changedPlanScan.stdout);
+  collectGeneratedReports(changedPlanScan.stdout);
 
   // 已被替换的历史卡：不得重新确认，页面必须标明历史状态而不是冒充当前依据。
   const reconfirmOld = await fetch(`${baseUrl}/api/match-card/confirm`, {
@@ -626,15 +633,14 @@ const generatedReports = [];
   assert.notStrictEqual(staleRescore.status, 0, "stale 方案必须拒绝重算");
   assert(`${staleRescore.stderr}\n${staleRescore.stdout}`.includes("画像已更新"), "stale 重算的失败原因必须与扫描一致");
 
-  // 已有 confirmed 卡时，即使活动方案已 stale，新上传也只产生草稿：
-  // 不自动停用、替换或重绑该方案；确认新卡后仍 stale，直到用户明确保存。
+  // 新上传只生成草稿与待确认方案：确认之前继续使用当前已确认方案。
   const thirdUpload = await uploadResumeText(baseUrl, `${sampleResumeText}\n第三版：增加 SecretThirdSkill 与会员增长复盘。`, profileId);
   assert.strictEqual(thirdUpload.status, 303);
   const thirdLocation = thirdUpload.headers.get("location");
   assert(thirdLocation?.startsWith(`/match-card?profileId=${profileId}`), `third upload must open a new draft card, got ${thirdLocation}`);
   const thirdCardId = Number(new URL(`${baseUrl}${thirdLocation}`).searchParams.get("cardId"));
   assert(thirdCardId && thirdCardId !== changedCardId, "第三份不同简历必须产生新草稿卡");
-  assert.strictEqual(getActiveSearchPlan(db, profileId)?.id, planId, "stale 活动方案不得被新草稿自动替换");
+  assert.strictEqual(getActiveSearchPlan(db, profileId)?.id, changedPlanId, "新草稿不得替换当前已确认卡的活动方案");
   assert.strictEqual(getSearchPlanDependency(db, planId).stale, true, "stale 方案在新草稿后继续保持 stale");
   const thirdCard = listMatchingCards(db, profileId).find((card) => card.id === thirdCardId);
   assert(!listMatchingResumeVersions(db, profileId).some((version) => Number(version.resumeDocumentId) === Number(thirdCard?.resumeDocumentId)), "第三版草稿卡绑定的简历版本同样不得进入匹配输入");
@@ -648,6 +654,9 @@ const generatedReports = [];
   assert.strictEqual(confirmThird.status, 303);
   assert.strictEqual(getActiveMatchingCard(db, profileId)?.id, thirdCardId);
   assert.strictEqual(getSearchPlanDependency(db, planId).stale, true, "确认第三张卡后旧方案仍 stale，必须用户明确保存");
+  const thirdPlanId = Number(db.prepare("SELECT search_plan_id FROM onboarding_runs WHERE matching_card_id = ? AND profile_id = ? ORDER BY created_at DESC LIMIT 1").get(thirdCardId, profileId)?.search_plan_id);
+  assert.strictEqual(getActiveSearchPlan(db, profileId)?.id, thirdPlanId);
+  assert.strictEqual(getSearchPlanDependency(db, thirdPlanId).stale, false);
 
   const resaved = await fetch(`${baseUrl}/api/plan`, {
     method: "POST",

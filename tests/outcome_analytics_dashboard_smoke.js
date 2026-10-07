@@ -331,8 +331,9 @@ function assertAnalyticsPanelPlacement(body, label) {
   const jobCards = body.indexOf('<article class="job">');
   assert(counters >= 0, `${label} retains the queue counters marker`);
   assert(panel > counters, `${label} follows the queue counters`);
-  assert(retryControls > panel, `${label} precedes retry controls`);
-  assert(jobCards > panel, `${label} precedes job cards`);
+  assert(retryControls < panel, `${label} follows retry controls`);
+  assert(jobCards < panel, `${label} follows job cards so the user sees jobs first`);
+  assert(body.includes('<details class="job-statistics"><summary>'), `${label} is available on demand`);
 }
 
 function escapeRegExp(value) {

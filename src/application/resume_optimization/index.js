@@ -6,7 +6,7 @@ const { selectRelevantCandidateMaterial } = require('../../core/candidate_eviden
 const { mergeCandidateFacts, currentCandidateMaterial, factStatus } = require('../../core/candidate_fact_policy');
 const { listDecisionPool, listJobIdentities, listJobSummaries } = require("../../storage/job_store");
 const { createResumeOptimization, getResumeOptimization, listResumeOptimizations,
-  saveResumeOptimizationDraft, activateResumeOptimization, findEditableResumeCopy } = require("../../storage/resume_optimization_store");
+  saveResumeOptimizationDraft, activateResumeOptimization, findEditableResumeCopy, findResumeOptimizationOperation } = require("../../storage/resume_optimization_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   buildResumeEvidenceCatalog,
@@ -17,6 +17,8 @@ const {
   selectRepresentativeResumeJobs
 } = require("../../core/resume_optimization");
 const { createFunnelAnalysisService } = require("../funnel_analysis");
+const { createHash } = require('node:crypto');
+const draftFlights = new WeakMap();
 
 function createResumeOptimizationService({ db, adapter = null, funnelAnalysisService = null } = {}) {
   if (!db) throw new Error("resume optimization service requires db");
@@ -26,13 +28,49 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     createDraft,
     copyDraft,
     getDraft,
+    getOperation,
     listDrafts,
     saveDraft,
     activateDraft,
     dashboard
   });
 
+  function getOperation(input = {}) {
+    const profileId = requiredId(input.profileId, 'profileId');
+    const plan = ownedPlan(profileId, input.planId);
+    const operationId = String(input.operationId || '').trim();
+    if (!operationId || operationId.length > 128) throw serviceError('GENERATION_OPERATION_INVALID', '生成操作编号无效，请重新打开页面。');
+    const result = findResumeOptimizationOperation(db, { profileId, planId: plan.id, operationId });
+    return { saved: Boolean(result), resultId: result?.id || null };
+  }
+
   async function createDraft(input = {}) {
+    const { operationId, ...parameters } = input;
+    const inputHash = createHash('sha256').update(JSON.stringify(parameters, (_, value) =>
+      value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest('hex');
+    if (operationId !== undefined && (!String(operationId).trim() || String(operationId).length > 128)) throw serviceError('GENERATION_OPERATION_INVALID', '生成操作编号无效，请重新打开页面。');
+    const profileId = requiredId(input.profileId, 'profileId');
+    const planId = requiredId(input.planId, 'planId');
+    if (operationId) {
+      const prior = findResumeOptimizationOperation(db, { profileId, planId, operationId });
+      if (prior) {
+        if (prior.modelIdentity.operationInputHash !== inputHash) throw serviceError('GENERATION_OPERATION_MISMATCH', '本次生成的输入已改变，请重新发起生成。');
+        return prior;
+      }
+    }
+    if (!draftFlights.has(db)) draftFlights.set(db, new Map());
+    const flights = draftFlights.get(db), key = `${profileId}:${planId}:${operationId || inputHash}`;
+    const active = flights.get(key);
+    if (active) {
+      if (active.inputHash !== inputHash) throw serviceError('GENERATION_OPERATION_MISMATCH', '本次生成的输入已改变，请重新发起生成。');
+      return active.promise;
+    }
+    const promise = Promise.resolve().then(() => generateDraft(input, { operationId: operationId ? String(operationId) : null, operationInputHash: inputHash }));
+    flights.set(key, { inputHash, promise });
+    try { return await promise; } finally { if (flights.get(key)?.promise === promise) flights.delete(key); }
+  }
+
+  async function generateDraft(input, operationIdentity) {
     const profileId = requiredId(input.profileId, "profileId");
     const plan = ownedPlan(profileId, input.planId);
     const source = ownedSource(profileId, input.sourceResumeVersionId);
@@ -128,6 +166,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       suggestions: validated.suggestions,
       generatedText,
       modelIdentity: {
+        ...operationIdentity,
         provider: String(adapter.provider || "unknown"),
         model: String(adapter.model || "")
       }
@@ -144,12 +183,13 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     }
     const existing = findEditableResumeCopy(db, { profileId: owned.profileId, planId: plan.id, draftId: owned.id });
     if (existing) return existing;
+    const { operationId, operationInputHash, ...modelIdentity } = owned.modelIdentity;
     return createResumeOptimization(db, {
       profileId: owned.profileId, planId: plan.id, sourceResumeVersionId: owned.sourceResumeVersionId,
       mode: owned.mode, targetDirection: owned.targetDirection, targetJobIds: owned.targetJobIds,
       generatedText: owned.generatedText, finalText: owned.finalText,
       headline: owned.headline, suggestions: owned.changeLedger, evidenceCatalog: owned.evidenceCatalog,
-      modelIdentity: { ...owned.modelIdentity, copiedFromDraftId: owned.id }
+      modelIdentity: { ...modelIdentity, copiedFromDraftId: owned.id }
     });
   }
 
@@ -164,7 +204,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
     return listResumeOptimizations(db, requiredId(profileId, "profileId"), limit);
   }
 
-  function saveDraft({ profileId, planId, draftId, optimizationId, finalText } = {}) {
+  function saveDraft({ profileId, planId, draftId, optimizationId, finalText, expectedRevision, baseText } = {}) {
     const owned = getDraft({ profileId, draftId: draftId || optimizationId });
     if (!owned) throw serviceError("RESUME_OPTIMIZATION_NOT_FOUND", "定向简历草稿不存在");
     const plan = ownedPlan(owned.profileId, planId);
@@ -176,17 +216,23 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       profileId: owned.profileId,
       planId: plan.id,
       optimizationId: owned.id,
-      finalText
+      finalText, expectedRevision, baseText
     });
     return { ...saved, integrity: integrityFor(saved, saved.finalText) };
   }
 
-  function activateDraft({ profileId, planId, draftId, optimizationId, finalText } = {}) {
+  function activateDraft({ profileId, planId, draftId, optimizationId, finalText, expectedRevision, baseText } = {}) {
     const owned = getDraft({ profileId, draftId: draftId || optimizationId });
     if (!owned) throw serviceError("RESUME_OPTIMIZATION_NOT_FOUND", "定向简历草稿不存在");
     const plan = ownedPlan(owned.profileId, planId);
     if (owned.planId !== plan.id) {
       throw serviceError("RESUME_OPTIMIZATION_PLAN_MISMATCH", "这份定向简历不属于当前投递方案，请返回原方案启用");
+    }
+    if (owned.status === 'draft' && ((expectedRevision !== undefined && String(expectedRevision) !== owned.revision)
+      || (baseText !== undefined && String(baseText) !== owned.finalText))) {
+      const conflict = serviceError('RESUME_OPTIMIZATION_REVISION_CONFLICT', '这份简历已在其他页面更新。本页修改仍保留，请先查看最新版本，再合并修改。');
+      conflict.statusCode = 409;
+      throw conflict;
     }
     let integrity = null;
     if (owned.status === "draft") {
@@ -202,6 +248,7 @@ function createResumeOptimizationService({ db, adapter = null, funnelAnalysisSer
       planId: plan.id,
       optimizationId: owned.id,
       finalText,
+      expectedRevision, baseText,
       version: {
         name: owned.mode === 'general' ? '通用整理版' : owned.targetDirection ? `${owned.targetDirection}定向版` : "定向简历",
         targetRoles: owned.targetDirection ? [owned.targetDirection] : [],

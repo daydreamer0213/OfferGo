@@ -28,13 +28,15 @@ async function runMessageReplySendBatch({
   sleepFn = sleep,
   randomFn = Math.random,
   signal = null,
-  logger = null
+  logger = null,
+  now = () => new Date()
 } = {}) {
   assertDependencies({ db, sender, accessController, onVerifiedSuccess, sleepFn });
   const batch = positiveInteger(batchId, "batchId");
   const owner = db.prepare("SELECT profile_id FROM message_reply_send_batches WHERE id = ?").get(batch);
   if (!owner) throw executorError("MESSAGE_REPLY_SEND_BATCH_NOT_FOUND", "message reply send batch was not found");
   const profileId = Number(owner.profile_id);
+  const check = (input) => checkpoint(db, { ...input, now: now() });
   let snapshot = loadReplySendBatch(db, { profileId, batchId: batch });
   if (TERMINAL_BATCH_STATUSES.has(snapshot.batch.status)) return publicReplySendBatch(snapshot);
   if (snapshot.batch.status === "running") {
@@ -57,12 +59,12 @@ async function runMessageReplySendBatch({
     let preparation = null;
     let durableClick = false;
     try {
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal });
+      await check({ profileId, batchId: batch, itemId, signal });
       transitionReplySendItem(db, {
         profileId, batchId: batch, itemId,
         expectedStatus: "pending", status: "selecting"
       });
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
       const current = currentItem(db, { profileId, batchId: batch, itemId });
       await accessController.reserve("message_reply_send", {
         batchId: batch,
@@ -70,33 +72,33 @@ async function runMessageReplySendBatch({
         jobId: current.jobId
       });
 
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
       const inspection = await sender.inspectReplyTarget(current, signal);
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "selecting" });
       transitionReplySendItem(db, {
         profileId, batchId: batch, itemId,
         expectedStatus: "selecting", status: "verified"
       });
 
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "verified" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "verified" });
       preparation = await sender.fillReply(inspection, current.replyText, signal);
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "verified" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "verified" });
       transitionReplySendItem(db, {
         profileId, batchId: batch, itemId,
         expectedStatus: "verified", status: "filled"
       });
 
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "filled" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "filled" });
       transitionReplySendItem(db, {
         profileId, batchId: batch, itemId,
         expectedStatus: "filled", status: "click_dispatched", clickCount: 1
       });
       durableClick = true;
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
       await sender.dispatchReply(preparation, signal);
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
       const outcome = normalizeOutcome(await sender.verifyReplyResult(preparation, signal));
-      await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
+      await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
 
       if (outcome.state !== "succeeded") {
         const terminalStatus = outcome.state === "platform_rejected" ? "platform_rejected" : "ambiguous";
@@ -116,8 +118,8 @@ async function runMessageReplySendBatch({
       }
 
       try {
-        await checkpoint(db, { profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
-        await onVerifiedSuccess({ batchId: batch, itemId });
+        await check({ profileId, batchId: batch, itemId, signal, expectedItemStatus: "click_dispatched" });
+        await onVerifiedSuccess({ batchId: batch, itemId, evidence: outcome.evidence });
       } catch (error) {
         markDispatchedAmbiguousIfNeeded(db, {
           profileId, batchId: batch, itemId,
@@ -151,9 +153,9 @@ async function runMessageReplySendBatch({
 
       logger?.info("message_reply_send_item_succeeded", { batchId: batch, itemId, position });
       if (position + 1 < snapshot.items.length) {
-        await checkpoint(db, { profileId, batchId: batch, signal });
+        await check({ profileId, batchId: batch, signal });
         await sleepFn(interItemDelay(randomFn), signal);
-        await checkpoint(db, { profileId, batchId: batch, signal });
+        await check({ profileId, batchId: batch, signal });
       }
     } catch (error) {
       if (error instanceof TerminalBatchSignal) {
@@ -222,15 +224,15 @@ function normalizeStaleRun(db, { profileId, batchId, snapshot, logger }) {
   });
 }
 
-async function checkpoint(db, { profileId, batchId, itemId = null, signal, expectedItemStatus = null }) {
+async function checkpoint(db, { profileId, batchId, itemId = null, signal, expectedItemStatus = null, now }) {
   if (signal?.aborted) throw signal.reason || executorError("MESSAGE_REPLY_SEND_ABORTED", "message reply send was aborted");
-  const snapshot = loadReplySendBatch(db, { profileId, batchId });
+  const snapshot = loadReplySendBatch(db, { profileId, batchId, checkReplyWindowItemId: itemId, now });
   if (snapshot.batch.status !== "running") {
     throw new TerminalBatchSignal(publicReplySendBatch(snapshot));
   }
-  if (itemId !== null && expectedItemStatus !== null) {
+  if (itemId !== null) {
     const item = snapshot.items.find((entry) => entry.id === itemId);
-    if (!item || item.status !== expectedItemStatus) {
+    if (!item || (expectedItemStatus !== null && item.status !== expectedItemStatus)) {
       throw executorError("MESSAGE_REPLY_SEND_CONTROL_CHANGED", "message reply send item changed concurrently");
     }
   }

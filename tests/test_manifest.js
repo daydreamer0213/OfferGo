@@ -1,4 +1,9 @@
 const all = Object.freeze([
+  "generation_operation_smoke.js",
+  "message_learning_audit_regression.js",
+  "dashboard_generation_audit_journey.js",
+  "dashboard_audit_repairs_journey.js",
+  "dashboard_learning_audit_journey.js",
   "candidate_learning_journey.js",
   "three_module_user_experience_journey.js",
   "dashboard_resume_edit_journey.js",
@@ -58,6 +63,7 @@ const all = Object.freeze([
   "message_inbox_store_smoke.js",
   "message_timeline_store_smoke.js",
   "message_reply_send_store_smoke.js",
+  "message_reply_expiry_smoke.js",
   "message_reply_send_service_smoke.js",
   "message_reply_send_executor_smoke.js",
   "boss_message_reply_sender_smoke.js",
@@ -146,6 +152,8 @@ const all = Object.freeze([
   "model_task_profiles_smoke.js",
   "model_settings_ui_smoke.js",
   "onboarding_run_smoke.js",
+  "profile_matching_source_regressions.js",
+  "onboarding_version_consistency_smoke.js",
   "initial_search_page_smoke.js",
   "onboarding_progress_ui_smoke.js",
   "onboarding_cli_smoke.js",
@@ -190,6 +198,8 @@ const all = Object.freeze([
 
 const groups = Object.freeze({
   fast: Object.freeze([
+  "generation_operation_smoke.js",
+  "message_learning_audit_regression.js",
   "candidate_evidence_smoke.js",
   "storage_boundary_smoke.js",
   "architecture_boundaries_smoke.js",
@@ -230,6 +240,9 @@ const groups = Object.freeze({
   "activity_status_smoke.js"
 ]),
   integration: Object.freeze([
+  "dashboard_learning_audit_journey.js",
+  "dashboard_generation_audit_journey.js",
+  "dashboard_audit_repairs_journey.js",
   "candidate_learning_journey.js",
   "three_module_user_experience_journey.js",
   "dashboard_resume_edit_journey.js",
@@ -273,6 +286,7 @@ const groups = Object.freeze({
   "message_inbox_store_smoke.js",
   "message_timeline_store_smoke.js",
   "message_reply_send_store_smoke.js",
+  "message_reply_expiry_smoke.js",
   "message_reply_send_service_smoke.js",
   "message_reply_send_executor_smoke.js",
   "boss_message_reply_sender_smoke.js",
@@ -344,6 +358,8 @@ const groups = Object.freeze({
   "model_task_profiles_smoke.js",
   "model_settings_ui_smoke.js",
   "onboarding_run_smoke.js",
+  "profile_matching_source_regressions.js",
+  "onboarding_version_consistency_smoke.js",
   "initial_search_page_smoke.js",
   "onboarding_progress_ui_smoke.js",
   "onboarding_cli_smoke.js",

@@ -57,6 +57,7 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
       if (result.scopeChange) {
         return sendHtml(res, renderWorkflowScopeChoicePage({
           workflowRunId,
+          site: result.workflow?.site,
           browserMode: params.browserMode,
           cdpPort: params.cdpPort,
           expectedScopeToken: result.scopeChange.expectedScopeToken
@@ -124,11 +125,12 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
   }
 }
 
-function renderWorkflowScopeChoicePage({ workflowRunId, browserMode, cdpPort, expectedScopeToken }) {
+function renderWorkflowScopeChoicePage({ workflowRunId, browserMode, cdpPort, expectedScopeToken, site = "boss" }) {
+  const platformName = site === "zhaopin" ? "智联" : " BOSS ";
   const identity = `<input type="hidden" name="workflowRunId" value="${escapeAttr(workflowRunId)}"><input type="hidden" name="browserMode" value="${escapeAttr(browserMode)}">${cdpPort ? `<input type="hidden" name="cdpPort" value="${Number(cdpPort)}">` : ""}`;
   return renderPage({
     title: "搜索条件已经变化",
-    body: `<main><h1>搜索条件已经变化</h1><section class="panel"><p>本轮开始时的条件与当前 BOSS 搜索页不同。旧结果不会与新结果混合。</p><div class="workflow-actions"><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="new"><input type="hidden" name="expectedScopeToken" value="${escapeAttr(expectedScopeToken)}"><button data-workflow-primary="true">按新条件重新开始本轮</button></form><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="original"><button class="secondary">继续开始时的条件</button></form><a class="button-link" href="/workflow?runId=${encodeURIComponent(workflowRunId)}">返回本轮</a></div></section></main>`
+    body: `<main><h1>搜索条件已经变化</h1><section class="panel"><p>本轮开始时的条件与当前${platformName}搜索页不同。旧结果不会与新结果混合。</p><div class="workflow-actions"><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="new"><input type="hidden" name="expectedScopeToken" value="${escapeAttr(expectedScopeToken)}"><button data-workflow-primary="true">按新条件重新开始本轮</button></form><form method="post" action="/api/workflow-run/resume">${identity}<input type="hidden" name="scopeChoice" value="original"><button class="secondary">继续开始时的条件</button></form><a class="button-link" href="/workflow?runId=${encodeURIComponent(workflowRunId)}">返回本轮</a></div></section></main>`
   });
 }
 

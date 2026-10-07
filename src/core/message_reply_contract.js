@@ -87,7 +87,7 @@ function validateMessageReply(value, context = {}) {
       : normalized.messages;
   return {
     ...normalized,
-    messageSummary: safeMessageSummary(normalized.messageIntent, normalized.messageCategory),
+    messageSummary: safeMessageSummary(normalized, context),
     messages,
     progressUpdate: {
       stage: safeStage,
@@ -118,7 +118,7 @@ function normalizeReply(value) {
     }
     const id = String(item.id || "").trim();
     const kind = String(item.kind || "").trim();
-    if (!id || !["question", "statement"].includes(kind)) {
+    if ((!isKnownFactKey(id) && !/^[a-z][a-z0-9_.-]{0,79}$/i.test(id)) || !["question", "statement"].includes(kind)) {
       throw contractError("MESSAGE_REPLY_INVALID", `response item ${index} is invalid`);
     }
     return { id, kind, required: Boolean(item.required) };
@@ -207,11 +207,12 @@ function assertKnownFactKeys(normalized, facts, now) {
   const unansweredKey = normalized.missingFact?.key;
   const canAskForUnansweredKey = !normalized.messages.length
     && normalized.requiredFactKeys.includes(unansweredKey)
-    && normalized.responseItems.some((item) => item.id === unansweredKey);
+    && normalized.responseItems.some((item) => item.required && normalized.coverage.some(
+      (entry) => entry.responseItemId === item.id && !entry.covered));
+  // Response item IDs name HR questions; only fact key fields claim candidate facts.
   const ids = [
     ...normalized.requiredFactKeys,
     ...normalized.usedFactKeys,
-    ...normalized.responseItems.map((item) => item.id),
     ...(normalized.missingFact ? [normalized.missingFact.key] : [])
   ];
   for (const id of ids) {
@@ -296,18 +297,22 @@ function assertDraftDoesNotDuplicateAction(messages, requestedActions) {
   }
 }
 
-function safeMessageSummary(messageIntent, messageCategory) {
+function safeMessageSummary(normalized, context) {
+  const { messageIntent, messageCategory, messageSummary } = normalized;
+  if (messageIntent === "rejection") return "招聘方已明确结束本次机会。";
+  const sourceMessages = Array.isArray(context.sourceMessages) ? context.sourceMessages : [];
+  const repeatsSource = sourceMessages.some((text) => String(text || '').replace(/\s+/g, ' ').trim() === messageSummary);
+  if (!repeatsSource) return messageSummary;
   if (messageIntent === "interview_invitation") return "对方正式邀请候选人参加面试。";
   if (messageIntent === "interest_check") return "对方正在询问候选人是否愿意了解或继续沟通该岗位。";
   if (messageIntent === "information_update") return "对方正在补充当前岗位、项目或流程信息。";
   if (messageIntent === "general_communication") return "对方正在进行普通沟通。";
-  if (messageIntent === "rejection") return "招聘方已明确结束本次机会。";
   if (messageIntent === "manual_review") return "这条消息暂时无法可靠判断，需要人工确认。";
   return {
     project_fact: "对方正在确认候选人的项目经历。",
     qualification: "对方正在确认候选人的任职资格。",
     salary: "对方正在沟通薪资信息。",
-    availability: "对方正在确认候选人的到岗时间。",
+    availability: "对方正在确认候选人的工作状态、时间或安排。",
     sensitive: "对方正在询问敏感个人信息。",
     identity_uncertain: "当前消息对应的岗位身份仍不明确。",
     other: "对方正在确认候选人的相关信息。"

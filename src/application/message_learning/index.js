@@ -1,14 +1,14 @@
 const { getMessageReplyDraft, saveMessageReplyDraftEdit, completeMessageReplyDraft,
-  listCandidateAnswerMemories, getCurrentCandidateAnswerMemory,
+  listCandidateAnswerMemories, getCandidateAnswerMemory, getCurrentCandidateAnswerMemory,
   findMessageReplyMemoryByText, recordSentMessageReplyDraftWithoutLearning,
   reviseCandidateAnswerMemory, withdrawCandidateAnswerMemory,
   setCandidateAnswerMemoryScope,
-  listCandidateFactRevisions, deleteCandidateFact, getMessageReplyLearningStatus,
+  listCandidateFactRevisions, recordCandidateFactValue, deleteCandidateFact, getMessageReplyLearningStatus,
   listPendingMessageReplyLearning, recordMessageReplyLearningStatus,
   applyMessageReplyLearning } = require("../../storage/message_learning_store");
-const { saveCandidateFact, listCandidateFacts } = require("../../storage/candidate_store");
+const { listCandidateFacts } = require("../../storage/candidate_store");
 const { listCandidateEvidence, saveCandidateEvidence, reviseCandidateEvidence, withdrawCandidateEvidence } = require("../../storage/candidate_evidence_store");
-const { mergeCandidateFacts } = require('../../core/candidate_fact_policy');
+const { mergeCandidateFacts, factStatus, currentCandidateMaterial, applySourceEvidenceUpdates } = require('../../core/candidate_fact_policy');
 const {
   replyDraftDigest,
   replyDraftWasEdited,
@@ -40,29 +40,37 @@ function createMessageReplyLearningService({
     withdrawEvidence: input => withdrawCandidateEvidence(db, input)
   };
 
-  function saveDraft({ profileId, draftId, text }) {
+  function saveDraft({ profileId, draftId, text, expectedRevision }) {
     return saveMessageReplyDraftEdit(db, {
       profileId,
       draftId,
       text,
+      expectedRevision,
       updatedAt: nowIso(now())
     });
   }
 
-  async function completeDraft({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) {
+  async function completeDraft({ profileId, draftId, finalText, completionKind, completionKey, afterComplete, expectedRevision, deferLearning = false }) {
+    if (completionKind === 'sent' && deferLearning) {
+      return completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete, expectedRevision, deferLearning });
+    }
     const flightKey = `${profileId}:${draftId}:${replyDraftDigest(finalText)}`;
     if (inFlight.has(flightKey)) {
       const prior = await inFlight.get(flightKey);
       return completionKind === "sent"
-        ? completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) : prior;
+        ? completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete, expectedRevision, deferLearning }) : prior;
     }
-    const task = completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete });
+    const task = completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete, expectedRevision, deferLearning });
     inFlight.set(flightKey, task);
     try { return await task; } finally { inFlight.delete(flightKey); }
   }
 
-  async function completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete }) {
+  async function completeDraftOnce({ profileId, draftId, finalText, completionKind, completionKey, afterComplete, expectedRevision, deferLearning }) {
     const draft = requiredDraft(profileId, draftId);
+    if (completionKind === 'copied' && expectedRevision !== undefined && expectedRevision !== null
+      && (!Number.isSafeInteger(Number(expectedRevision)) || Number(expectedRevision) !== draft.revision)) {
+      throw serviceError('MESSAGE_REPLY_DRAFT_CONFLICT', '草稿已在另一个页面修改，本页输入已保留，请复制后查看最新草稿。');
+    }
     const existing = findMessageReplyMemoryByText(db, { profileId, draftId, finalText });
     if (existing) {
       const current = getCurrentCandidateAnswerMemory(db, { profileId, memoryId: existing.id });
@@ -87,15 +95,25 @@ function createMessageReplyLearningService({
     if (draft.closedAt) {
       throw serviceError("MESSAGE_REPLY_DRAFT_CLOSED", "message reply draft is already closed");
     }
-    const initialCurrent = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
-      .find(memory => memory.draftId === draft.id);
+    const initialCurrent = listCandidateAnswerMemories(db, { profileId, draftId: draft.id, activeOnly: true, limit: 1 })[0];
     const changed = replyDraftWasEdited(draft.originalText, finalText);
     const changedText = changed ? deriveUserChangedText(draft.originalText, finalText) : "";
+    // The verified platform result is committed with the draft before any
+    // optional model extraction. Existing retryLearning performs the supplement.
+    if (completionKind === 'sent' && deferLearning) {
+      const status = changed ? 'unavailable' : 'not_needed';
+      const memory = completeMessageReplyDraft(db, { profileId, draftId, finalText, changedText,
+        completionKind, scope: defaultScope(draft), extractedFacts: [], completedAt: nowIso(now()),
+        afterComplete: item => {
+          recordMessageReplyLearningStatus(db, { profileId, memoryId:item.id, status, at:nowIso(now()) });
+          afterComplete?.(item);
+        } });
+      return completionResult(memory, requiredDraft(profileId,draftId), 0, status);
+    }
     const extraction = changed
       ? await extractFacts({ draft, finalText, changedText })
       : { scope: { kind: "global", key: "" }, facts: [], status: "not_needed" };
-    const currentAfterExtraction = listCandidateAnswerMemories(db, { profileId, activeOnly: true, limit: 500 })
-      .find(memory => memory.draftId === draft.id);
+    const currentAfterExtraction = listCandidateAnswerMemories(db, { profileId, draftId: draft.id, activeOnly: true, limit: 1 })[0];
     const matchedAfterExtraction = findMessageReplyMemoryByText(db, { profileId, draftId, finalText });
     if (completionKind === "sent" && matchedAfterExtraction?.withdrawnAt) {
       return sentWithoutLearning({ draft, profileId, draftId, finalText, afterComplete,
@@ -131,6 +149,7 @@ function createMessageReplyLearningService({
       finalText,
       changedText,
       completionKind,
+      expectedRevision,
       afterComplete: memory => {
         saveReplyExperiences(memory, draft, extraction.experiences || []);
         afterComplete?.(memory);
@@ -179,8 +198,11 @@ function createMessageReplyLearningService({
     const draft = requiredDraft(profileId, current.draftId);
     const confirmedExperiences = listCandidateEvidence(db, { profileId }).filter(entry =>
       entry.sourceKind === 'manual' && entry.sourceId === `reply-edit:${current.id}`);
-    const extraction = await extractFacts({ draft, finalText: current.finalText,
-      changedText: current.changedText, confirmedExperiences });
+    const currentProjection = listCandidateAnswerMemories(db, { profileId, draftId: current.draftId,
+      activeOnly: true, source: 'user_edited_reply', limit: 1 })[0];
+    const effectiveText = applySourceEvidenceUpdates(current.finalText, currentProjection?.sourceEvidenceUpdates);
+    const extraction = await extractFacts({ draft, finalText: effectiveText,
+      changedText: deriveUserChangedText(draft.originalText, effectiveText), confirmedExperiences });
     const stillCurrent = Boolean(getCurrentCandidateAnswerMemory(db, { profileId, memoryId: current.id }));
     if (!stillCurrent || getMessageReplyLearningStatus(db, { profileId, memoryId: current.id })?.status === "succeeded") {
       throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory changed during learning");
@@ -205,7 +227,7 @@ function createMessageReplyLearningService({
         saveReplyExperiences(item, draft,
           [...retained, ...(extraction.experiences || []).filter(entry =>
             !withdrawnDuringExtraction.has(entry.sourceQuote))].filter((entry, index, entries) =>
-            entries.findIndex(other => other.sourceQuote === entry.sourceQuote) === index));
+            entries.findIndex(other => other.sourceQuote === entry.sourceQuote || other.text === entry.text) === index));
       } });
     if (!memory) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory changed during learning");
     return completionResult(memory, draft, extraction.facts.length, "succeeded");
@@ -219,25 +241,26 @@ function createMessageReplyLearningService({
     return result;
   }
 
-  function listCommunicationProfile({ profileId }) {
+  function listCommunicationProfile({ profileId, answerPage = 1, answerQuery = '' }) {
     const evidence = listCandidateEvidence(db, { profileId });
     const revisions = listCandidateFactRevisions(db, { profileId, limit: 2000 });
+    const page = Number.isSafeInteger(Number(answerPage)) && Number(answerPage) > 0 ? Number(answerPage) : 1;
+    const pageSize = 50;
+    const query = String(answerQuery || '').trim().slice(0,160);
+    const answers = listCandidateAnswerMemories(db, { profileId, activeOnly: true,
+      source: 'user_edited_reply', limit: pageSize + 1, offset: (page - 1) * pageSize, search: query });
     return {
-      facts: mergeCandidateFacts(listCandidateFacts(db, profileId), evidence, { factRevisions: revisions }),
+      facts: mergeCandidateFacts(listCandidateFacts(db, profileId), evidence, { factRevisions: revisions })
+        .map(fact => ({ ...fact, confirmation: factStatus(nowIso(now()), { ...fact, key: fact.factKey }) })),
       evidence,
-      answers: listCandidateAnswerMemories(db, {
-        profileId,
-        activeOnly: true,
-        source: "user_edited_reply",
-        limit: 100
-      }).map(memory => ({ ...memory, learning: getMessageReplyLearningStatus(db, { profileId, memoryId: memory.id }) })),
+      answers: answers.slice(0,pageSize).map(memory => ({ ...memory, learning: getMessageReplyLearningStatus(db, { profileId, memoryId: memory.id }) })),
+      answerPage: { page, query, hasPrevious: page > 1, hasNext: answers.length > pageSize },
       revisions
     };
   }
 
   async function reviseMemory({ profileId, memoryId, finalText }) {
-    const selected = listCandidateAnswerMemories(db, { profileId, activeOnly: false, limit: 500 })
-      .find(memory => memory.id === Number(memoryId));
+    const selected = getCandidateAnswerMemory(db, { profileId, memoryId });
     if (!selected) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
     const current = getCurrentCandidateAnswerMemory(db, { profileId, memoryId });
     if (!current) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_CURRENT", "answer memory is no longer current");
@@ -286,9 +309,17 @@ function createMessageReplyLearningService({
   }
 
   function withdrawMemory({ profileId, memoryId }) {
-    const memories = listCandidateAnswerMemories(db, { profileId, activeOnly: false, limit: 500 });
-    const selected = memories.find((memory) => memory.id === Number(memoryId));
+    const selected = getCandidateAnswerMemory(db, { profileId, memoryId });
     if (!selected) throw serviceError("CANDIDATE_ANSWER_MEMORY_NOT_FOUND", "candidate answer memory was not found");
+    const memories = [];
+    // Read the entire selected answer's history before changing its ordering.
+    // The model's global 500-memory retrieval budget remains unchanged.
+    for (let offset = 0;; offset += 500) {
+      const page = listCandidateAnswerMemories(db, { profileId, draftId: selected.draftId,
+        activeOnly: false, limit: 500, offset });
+      memories.push(...page);
+      if (page.length < 500) break;
+    }
     const withdrawnAt = nowIso(now());
     let result = selected;
     for (const memory of memories.filter((item) => item.draftId === selected.draftId && !item.withdrawnAt)) {
@@ -303,7 +334,8 @@ function createMessageReplyLearningService({
   }
 
   function saveFact({ profileId, factKey, factValue }) {
-    return saveCandidateFact(db, { profileId, factKey, factValue, source: "user_provided" });
+    return recordCandidateFactValue(db, { profileId, factKey, factValue, source: "user_provided",
+      reconfirm: true, occurredAt: nowIso(now()) });
   }
 
   function deleteFact({ profileId, factKey }) {
@@ -326,7 +358,7 @@ function createMessageReplyLearningService({
         originalText: draft.originalText,
         finalText: String(finalText || "").trim().slice(0, 4000),
         changedText,
-        confirmedExperiences,
+        confirmedExperiences: currentCandidateMaterial(confirmedExperiences, { now: nowIso(now()) }),
         questionSummary: draft.questionSummary,
         messageIntent: draft.messageIntent,
         messageCategory: draft.messageCategory,
@@ -359,8 +391,7 @@ function createMessageReplyLearningService({
   }
 
   function saveReplyExperiences(memory, draft, experiences) {
-    const previous = listCandidateAnswerMemories(db, { profileId: memory.profileId, activeOnly: false, limit: 500 })
-      .filter(item => item.draftId === draft.id);
+    const previous = listCandidateAnswerMemories(db, { profileId: memory.profileId, draftId: draft.id, activeOnly: false, limit: 500 });
     withdrawReplyExperiences(memory.profileId, new Set(previous.map(item => `reply-edit:${item.id}`)));
     experiences.forEach((entry, index) => saveCandidateEvidence(db, {
       ...entry, profileId: memory.profileId, sourceKind: 'manual', sourceId: `reply-edit:${memory.id}`,

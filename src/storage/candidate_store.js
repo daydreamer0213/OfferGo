@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const { nowIso, parseJson } = require("./storage_shared");
 const { normalizeMatchingCard, matchingCardRevision } = require("../core/matching_card");
-const { maskResumeContacts, maskResumeFileName, maskResumeDiagnostics } = require("../core/resume_privacy");
+const { maskResumeContacts, maskResumeFileName, maskResumeDiagnostics, prepareResumeTextForModel } = require("../core/resume_privacy");
 const { canonicalSearchPlanV2 } = require("../core/search_plan_schema");
 const { recordCandidateFactValue, listCandidateFacts } = require("./message_learning_store");
 
@@ -123,20 +123,31 @@ function stringList(value, limit) {
   return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
 }
 
-function saveSearchPlan(db, { id = null, profileId, profileVersionId = null, plan, now = nowIso() }) {
+function saveSearchPlan(db, { id = null, profileId, profileVersionId = null, plan, activate = true, now = nowIso() }) {
   const persistedPlan = canonicalSearchPlanV2(plan || {});
   const name = persistedPlan.name;
   const currentId = Number(id || 0);
   const boundProfileVersionId = Number(profileVersionId || getLatestProfileVersionId(db, profileId) || 0) || null;
-  db.prepare("UPDATE search_plans SET is_active = 0, updated_at = ? WHERE profile_id = ?").run(now, profileId);
-  if (currentId && db.prepare("SELECT id FROM search_plans WHERE id = ? AND profile_id = ?").get(currentId, profileId)) {
-    db.prepare("UPDATE search_plans SET name = ?, plan_json = ?, profile_version_id = ?, is_active = 1, updated_at = ? WHERE id = ?")
-      .run(name, JSON.stringify(persistedPlan), boundProfileVersionId, now, currentId);
-    return currentId;
+  // A savepoint also works inside the profile-save transaction without committing it.
+  db.exec("SAVEPOINT offergo_search_plan");
+  try {
+    if (activate) db.prepare("UPDATE search_plans SET is_active = 0, updated_at = ? WHERE profile_id = ?").run(now, profileId);
+    if (currentId && db.prepare("SELECT id FROM search_plans WHERE id = ? AND profile_id = ?").get(currentId, profileId)) {
+      db.prepare("UPDATE search_plans SET name = ?, plan_json = ?, profile_version_id = ?, is_active = ?, updated_at = ? WHERE id = ?")
+        .run(name, JSON.stringify(persistedPlan), boundProfileVersionId, Number(Boolean(activate)), now, currentId);
+      db.exec("RELEASE offergo_search_plan");
+      return currentId;
+    }
+    const result = Number(db.prepare(`INSERT INTO search_plans(profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(profileId, name, JSON.stringify(persistedPlan), boundProfileVersionId, Number(Boolean(activate)), now, now).lastInsertRowid);
+    db.exec("RELEASE offergo_search_plan");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK TO offergo_search_plan");
+    db.exec("RELEASE offergo_search_plan");
+    throw error;
   }
-  return Number(db.prepare(`INSERT INTO search_plans(profile_id, name, plan_json, profile_version_id, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 1, ?, ?)`)
-    .run(profileId, name, JSON.stringify(persistedPlan), boundProfileVersionId, now, now).lastInsertRowid);
 }
 
 function getCandidateProfile(db, profileId) {
@@ -437,8 +448,8 @@ function createMatchingCardDraft(db, { profileId, profileVersionId, resumeDocume
   const hash = String(resumeContentHash || "").trim();
   if (!profile || !version || !hash) throw new Error("匹配卡草稿必须包含 profileId、profileVersionId 和 resumeContentHash");
   const existing = db.prepare(`SELECT * FROM candidate_matching_cards
-    WHERE profile_id = ? AND resume_content_hash = ? AND status IN ('draft', 'confirmed')
-    ORDER BY status = 'confirmed' DESC, id DESC LIMIT 1`).get(profile, hash);
+    WHERE profile_id = ? AND profile_version_id = ? AND resume_content_hash = ? AND status IN ('draft', 'confirmed')
+    ORDER BY status = 'confirmed' DESC, id DESC LIMIT 1`).get(profile, version, hash);
   if (existing) return matchingCardRow(existing);
   const normalized = normalizeMatchingCard(card, { source });
   const now = nowIso();
@@ -469,6 +480,18 @@ function confirmMatchingCard(db, { profileId, cardId }) {
     }
     db.prepare("UPDATE candidate_matching_cards SET status = 'superseded', updated_at = ? WHERE profile_id = ? AND status = 'confirmed'").run(now, profile);
     db.prepare("UPDATE candidate_matching_cards SET status = 'confirmed', confirmed_at = ?, updated_at = ? WHERE id = ?").run(now, now, target);
+    const preparedPlan = db.prepare(`SELECT plans.id FROM onboarding_runs runs
+      JOIN search_plans plans ON plans.id = runs.search_plan_id AND plans.profile_id = runs.profile_id
+        AND plans.profile_version_id = runs.profile_version_id
+      JOIN candidate_matching_cards cards ON cards.id = runs.matching_card_id AND cards.profile_id = runs.profile_id
+        AND cards.profile_version_id = runs.profile_version_id
+      WHERE runs.profile_id = ? AND runs.matching_card_id = ?
+        AND runs.status = 'completed' AND runs.stage = 'ready'
+      ORDER BY runs.created_at DESC, runs.id DESC LIMIT 1`).get(profile, target);
+    if (preparedPlan) {
+      db.prepare("UPDATE search_plans SET is_active = 0, updated_at = ? WHERE profile_id = ?").run(now, profile);
+      db.prepare("UPDATE search_plans SET is_active = 1, updated_at = ? WHERE id = ? AND profile_id = ?").run(now, preparedPlan.id, profile);
+    }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -512,12 +535,14 @@ function saveConfirmedMatchingCardRevision(db, { profileId, cardId, card }) {
   }
 }
 
-function getCandidateMatchingContext(db, profileId) {
+function getCandidateMatchingContext(db, profileId, { includeResumeEvidence = false } = {}) {
   const activeCard = getActiveMatchingCard(db, profileId);
   if (!activeCard) return null;
-  const version = db.prepare("SELECT id, profile_json FROM profile_versions WHERE id = ?").get(activeCard.profileVersionId);
+  const version = db.prepare(includeResumeEvidence
+    ? "SELECT id, profile_id, resume_document_id, profile_json FROM profile_versions WHERE id = ?"
+    : "SELECT id, profile_json FROM profile_versions WHERE id = ?").get(activeCard.profileVersionId);
   if (!version) return null;
-  return {
+  const context = {
     matchingCard: activeCard.card,
     matchingCardId: activeCard.id,
     matchingCardRevision: matchingCardRevision(activeCard.card),
@@ -526,6 +551,45 @@ function getCandidateMatchingContext(db, profileId) {
     candidateProfile: parseJson(version.profile_json, {}),
     resumeDocumentId: activeCard.resumeDocumentId
   };
+  if (includeResumeEvidence) recoverMatchingResumeEvidence(db, context, version, activeCard, profileId);
+  return context;
+}
+
+function recoverMatchingResumeEvidence(db, context, version, card, profileId) {
+  const unavailable = (reasonCode) => {
+    context.resumeEvidenceRecovery = { status: "unavailable", reasonCode };
+  };
+  if (Number(version.profile_id) !== Number(profileId)) return unavailable("VERSION_PROFILE_MISMATCH");
+  const profile = context.candidateProfile;
+  if (String(profile.source?.resumeEvidenceText || "").trim()) {
+    context.resumeEvidenceRecovery = { status: "existing", source: "stored_profile" };
+    return;
+  }
+  if (!version.resume_document_id || Number(version.resume_document_id) !== card.resumeDocumentId) {
+    return unavailable("DOCUMENT_BINDING_MISMATCH");
+  }
+  const document = db.prepare("SELECT profile_id, resume_text, original_file_name, content_hash FROM resume_documents WHERE id = ?")
+    .get(Number(version.resume_document_id));
+  if (!document) return unavailable("DOCUMENT_MISSING");
+  if (Number(document.profile_id) !== Number(profileId)) return unavailable("DOCUMENT_PROFILE_MISMATCH");
+  if (!card.resumeContentHash || card.resumeContentHash !== document.content_hash) return unavailable("DOCUMENT_HASH_MISMATCH");
+  if (!String(document.resume_text || "").trim()) return unavailable("DOCUMENT_TEXT_MISSING");
+  const name = String(profile.candidate?.name || "").trim();
+  const knownName = name && !/^(?:候选人|candidate|unknown|匿名)$/i.test(name) && !/已隐藏|已遮盖/.test(name)
+    && String(document.resume_text).normalize("NFKC").toLowerCase().includes(name.normalize("NFKC").toLowerCase());
+  try {
+    const prepared = prepareResumeTextForModel(document.resume_text, {
+      originalFileName: document.original_file_name,
+      identity: { names: knownName ? [name] : [] },
+      strict: true
+    });
+    if (!prepared.redactions.name) return unavailable("RESUME_PRIVACY_REDACTION_FAILED");
+    context.candidateProfile = { ...profile, source: { ...(profile.source || {}), resumeEvidenceText: prepared.text } };
+    context.resumeEvidenceRecovery = { status: "recovered", source: "same_profile_version_document" };
+  } catch (error) {
+    if (error.code !== "RESUME_PRIVACY_REDACTION_FAILED") throw error;
+    unavailable(error.code);
+  }
 }
 
 function compareProfileVersions(db, profileId) {

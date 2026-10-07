@@ -199,4 +199,26 @@ const supportedSolvedProblems = assessMessageDraftQuality({
 });
 assert.equal(supportedSolvedProblems.valid, true, JSON.stringify(supportedSolvedProblems.errors));
 
+const benchmarkEvidence = "在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。";
+for (const reply of [
+  "在2万条订单测试数据上跑了优化前后对比。",
+  "这个优化我是在测试环境用 2 万条订单数据做压测对比的。",
+  "2 万条订单测试数据平均耗时从 480ms 降到 190ms。",
+  "在2万条测试数据上平均响应从480ms降到190ms。"
+]) {
+  const result = assessMessageDraftQuality({ text: reply, evidenceTexts: [benchmarkEvidence] });
+  assert.equal(result.valid, true, `${reply}: ${JSON.stringify(result.errors)}`);
+}
+for (const reply of [
+  "在20万条订单测试数据上跑了优化前后对比。",
+  "在2万条客户测试数据上跑了优化前后对比。",
+  "处理了2万条生产订单。",
+  "累计处理了2万条订单。",
+  "在2万条订单测试数据上完成了20万条请求的压测。"
+]) {
+  const result = assessMessageDraftQuality({ text: reply, evidenceTexts: [benchmarkEvidence] });
+  assert.equal(result.valid, false, reply);
+  assert(result.errors.some((item) => item.kind === "numeric_achievement"));
+}
+
 console.log("message_draft_quality_smoke ok");

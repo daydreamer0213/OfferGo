@@ -50,6 +50,23 @@ let server;
 });
 
 async function testApplicationBoundary() {
+  const legacy = seedPlan("legacy-resume-evidence");
+  const legacyProfile = JSON.parse(db.prepare("SELECT profile_json FROM profile_versions WHERE id = ?").get(legacy.profileVersionId).profile_json);
+  legacyProfile.candidate.name = "李明";
+  db.prepare("UPDATE profile_versions SET profile_json = ? WHERE id = ?").run(JSON.stringify(legacyProfile), legacy.profileVersionId);
+  db.prepare("UPDATE resume_documents SET resume_text = ? WHERE id = ?")
+    .run("姓名：李明\n联系方式：13800000001｜liming@example.invalid\n不了解云平台部署，没有软件系统开发工作经历。", legacy.resumeDocumentId);
+  const legacyJobId = seedFailedJob(legacy, "legacy-evidence-complete");
+  const legacyRunner = controlledRunner({ delayMs: 0 });
+  await retryOneJobAnalysis({ db, input: { planId: legacy.planId, jobId: legacyJobId }, deps: applicationDeps(legacyRunner) });
+  const legacyRuntime = legacyRunner.configs[0];
+  assert.match(legacyRuntime.candidateProfile.source.resumeEvidenceText, /不了解云平台部署/,
+    "analysis must recover bound legacy source before preparing the runner");
+  assert(!/李明|13800000001|liming@example\.invalid/.test(legacyRuntime.candidateProfile.source.resumeEvidenceText));
+  assert.notStrictEqual(legacyRuntime.analysisContext.profileVersion,
+    require("../src/core/analysis_revision").runtimeAnalysisContext(legacyProfile, legacyRuntime.searchPlan, legacyRuntime.candidateMatchCard).profileVersion,
+    "cache identity must include recovered evidence before model execution");
+
   const single = seedPlan("single");
   const singleJobId = seedFailedJob(single, "single-complete");
   const workflow = createWorkflowRun(db, {

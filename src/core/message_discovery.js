@@ -25,7 +25,7 @@ const { canonicalBossJobSourceId, bossLocationConflicts } = require("./boss_job_
 const { MANUAL_ONLY_CATEGORIES } = require("./message_reply_contract");
 const { isExplicitRecruiterRejection, isLatestRecruiterRejection, isClearlyUnmatchedMessageJob, isRecruiterReceiptUpdate } = require("./message_routing_policy");
 const { hardBoundaryReason } = require("./match_explainer");
-const { decisionHardBlockers } = require("./model_contract");
+const { decisionHardBlockers, evidenceFitReasons, isAbsentResumeEvidence } = require("./model_contract");
 const { recordFunnelRowObservations } = require("./funnel_observation");
 const {
   MESSAGE_ACTION_WINDOW_MS,
@@ -139,7 +139,8 @@ async function runBossMessageDiscovery({
     saveMessageInboxSyncState,
     markMessageInboxItemDone,
     deleteMessageInboxItem,
-    listMessageInboxItems
+    listMessageInboxItems,
+    getConfirmedFutureInterview
   } = messageInboxPort(messageInbox);
   const timeline = messageTimelinePort(messageTimeline);
   const source = discoveryPlatform(platform);
@@ -170,7 +171,7 @@ async function runBossMessageDiscovery({
     platform: source,
     resolvedAt: runStartedAt,
     actionCutoffAt,
-    messageInbox: { listMessageInboxItems, markMessageInboxItemDone }
+    messageInbox: { listMessageInboxItems, markMessageInboxItemDone, getConfirmedFutureInterview }
   });
   const previousSync = getMessageInboxSyncState(db, { profileId, platform: source });
   const firstSync = !previousSync?.lastSuccessfulAt;
@@ -1445,9 +1446,12 @@ function qualityWarningCodes(value = {}) {
 }
 
 function projectMessageDecisionCard(job = {}) {
-  const analysis = job.analysis && typeof job.analysis === "object" && !Array.isArray(job.analysis)
+  const storedAnalysis = job.analysis && typeof job.analysis === "object" && !Array.isArray(job.analysis)
     ? job.analysis
     : {};
+  const explanationReasons = evidenceFitReasons(storedAnalysis);
+  const analysis = { ...storedAnalysis, fitReasons: storedAnalysis.ruleAdjusted === true || storedAnalysis.decisionSource === 'hard_boundary'
+    ? storedAnalysis.fitReasons : explanationReasons };
   const boundaryExcluded = analysis.decisionSource === "hard_boundary";
   const fitLabel = boundaryExcluded ? "" : decisionFitLabel(analysis.fitLevel);
   const fitSummary = boundaryExcluded ? boundaryFitSummary(analysis) : decisionFitSummary(analysis, fitLabel);
@@ -1578,7 +1582,7 @@ function decisionOpportunitySummary(analysis, fitSummary) {
 function decisionMatchHighlights(analysis) {
   const highlights = [];
   for (const value of Array.isArray(analysis.fitReasons) ? analysis.fitReasons : []) {
-    const text = safeProjectionText(value, 180);
+    const text = safeProjectionText(value, 600);
     if (!text || /(?:核心硬性要求只有可迁移证据|最高归入|硬性要求缺口|决策桶|证据不足|等待补充|尚无足够|无法判断)/.test(text)) continue;
     const direct = text.match(/^(.+?)[:：]有直接简历证据[。.]?$/);
     const related = text.match(/^(.+?)[:：]有可迁移简历证据[。.]?$/);
@@ -1646,32 +1650,35 @@ function decisionContinueCondition({ recommendation, salary, workSchedule, quest
 }
 
 function decisionResumeConnections(analysis, attentionGap) {
+  const connections = [];
+  for (const item of Array.isArray(analysis.responsibilityMatches) ? analysis.responsibilityMatches : []) {
+    if (item?.state !== "matched" && item?.state !== "transferable") continue;
+    if (lowQualityResumeEvidence(item.resumeEvidence)) continue;
+    const evidence = naturalResumeEvidence(item.resumeEvidence);
+    if (!evidence || connections.some((text) => text.startsWith(evidence))) continue;
+    const relation = item.state === 'transferable' ? '这能作为相近经验支持' : '这能对应';
+    connections.push(`${evidence}。${relation}岗位${readableResponsibility(item.jdEvidence)}。`);
+    if (connections.length >= 3) return connections;
+  }
   const requirements = Array.isArray(analysis.requirementMatches) ? analysis.requirementMatches : [];
   const directGroups = new Map();
   for (const item of requirements) {
     if (item?.state !== "matched" || (!item.foundation && !item.central) || genericRequirement(item.requirement)) continue;
     const evidence = safeProjectionText(item.resumeEvidence, 320).replace(/^简历[:：]\s*/, "");
     if (!evidence || lowQualityResumeEvidence(evidence)) continue;
-    const key = resumeEvidenceSource(evidence);
+    const key = evidence;
     const group = directGroups.get(key) || { evidence, requirements: [] };
     const label = readableRequirement(item.requirement);
     if (label && !group.requirements.includes(label)) group.requirements.push(label);
     directGroups.set(key, group);
   }
-  const connections = [...directGroups.values()].map((group) => {
+  connections.push(...[...directGroups.values()].map((group) => {
     const evidence = naturalResumeEvidence(group.evidence);
     const focus = joinChinese(group.requirements);
+    if (connections.some(text => text.startsWith(evidence))) return '';
     return evidence && focus ? readableEvidenceSpacing(`${evidence}。这与岗位需要的${focus}直接相关。`) : "";
-  }).filter(Boolean);
-
-  for (const item of Array.isArray(analysis.responsibilityMatches) ? analysis.responsibilityMatches : []) {
-    if (item?.state !== "matched" && item?.state !== "transferable") continue;
-    if (lowQualityResumeEvidence(item.resumeEvidence)) continue;
-    const evidence = naturalResumeEvidence(item.resumeEvidence);
-    if (!evidence || connections.some((text) => text.startsWith(evidence))) continue;
-    connections.push(`${evidence}。这能对应岗位${readableResponsibility(item.jdEvidence)}。`);
-    if (connections.length >= 3) return connections;
-  }
+  }).filter(Boolean));
+  if (connections.length >= 3) return connections.slice(0, 3);
 
   for (const item of requirements) {
     if (item === attentionGap || item?.state !== "transferable" || item.foundation || item.central || genericRequirement(item.requirement)) continue;
@@ -1753,16 +1760,10 @@ function naturalResumeEvidence(value) {
   match = text.match(/^长期目标与反馈学习\s*Agent\s*项目[，,]?\s*(.+)$/i);
   if (match) return readableEvidenceSpacing(`你在“长期目标与反馈学习 Agent”项目中，${match[1]}`);
   match = text.match(/^(参与|实现)(.+)$/);
-  if (match) return readableEvidenceSpacing(`你在德勤的 AI 应用工程师经历中，${match[1]}过${match[2]}`);
+  if (match) return readableEvidenceSpacing(`你的相关经历包括：${match[1]}${match[2]}`);
   match = text.match(/^技能列表包含\s*(.+)$/);
   if (match) return readableEvidenceSpacing(`你具备${match[1]}基础`);
   return text ? readableEvidenceSpacing(`你的相关经历包括：${text}`) : "";
-}
-
-function resumeEvidenceSource(value) {
-  if (/OfferGo/i.test(value)) return "offergo";
-  if (/德勤/i.test(value)) return "deloitte";
-  return value.slice(0, 80);
 }
 
 function genericRequirement(value) {
@@ -1770,7 +1771,7 @@ function genericRequirement(value) {
 }
 
 function lowQualityResumeEvidence(value) {
-  return /(?:未(?:直接|明确)?提及|未(?:直接|明确)?体现|简历(?:中)?缺少|缺少(?:直接|相关|明确).*(?:证据|经验)|无(?:直接|相关|明确|项目|经验|证据)|仅有|只有)/.test(String(value || ""));
+  return isAbsentResumeEvidence(value);
 }
 
 function readableRequirement(value) {
@@ -1789,7 +1790,7 @@ function readableRequirement(value) {
 function readableResponsibility(value) {
   const text = safeProjectionText(value, 220).replace(/^JD[:：]\s*/, "");
   if (/从需求.*到验收.*完整闭环/.test(text)) return "从需求到验收的交付闭环";
-  return "的主要工作";
+  return `的${text.replace(/[。.]$/, '')}`;
 }
 
 function technologyScope(value) {
@@ -2160,7 +2161,9 @@ function reconcileExpiredMessageActions({
       && ["needs_action", "needs_review"].includes(item.actionGroup)
       && item.lastDirection === "friend"
       && Number.isFinite(Date.parse(String(item.lastActivityAt || "")))
-      && Date.parse(item.lastActivityAt) < cutoffMillis);
+      && Date.parse(item.lastActivityAt) < cutoffMillis
+      && !messageInbox.getConfirmedFutureInterview?.(db, { profileId, cardId: item.cardId,
+        lastActivityAt: item.lastActivityAt, now: resolvedAt }));
   for (const item of items) {
     immediateTransaction(db, () => {
       if (Number.isSafeInteger(Number(item.cardId)) && Number(item.cardId) > 0) {

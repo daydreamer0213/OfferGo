@@ -55,6 +55,7 @@ function createMessageReplySendController({
   const service = createMessageReplySendingService({
     db,
     learningService,
+    logger,
     now,
     executeBatch: startExecution,
     onExecutionError(error, batchId) {
@@ -219,11 +220,13 @@ function createMessageReplySendController({
         batchId,
         sender,
         accessController,
-        onVerifiedSuccess: ({ batchId: verifiedBatchId, itemId }) => service.completeVerifiedItem({
+        onVerifiedSuccess: ({ batchId: verifiedBatchId, itemId, evidence }) => service.completeVerifiedItem({
           batchId: verifiedBatchId,
-          itemId
+          itemId,
+          evidence
         }),
         signal: abortController.signal,
+        now,
         logger
       });
     }).catch((error) => {

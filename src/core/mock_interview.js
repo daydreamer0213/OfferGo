@@ -85,8 +85,8 @@ function normalizeAnswerReview(value, validTurns) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("回答复盘格式无效");
   return {
     conclusion: cleanText(value.conclusion, 2_000, "回答结论"),
-    strengths: boundedTextArray(value.strengths, "回答优点"),
-    improvements: boundedTextArray(value.improvements, "回答改进点"),
+    strengths: boundedTextArray(typeof value.strengths === 'string' && value.strengths.trim() ? [value.strengths] : value.strengths, "回答优点"),
+    improvements: boundedTextArray(typeof value.improvements === 'string' && value.improvements.trim() ? [value.improvements] : value.improvements, "回答改进点"),
     turnNumbers: normalizeTurnNumbers(value.turnNumbers, validTurns, "回答复盘")
   };
 }
@@ -176,7 +176,7 @@ function validateInterviewStep(raw, context = {}) {
   const answerReview = raw.answerReview == null ? null : normalizeAnswerReview(raw.answerReview, validTurns);
   const nextQuestion = raw.nextQuestion == null ? null : normalizeQuestion(raw.nextQuestion, evidenceById);
 
-  if (turns.length > 0 && !answerReview) throw new Error("回答后必须先生成复盘");
+  if (turns.length > 0 && !answerReview) throw Object.assign(new Error("回答后必须先生成复盘"), { code: 'MOCK_INTERVIEW_ANSWER_REVIEW_REQUIRED' });
   if (turns.length > 0) {
     const latestTurnNumber = Number(turns[turns.length - 1].turnNumber);
     if (!answerReview.turnNumbers.includes(latestTurnNumber)) {
@@ -194,7 +194,8 @@ function validateInterviewStep(raw, context = {}) {
       throw new Error("首题不能包含上一回答片段");
     }
     if (nextQuestion.questionKind && !["follow_up", "topic_transition"].includes(nextQuestion.questionKind)) {
-      throw new Error("题目类型无效");
+      throw Object.assign(new Error("题目类型无效：questionKind 只能为 follow_up 或 topic_transition，不能使用面试风格"),
+        { code: 'MOCK_INTERVIEW_QUESTION_KIND_INVALID' });
     }
     const transition = nextQuestion.questionKind === "topic_transition" && context.interviewBrief;
     if (transition && (nextQuestion.basedOnTurnNumber !== null || nextQuestion.answerEvidence)) {

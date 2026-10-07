@@ -109,7 +109,6 @@ foreach ($RelativePath in @(
   "node_modules",
   "LICENSE",
   "NOTICE",
-  "README.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
   "CODE_OF_CONDUCT.md",
@@ -121,6 +120,9 @@ foreach ($RelativePath in @(
 )) {
   Copy-ProjectItem -RelativePath $RelativePath
 }
+
+# The installed help entry opens README.md; source navigation is for maintainers.
+Copy-ProjectItem -RelativePath "docs\installed-user-guide.md" -DestinationRelativePath "README.md"
 
 foreach ($RelativePath in @(
   "scripts\install.ps1",
@@ -143,13 +145,15 @@ foreach ($RelativePath in @(
   "configs\keywords.yaml",
   "configs\scoring.yaml",
   "configs\model.json",
-  "docs\README.md",
   "docs\agent-operation.md",
   "docs\daily_workflow.md",
   "docs\onboarding_workflow.md",
   "docs\operations.md",
   "docs\product_spec.md",
-  "docs\release_boundary.md"
+  "docs\release_boundary.md",
+  "docs\workflow_health.md",
+  "docs\outcome_analytics.md",
+  "docs\releases\v1.3.2.md"
 )) {
   Copy-ProjectItem -RelativePath $RelativePath
 }

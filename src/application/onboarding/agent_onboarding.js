@@ -7,6 +7,7 @@ const {
 const {
   createOnboardingRun,
   getLatestReusableOnboardingRunByContentHash,
+  bindReusedOnboardingRun,
   getOnboardingRunContext,
   retryOnboardingRun
 } = require("../../storage/onboarding_store");
@@ -49,7 +50,12 @@ async function runAgentOnboarding({
   if (!existing && !refreshProfile) {
     const reusable = getLatestReusableOnboardingRunByContentHash(db, document.contentHash);
     if (reusable) {
-      return buildAgentOnboardingResult(db, reusable, {
+      const boundRun = bindReusedOnboardingRun(db, {
+        operationId: normalizedOperationId,
+        sourceRunId: reusable.id,
+        contentHash: document.contentHash
+      });
+      return buildAgentOnboardingResult(db, boundRun, {
         operationId: normalizedOperationId,
         reused: true
       });
@@ -123,7 +129,10 @@ function confirmAgentMatchingCard({ db, profileId, cardId }) {
 }
 
 function buildAgentOnboardingResult(db, run, { operationId, reused }) {
-  const profile = getCandidateProfile(db, run.profileId);
+  const currentProfile = getCandidateProfile(db, run.profileId);
+  const context = getOnboardingRunContext(db, run.id);
+  const profile = currentProfile && context?.profileVersion ? { ...currentProfile,
+    sourceHash: context.document.contentHash, profile: context.profileVersion.profile } : currentProfile;
   const matchingCard = getMatchingCard(db, run.matchingCardId);
   const searchPlan = getSearchPlan(db, run.searchPlanId);
   return {

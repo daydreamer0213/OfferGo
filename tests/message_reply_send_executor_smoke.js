@@ -12,9 +12,10 @@ const {
   transitionReplySendBatch,
   transitionReplySendItem
 } = require("../src/core/message_reply_send_batches");
-const { runMessageReplySendBatch } = require("../src/core/message_reply_send_executor");
+const { runMessageReplySendBatch: executeReplyBatch } = require("../src/core/message_reply_send_executor");
 
 const NOW = "2026-08-29T04:00:00.000Z";
+const runMessageReplySendBatch = (options) => executeReplyBatch({ now: () => NOW, ...options });
 
 (async () => {
   await successfulSerialBatchSmoke();

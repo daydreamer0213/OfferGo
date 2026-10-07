@@ -19,6 +19,7 @@ const TERMINAL_BATCH_STATUSES = new Set(["completed", "stopped", "interrupted"])
 function createMessageReplySendingService({
   db,
   learningService,
+  logger = null,
   now = () => new Date().toISOString(),
   executeBatch = () => {},
   onExecutionError = () => {}
@@ -127,7 +128,7 @@ function createMessageReplySendingService({
     return publicReplySendBatch(loadReplySendBatch(db, { profileId: profile, batchId: batch }));
   }
 
-  async function completeVerifiedItem({ batchId, itemId } = {}) {
+  async function completeVerifiedItem({ batchId, itemId, evidence } = {}) {
     const batch = positiveInteger(batchId, "batchId");
     const item = positiveInteger(itemId, "itemId");
     const owner = getMessageReplySendBatchOwner(db, batch);
@@ -155,6 +156,7 @@ function createMessageReplySendingService({
       finalText: current.replyText,
       completionKind: "sent",
       completionKey,
+      deferLearning: true,
       afterComplete() {
         transitionReplySendItem(db, {
           profileId,
@@ -163,6 +165,7 @@ function createMessageReplySendingService({
           expectedStatus: "click_dispatched",
           status: "succeeded",
           clickCount: 1,
+          evidence,
           updatedAt: completedAt
         });
         const recordSent = draft.messageIntent === "follow_up" ? recordFollowUpSent : recordReplyConfirmedSent;
@@ -176,6 +179,17 @@ function createMessageReplySendingService({
     });
     snapshot = loadReplySendBatch(db, { profileId, batchId: batch });
     current = snapshot.items.find((entry) => entry.id === item);
+    if (current.status === "succeeded" && learning.memoryId
+      && ["failed", "unavailable"].includes(learning.extractionStatus)
+      && typeof learningService.retryLearning === "function") {
+      Promise.resolve().then(() => learningService.retryLearning({ profileId, memoryId: learning.memoryId }))
+        .catch(error => {
+          try {
+            logger?.warn?.("message_reply_send_learning_failed", { draftId: current.draftId,
+              memoryId: learning.memoryId, errorCode: String(error?.code || "MESSAGE_REPLY_LEARNING_FAILED") });
+          } catch {}
+        });
+    }
     return {
       item: publicReplySendBatch({ batch: snapshot.batch, items: [current] }).items[0],
       learning

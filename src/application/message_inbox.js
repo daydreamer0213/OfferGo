@@ -1,6 +1,7 @@
 const { createHash } = require("node:crypto");
 const messageInboxStore = require("../storage/message_inbox_store");
 const messageTimelineStore = require("../storage/message_timeline_store");
+const { getConfirmedFutureInterview } = require("../storage/message_discovery_store");
 
 function restoreLegacyZhaopinResumeRequestEvent(db, { profileId, context } = {}) {
   if (!context || context.platform !== "zhaopin"
@@ -45,6 +46,7 @@ function validIso(value) {
 }
 
 module.exports = {
+  getConfirmedFutureInterview,
   upsertMessageInboxItem: messageInboxStore.upsertMessageInboxItem,
   getMessageInboxItem: messageInboxStore.getMessageInboxItem,
   listMessageInboxItems: messageInboxStore.listMessageInboxItems,

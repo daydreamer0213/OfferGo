@@ -104,7 +104,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const inboxItem = inboxByConversation.get(`${result.platform}\0${result.conversationKey}`) || null;
     const expired = inboxItem?.reasonCode === "MESSAGE_REPLY_WINDOW_EXPIRED"
       || result.legacyActionExpired === true;
-    const waitingForRecruiter = inboxItem?.actionGroup === "waiting";
+    const waitingForRecruiter = inboxItem?.actionGroup === "waiting" || result.legacyWaitingForRecruiter === true;
+    const scheduledAt = result.legacyScheduledAt || inboxItem?.scheduledAt || "";
     const completedResumeAction = messageActions.some(action => action.platform === result.platform
       && action.conversationKey === result.conversationKey && action.status === "succeeded"
       && String(action.evidence?.sourceMessageId || "") === inboxItem?.lastMessageId);
@@ -174,15 +175,17 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       ? '<p class="line">简历邀请已处理，目前没有需要你回复的问题。</p>'
       : expired
       ? '<p class="line">这条消息已超过 7 天未回复，系统保留历史记录，不再要求你处理。</p>'
+      : scheduledAt
+      ? `<p class="line">面试已确认，安排时间：${escapeHtml(messageTimeLabel(scheduledAt))}。目前不需要再回复这条旧消息。</p>`
       : `${missingFactSection}${replySection}`;
-    const sentForm = !expired && sendable && drafts && !durableDrafts.length
+    const sentForm = !expired && !scheduledAt && sendable && drafts && !durableDrafts.length
       ? `<form method="post" action="/api/progress"><input type="hidden" name="cardId" value="${result.cardId}"><input type="hidden" name="idempotencyKey" value="${escapeAttr(newProgressRequestKey())}"><input type="hidden" name="action" value="reply_confirmed_sent"><button class="secondary">${escapeHtml(manualSentLabel)}</button></form>`
       : "";
     const viewId = `message-view-${viewKey}`;
     const title = job.title || "岗位处理结果";
     const company = job.company || "公司待确认";
     const preview = messagePreview(result);
-    const actionGroup = inboxItem?.actionGroup || (pending ? "needs_action" : "done");
+    const actionGroup = inboxItem?.actionGroup || (waitingForRecruiter ? "waiting" : pending ? "needs_action" : "done");
     const statusText = expired ? "超过 7 天，已结束处理" : waitingForRecruiter ? "等待对方反馈"
       : completedResumeAction && actionGroup === "done" ? "简历邀请已处理"
       : actionGroup === "done" ? result.messageIntent === "rejection" ? "对方已结束沟通" : inboxItem?.statusText || "已经处理"
@@ -196,7 +199,10 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       detail: `<section id="message-detail-${viewKey}" class="panel message-result" data-platform="${escapeAttr(result.platform || "")}" data-message-detail-panel="${viewKey}" hidden><button type="button" class="message-back" data-message-back>返回列表</button><h2>${escapeHtml(title)}</h2><p class="line"><span class="message-source">${escapeHtml(platformLabel)}</span> · ${escapeHtml(company)}</p>${inboundSection}${jobOverview}${responseSection}${sentForm}${fitDetails}</section>`
     };
   });
-  const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)).reduce((count, result) => count
+  const sendableDraftCount = displayResults.filter(result => ["boss", "zhaopin"].includes(result.platform)
+    && !result.legacyActionExpired && !result.legacyWaitingForRecruiter
+    && !inboxByConversation.get(`${result.platform}\0${result.conversationKey}`)?.scheduledAt
+    && inboxByConversation.get(`${result.platform}\0${result.conversationKey}`)?.reasonCode !== "MESSAGE_REPLY_WINDOW_EXPIRED").reduce((count, result) => count
     + (Array.isArray(result.drafts) ? result.drafts.filter((draft) => Number(draft?.id) > 0).length : 0), 0);
   const activeReplyBatch = initialReplySend?.batch && !["completed", "stopped", "interrupted"].includes(initialReplySend.batch.status);
   const controls = `<section class="message-controls" aria-label="消息发现操作">
@@ -456,13 +462,14 @@ function messageDiscoveryClientScript(scriptState) {
     const schedulePoll=()=>{if(!reloadPending&&!actionPending&&pollTimer===null)pollTimer=setTimeout(poll,2000);};
     for(const form of forms)form.addEventListener("submit",async(event)=>{event.preventDefault();if(actionPending||reloadPending)return;actionPending=true;actionVersion+=1;setPending(true);let succeeded=false;try{const response=await fetch(form.getAttribute("action"),{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(form))});const parsed=await read(response);if(accepted(response,parsed,postStatuses)){succeeded=true;requestReload(parsed.body.status!=="running");return;}show(rejectedCode(parsed));}catch{show("MESSAGE_DISCOVERY_SERVICE_UNAVAILABLE");}finally{actionPending=false;setPending(false);if(!reloadPending&&!succeeded&&currentStatus==="running")schedulePoll();}});
     const cancelDraftSave=(field)=>{const timer=draftTimers.get(field);if(timer!==undefined){clearTimeout(timer);draftTimers.delete(field);}};
-    const postDraft=async(field,text,action,completionKind="")=>{const response=await fetch("/api/message-reply-draft",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,profileId:initial.profileId,draftId:Number(field.dataset.draftId),text,completionKind})});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.ok)throw new Error(rejectedCode(parsed));return parsed.body;};
+    const postDraft=async(field,text,action,completionKind="")=>{const response=await fetch("/api/message-reply-draft",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,profileId:initial.profileId,draftId:Number(field.dataset.draftId),expectedRevision:Number(field.dataset.draftRevision||field.dataset.revision||0),text,completionKind})});const parsed=await read(response);if(!response.ok||!parsed.json||!parsed.body?.ok)throw new Error(rejectedCode(parsed));return parsed.body;};
     const draftSaveStatus=(field)=>field.closest("[data-draft-card]")?.querySelector("[data-draft-save-status]");
     const setDraftSaveStatus=(field,text)=>{const status=draftSaveStatus(field);if(status)status.textContent=text;};
-    const queueDraftWrite=(field,action,completionKind="",text=field.value)=>{const previous=draftWrites.get(field)||Promise.resolve();const pending=previous.catch(()=>undefined).then(()=>{setDraftSaveStatus(field,"正在保存…");return postDraft(field,text,action,completionKind);});draftWrites.set(field,pending);const clear=()=>{if(draftWrites.get(field)===pending)draftWrites.delete(field);};pending.then((result)=>{const revision=Number(result?.revision);if(Number.isSafeInteger(revision)&&revision>=0){field.dataset.revision=String(revision);field.dataset.draftRevision=String(revision);}setDraftSaveStatus(field,field.value===text?"已自动保存":"有修改待保存");clear();},()=>{setDraftSaveStatus(field,field.value===text?"保存失败，请重试":"有修改待保存");clear();});return pending;};
+    const draftWriteError=(error)=>error?.message==="MESSAGE_REPLY_DRAFT_CONFLICT"?"草稿已在其他页面更新。本页输入已保留，请先复制，再刷新查看最新草稿。":"本次修改还没有保存，请稍后重试。";
+    const queueDraftWrite=(field,action,completionKind="",text=field.value)=>{const previous=draftWrites.get(field)||Promise.resolve();const pending=previous.catch(()=>undefined).then(()=>{setDraftSaveStatus(field,"正在保存…");return postDraft(field,text,action,completionKind);});draftWrites.set(field,pending);const clear=()=>{if(draftWrites.get(field)===pending)draftWrites.delete(field);};pending.then((result)=>{const revision=Number(result?.revision);if(Number.isSafeInteger(revision)&&revision>=0){field.dataset.revision=String(revision);field.dataset.draftRevision=String(revision);}setDraftSaveStatus(field,field.value===text?"已自动保存":"有修改待保存");clear();},(error)=>{setDraftSaveStatus(field,error?.message==="MESSAGE_REPLY_DRAFT_CONFLICT"?draftWriteError(error):field.value===text?"保存失败，请重试":"有修改待保存");clear();});return pending;};
     const saveDraft=async(field)=>{cancelDraftSave(field);return queueDraftWrite(field,"save");};
     const saveStableDrafts=async(fields)=>{for(;;){const texts=fields.map(field=>field.value);await Promise.all(fields.map(saveDraft));if(fields.every((field,index)=>field.value===texts[index]))return;}};
-    for(const field of document.querySelectorAll("[data-draft-text]"))field.addEventListener("input",()=>{setDraftSaveStatus(field,"有修改待保存");cancelDraftSave(field);draftTimers.set(field,setTimeout(async()=>{draftTimers.delete(field);try{await queueDraftWrite(field,"save");}catch{feedback.textContent="本次修改还没有保存，请稍后重试。";}},600));});
+    for(const field of document.querySelectorAll("[data-draft-text]"))field.addEventListener("input",()=>{setDraftSaveStatus(field,"有修改待保存");cancelDraftSave(field);draftTimers.set(field,setTimeout(async()=>{draftTimers.delete(field);try{await queueDraftWrite(field,"save");}catch(error){feedback.textContent=draftWriteError(error);}},600));});
     for(const button of document.querySelectorAll("[data-copy-draft]"))button.addEventListener("click",async()=>{const field=document.getElementById(button.dataset.copyDraft);if(!field)return;const text=field.value;try{await navigator.clipboard.writeText(text);}catch{feedback.textContent="复制失败，请重试。";return;}if("copyOnly" in button.dataset){feedback.textContent="草稿已复制。";return;}cancelDraftSave(field);try{const result=await queueDraftWrite(field,"complete","copied",text);feedback.textContent=!result.changed?"草稿已复制。":result.extractionStatus==="succeeded"?"已复制，修改后的回答和资料已保存。":result.extractionStatus==="failed"||result.extractionStatus==="unavailable"?"已复制，修改后的回答已保存；资料暂未整理，可在“我的沟通资料”补做。":"已复制，修改后的回答已保存。";}catch{feedback.textContent="已复制；这次修改暂未保存，请稍后重试";}});
     for(const form of document.querySelectorAll("[data-sent-draft]"))form.addEventListener("submit",()=>{const field=document.getElementById(form.dataset.sentDraft);if(!field)return;cancelDraftSave(field);const hidden=form.querySelector('[name="finalText"]');if(hidden)hidden.value=field.value;});
     const sendPanel=document.querySelector("[data-send-batch-panel]");
@@ -487,6 +494,7 @@ function messageDiscoveryClientScript(scriptState) {
     let sendPollTimer=null;
     const ownedDraftCards=new WeakSet();
     const sendMessage=(code)=>({
+      MESSAGE_REPLY_DRAFT_CONFLICT:"草稿已在其他页面更新。本页输入已保留，请先复制，再刷新查看最新草稿。",
       MESSAGE_REPLY_SEND_PROFILE_BUSY:"已有一批消息正在发送，请等待完成或停止后续发送。",
       MESSAGE_REPLY_SEND_LEASE_BUSY:"招聘平台正在执行另一项任务，请等待完成后再发送。",
       MESSAGE_REPLY_SEND_MIXED_PLATFORM:"BOSS 和智联需要分开确认发送。",

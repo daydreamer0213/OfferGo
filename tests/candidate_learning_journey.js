@@ -164,7 +164,7 @@ async function confirmedFactsJourney() {
   }
   const reply = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
     assert.equal(input.facts.find(fact => fact.key === 'employment_status')?.value, '已离职');
-    assert.equal(input.facts.find(fact => fact.key === 'availability_date')?.value, '下周');
+    assert.match(input.facts.find(fact => fact.key === 'availability_date')?.value, /^\d{4}-\d{2}-\d{2}至\d{4}-\d{2}-\d{2}$/, 'relative arrival week is anchored to confirmation');
     return { messageIntent: 'information_request', messageCategory: 'availability', messageSummary: '确认在职和到岗',
       requiredFactKeys: ['employment_status', 'availability_date'], usedFactKeys: ['employment_status', 'availability_date'], usedMemoryIds: [],
       responseItems: [{ id: 'employment_status', kind: 'question', required: true }, { id: 'availability_date', kind: 'question', required: true }],

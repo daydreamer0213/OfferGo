@@ -147,6 +147,7 @@ const {
 const { FEEDBACK_REASON_OPTIONS, normalizeFeedbackReason, feedbackReasonLabel } = require("../core/feedback");
 const { storeResumeSourceFile, resolveResumeSourceFile } = require("../core/resume_files");
 const { PRODUCT_POLICY } = require("../core/product_policy");
+const { evidenceFitReasons } = require("../core/model_contract");
 const { defaultSelectedForBatch } = require("../core/decision_policy");
 const {
   createCommunicationBatch,
@@ -1336,7 +1337,10 @@ function createDashboardServer({
       if (req.method === "GET" && url.pathname === "/communication") return sendHtml(res, renderCommunicationCenterPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/jobs/export.csv") return handleFilteredJobExport(res, db, url.searchParams);
       if (req.method === "GET" && url.pathname === "/jobs") return sendHtml(res, renderDashboard(getDashboardData(db, url.searchParams)));
-      if (req.method === "GET" && url.pathname === "/diagnostics") return sendHtml(res, renderDiagnosticsPage(logger.listRecent(), url.searchParams.get("events"), diagnosticsActionToken, dashboardNavigationContext(db, url, "/diagnostics")));
+      if (req.method === "GET" && url.pathname === "/diagnostics") return sendHtml(res, renderDiagnosticsPage(logger.listRecent(120, {
+        levels: url.searchParams.get("events") === "all" ? null : ["warn", "error"],
+        requestId: url.searchParams.get("requestId") || ""
+      }), url.searchParams.get("events"), diagnosticsActionToken, dashboardNavigationContext(db, url, "/diagnostics"), url.searchParams.get("requestId") || ""));
       if (req.method === "GET" && url.pathname === "/health") {
         return sendJson(res, 200, {
           ok: true,
@@ -1557,6 +1561,12 @@ function createDashboardServer({
       if (req.method === "POST" && url.pathname === "/api/funnel/strategy-round") {
         return await handleFunnelStrategyRound(req, res, { db, funnelAnalysis });
       }
+      if (req.method === "GET" && url.pathname === "/api/resume-optimization/operation") {
+        const plan = requiredResumeOptimizationPlan(db, url.searchParams.get("planId"));
+        return sendJson(res, 200, { ok: true, ...getResumeOptimizationService().getOperation({
+          profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get("operationId")
+        }) });
+      }
       if (req.method === "POST" && url.pathname === "/api/resume-optimization") return await handleResumeOptimizationCreate(req, res, {
         db,
         resumeOptimization: getResumeOptimizationService()
@@ -1579,6 +1589,12 @@ function createDashboardServer({
         db,
         resumeOptimization: getResumeOptimizationService()
       });
+      if (req.method === "GET" && url.pathname === "/api/interview/operation") {
+        const plan = requiredMockInterviewPlan(db, url.searchParams.get("planId"));
+        return sendJson(res, 200, { ok: true, ...getMockInterviewService().getOperation({
+          profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get("operationId")
+        }) });
+      }
       if (req.method === "POST" && url.pathname === "/api/interview/start") return await handleMockInterviewStart(req, res, {
         db,
         mockInterview: getMockInterviewService()
@@ -2423,14 +2439,12 @@ function buildWorkflowDashboardState(
   const runs = listWorkflowRuns(db, {
     site,
     profileId: planRecord.profileId,
-    planId: planRecord.id,
     localDay,
-    limit: PRODUCT_POLICY.operations.workflow.maxRunsPerDay
+    limit: 500
   }).sort((a, b) => a.sequence - b.sequence);
   const activeRun = getActiveWorkflowRun(db, {
     site,
-    profileId: planRecord.profileId,
-    planId: planRecord.id
+    profileId: planRecord.profileId
   });
   const successfulToday = runs.reduce((sum, run) => sum + Number(run.successfulCount || 0), 0);
   const inventory = site === 'zhaopin' ? [] : listWorkflowInventory(db, { planId: planRecord.id, now: asIso(now) });
@@ -4149,14 +4163,16 @@ function sendMessageReplySendError(res, error) {
     "MESSAGE_REPLY_SEND_DRAFT_CLOSED",
     "MESSAGE_REPLY_SEND_CONTEXT_REQUIRED",
     "MESSAGE_REPLY_SEND_BATCH_CONFLICT",
-    "MESSAGE_REPLY_SEND_ITEM_CONFLICT"
+    "MESSAGE_REPLY_SEND_ITEM_CONFLICT",
+    "MESSAGE_REPLY_WINDOW_EXPIRED"
   ]);
   const statusCode = Number(error?.statusCode)
     || (code.endsWith("_NOT_FOUND") ? 404
       : conflictCodes.has(code) ? 409
         : error instanceof TypeError || code.endsWith("_INVALID") || code.endsWith("_REQUIRED") ? 400
           : 500);
-  const message = statusCode === 403 ? "请从当前 OfferGo 消息页面确认发送。"
+  const message = code === 'MESSAGE_REPLY_WINDOW_EXPIRED' ? '这条消息已超过一周未回复，本次不会发送。招聘方有新消息时可继续处理。'
+    : statusCode === 403 ? "请从当前 OfferGo 消息页面确认发送。"
     : statusCode === 404 ? "没有找到这次发送任务。"
       : statusCode === 409 ? "草稿或发送任务已经变化，请刷新页面后重试。"
         : statusCode === 400 ? "发送请求无效，请刷新页面后重试。"
@@ -4173,7 +4189,8 @@ function messageDiscoveryPublicError(error) {
     MESSAGE_DISCOVERY_NOT_FOUND: "没有可操作的消息发现任务。",
     MESSAGE_DISCOVERY_NOT_RUNNING: "消息发现当前未运行。",
     MESSAGE_DISCOVERY_RUNNING: "请先安全停止，再放弃草稿。",
-    MESSAGE_DISCOVERY_ACTION_INVALID: "消息发现操作无效。"
+    MESSAGE_DISCOVERY_ACTION_INVALID: "消息发现操作无效。",
+    MESSAGE_REPLY_WINDOW_EXPIRED: "这条消息已超过一周未回复，不再生成回复草稿。招聘方有新消息时可继续处理。"
   }[String(error?.code || "")] || "消息发现操作失败。";
 }
 
@@ -4253,7 +4270,8 @@ async function handleMessageReplyDraft(req, res, service) {
       const draft = service.saveDraft({
         profileId: params.profileId,
         draftId: params.draftId,
-        text: params.text
+        text: params.text,
+        ...(params.expectedRevision === undefined ? {} : { expectedRevision: params.expectedRevision })
       });
       return sendJson(res, 200, { ok: true, draftId: draft.id, revision: draft.revision });
     }
@@ -4266,6 +4284,7 @@ async function handleMessageReplyDraft(req, res, service) {
         profileId: params.profileId,
         draftId: params.draftId,
         finalText: params.text,
+        ...(params.expectedRevision === undefined ? {} : { expectedRevision: params.expectedRevision }),
         completionKind
       });
       return sendJson(res, 200, { ok: true, ...result });
@@ -4339,10 +4358,12 @@ async function handleCommunicationProfile(req, res, service) {
 
 function sendReplyLearningError(res, error) {
   const code = String(error?.code || "MESSAGE_REPLY_LEARNING_FAILED");
-  const statusCode = code.endsWith("_NOT_FOUND") || code === "CANDIDATE_PROFILE_NOT_FOUND" ? 404
+  const statusCode = code === "MESSAGE_REPLY_DRAFT_CONFLICT" ? 409
+    : code.endsWith("_NOT_FOUND") || code === "CANDIDATE_PROFILE_NOT_FOUND" ? 404
     : error instanceof TypeError || code.endsWith("_INVALID") ? 400
       : 500;
-  const message = statusCode === 404 ? "没有找到这条沟通资料。"
+  const message = statusCode === 409 ? "这份回复已在另一页面修改，你的输入仍保留。请先查看最新内容，再合并修改。"
+    : statusCode === 404 ? "没有找到这条沟通资料。"
     : statusCode === 400 ? "沟通资料请求无效。"
       : "沟通资料暂时无法保存，请稍后重试。";
   return sendJson(res, statusCode, { error: message, errorCode: code });
@@ -4949,7 +4970,7 @@ function renderResumeVersion(version, profileId) {
   const factSummary = version.resumeDocumentId
     ? `已保存正文引用；结构化事实：教育 ${(facts.education || []).length}、经历 ${(facts.experiences || []).length}、项目 ${(facts.projects || []).length}、技能 ${(facts.skills || []).length}`
     : "没有对应简历正文，不参与具体版本证据匹配";
-  return `<form class="panel form-stack" method="post" action="/api/resume-version">
+  return `<form class="panel form-stack" method="post" action="/api/resume-version" enctype="multipart/form-data">
     <input type="hidden" name="profileId" value="${escapeAttr(profileId)}"><input type="hidden" name="versionId" value="${escapeAttr(version.id)}">
     <h2>${escapeHtml(version.name)}</h2><p class="hint">${escapeHtml(file)}${sourceFile}，更新于 ${escapeHtml(String(version.updatedAt || "").slice(0, 16).replace("T", " "))}</p><p class="hint">${escapeHtml(factSummary)}</p>
     ${renderResumeVersionFields(version)}
@@ -5684,7 +5705,7 @@ function modelSettingsBack(error, fallback) {
     : fallback;
 }
 
-function renderDiagnosticsPage(entries = [], events = "", actionToken = "", navigation = {}) {
+function renderDiagnosticsPage(entries = [], events = "", actionToken = "", navigation = {}, requestId = "") {
   const showAll = events === "all";
   const rows = entries.filter((entry) => showAll || ["warn", "error"].includes(entry.level)).map((entry) => {
     const error = entry.error || {};
@@ -5704,8 +5725,8 @@ function renderDiagnosticsPage(entries = [], events = "", actionToken = "", navi
   }).join("");
   const filterNotice = showAll
     ? `<p class="hint">正在显示最近 120 条脱敏日志（含常规事件）。<a href="/diagnostics">只看问题和建议行动</a></p>`
-    : `<p class="hint">问题和建议行动优先：默认只显示 warn 和 error。<a href="/diagnostics?events=all">显示所有常规事件</a></p>`;
-  return renderLegacyDashboardPage({ title: "诊断日志", currentPath: navigation.currentPath || "/diagnostics", todayPath: navigation.todayPath || "", planId: navigation.planId || "", stage: "诊断", body: `<main id="main-content"><h1>诊断日志</h1><section class="panel"><h2>需要协助时</h2><p>复制的是运行状态和版本，不包含简历、岗位内容、登录信息或本机文件路径。</p><div class="button-row"><button type="button" data-copy-runtime-diagnostics>复制诊断信息</button><button type="button" class="secondary" data-open-runtime-logs>打开日志文件夹</button></div><p class="hint" data-runtime-diagnostics-feedback aria-live="polite">完整日志保存在当前用户的 RoleFlow 数据目录。</p></section>${filterNotice}<p class="hint">下方仅展示最近 120 条脱敏日志。</p><span class="nav-scroll-hint">左右滑动查看完整日志表格</span><section class="panel diagnostics-scroll"><table class="diagnostics"><thead><tr><th>时间</th><th>级别</th><th>组件</th><th>事件</th><th>请求</th><th>错误码</th><th>摘要</th></tr></thead><tbody>${rows || "<tr><td colspan=\"7\">暂无日志</td></tr>"}</tbody></table></section></main><script>(function(){const actionToken=${JSON.stringify(String(actionToken || ""))};const feedback=document.querySelector('[data-runtime-diagnostics-feedback]');const copy=document.querySelector('[data-copy-runtime-diagnostics]');const open=document.querySelector('[data-open-runtime-logs]');copy?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics');if(!response.ok)throw new Error();const value=JSON.stringify(await response.json(),null,2);await navigator.clipboard.writeText(value);feedback.textContent='诊断信息已复制。';}catch{feedback.textContent='复制失败，请重试。';}});open?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics/open-logs',{method:'POST',headers:{'content-type':'application/json','x-roleflow-action':actionToken},body:'{}'});if(!response.ok)throw new Error();feedback.textContent='日志文件夹已打开。';}catch{feedback.textContent='无法打开日志文件夹，请重试。';}});}());</script>` });
+    : `<p class="hint">问题和建议行动优先：默认显示最近的警告和错误。<a href="/diagnostics?events=all">显示所有常规事件</a></p>`;
+  return renderLegacyDashboardPage({ title: "诊断日志", currentPath: navigation.currentPath || "/diagnostics", todayPath: navigation.todayPath || "", planId: navigation.planId || "", stage: "诊断", body: `<main id="main-content"><h1>诊断日志</h1><section class="panel"><h2>需要协助时</h2><p>复制的是运行状态和版本，不包含简历、岗位内容、登录信息或本机文件路径。</p><div class="button-row"><button type="button" data-copy-runtime-diagnostics>复制诊断信息</button><button type="button" class="secondary" data-open-runtime-logs>打开日志文件夹</button></div><p class="hint" data-runtime-diagnostics-feedback aria-live="polite">完整日志保存在当前用户的 RoleFlow 数据目录。</p></section>${filterNotice}<form class="panel inline-form" method="get" action="/diagnostics"><label>查找排错编号<input name="requestId" value="${escapeAttr(requestId)}" placeholder="粘贴页面提示的排错编号"></label>${showAll ? '<input type="hidden" name="events" value="all">' : ""}<button>查找记录</button><a href="/diagnostics">清除查询</a></form><p class="hint">下方仅展示最近 120 条脱敏日志。</p><span class="nav-scroll-hint">左右滑动查看完整日志表格</span><section class="panel diagnostics-scroll"><table class="diagnostics"><thead><tr><th>时间</th><th>级别</th><th>组件</th><th>事件</th><th>请求</th><th>错误码</th><th>摘要</th></tr></thead><tbody>${rows || "<tr><td colspan=\"7\">暂无日志</td></tr>"}</tbody></table></section></main><script>(function(){const actionToken=${JSON.stringify(String(actionToken || ""))};const feedback=document.querySelector('[data-runtime-diagnostics-feedback]');const copy=document.querySelector('[data-copy-runtime-diagnostics]');const open=document.querySelector('[data-open-runtime-logs]');copy?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics');if(!response.ok)throw new Error();const value=JSON.stringify(await response.json(),null,2);await navigator.clipboard.writeText(value);feedback.textContent='诊断信息已复制。';}catch{feedback.textContent='复制失败，请重试。';}});open?.addEventListener('click',async()=>{try{const response=await fetch('/api/runtime-diagnostics/open-logs',{method:'POST',headers:{'content-type':'application/json','x-roleflow-action':actionToken},body:'{}'});if(!response.ok)throw new Error();feedback.textContent='日志文件夹已打开。';}catch{feedback.textContent='无法打开日志文件夹，请重试。';}});}());</script>` });
 }
 
 function dashboardNavigationContext(db, url, route) {
@@ -5925,6 +5946,7 @@ async function handleResumeOptimizationCreate(req, res, { db, resumeOptimization
     profileId: plan.profileId,
     planId: plan.id,
     sourceResumeVersionId: Number(params.sourceResumeVersionId),
+    ...(params.operationId === undefined ? {} : { operationId: params.operationId }),
     ...(params.mode ? { mode: params.mode, ...(params.mode === 'job_specific' ? { jobId: Number(params.jobId) } : {}) } : {}),
     targetDirection: String(params.targetDirection || "").trim()
   });
@@ -5942,10 +5964,12 @@ async function handleResumeOptimizationSave(req, res, { db, resumeOptimization }
     profileId: plan.profileId,
     planId: plan.id,
     draftId,
-    finalText: String(params.finalText || "")
+    finalText: String(params.finalText || ""),
+    ...(params.expectedRevision === undefined ? {} : { expectedRevision: params.expectedRevision }),
+    ...(params.baseText === undefined ? {} : { baseText: params.baseText })
   }));
   if (contentType.includes("application/json") || String(req.headers.accept || "").includes("application/json")) {
-    return sendJson(res, 200, { ok: true, integrity: saved?.integrity || null });
+    return sendJson(res, 200, { ok: true, integrity: saved?.integrity || null, revision: saved?.revision });
   }
   redirect(res, `/resume-optimization?planId=${encodeURIComponent(plan.id)}&draftId=${encodeURIComponent(draftId)}#resume-opt-draft-title`);
 }
@@ -5959,7 +5983,9 @@ async function handleResumeOptimizationActivate(req, res, { db, resumeOptimizati
       profileId: plan.profileId,
       planId: plan.id,
       draftId,
-      finalText: String(params.finalText || "")
+      finalText: String(params.finalText || ""),
+      ...(params.expectedRevision === undefined ? {} : { expectedRevision: params.expectedRevision }),
+      ...(params.baseText === undefined ? {} : { baseText: params.baseText })
     }));
   } catch (error) {
     if (error?.code !== "RESUME_ACTIVATION_INTEGRITY_FAILED") throw error;
@@ -6019,6 +6045,7 @@ async function handleMockInterviewStart(req, res, { db, mockInterview }) {
     profileId: plan.profileId,
     planId: plan.id,
     sessionKind,
+    ...(params.operationId === undefined ? {} : { operationId: params.operationId }),
     jobId: sessionKind === "job_specific" ? Number(params.jobId) : null,
     resumeVersionId: Number(params.resumeVersionId),
     settings: {
@@ -6039,7 +6066,8 @@ async function handleMockInterviewAnswer(req, res, { db, mockInterview }) {
     planId: plan.id,
     sessionId,
     turnNumber: Number(params.turnNumber),
-    answerText: params.answerText
+    answerText: params.answerText,
+    ...(params.operationId === undefined ? {} : { operationId: params.operationId })
   });
   redirect(res, `/interview?planId=${encodeURIComponent(plan.id)}&sessionId=${encodeURIComponent(sessionId)}#interview-active-step`);
 }
@@ -6061,7 +6089,8 @@ async function handleMockInterviewRetry(req, res, { db, mockInterview }) {
     planId: plan.id,
     sessionId,
     turnNumber: Number(params.turnNumber),
-    answerText: params.answerText
+    answerText: params.answerText,
+    ...(params.operationId === undefined ? {} : { operationId: params.operationId })
   });
   redirect(res, `/interview?planId=${encodeURIComponent(plan.id)}&sessionId=${encodeURIComponent(sessionId)}#interview-turn-${encodeURIComponent(Number(params.turnNumber))}`);
 }
@@ -6145,7 +6174,7 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
       ? "这里只显示你主动标记为无回复的岗位；跟进文案按需生成一次，不会自动提醒或发送。"
       : progressPools.has(pool)
         ? "进展操作只更新本地记录；回复、投递、面试确认仍由你在平台上手动完成。"
-        : "岗位按唯一记录展示；可切换本轮新增、本轮重复和历史未处理，已投与跳过状态不会因再次扫描丢失。",
+        : "查看本轮找到的岗位，也可切换到历史未处理岗位。",
     queue: { site: source, pool, counts, scope, scopeCounts, total: filtered.length, page, pageSize, totalPages, latestMainBatchId, profileId: plan.profileId },
     outcomeAnalyticsPanel: site === 'zhaopin' ? '' : outcomeAnalyticsPanel
   });
@@ -6178,7 +6207,7 @@ function renderOutcomeAnalyticsPanel(aggregate) {
     : "<p>\u6682\u65e0\u5173\u952e\u8bcd\u7edf\u8ba1\u8bb0\u5f55\u3002</p>";
   const unclassified = outcomeUnclassifiedCounts(aggregate);
   const noRecordedResults = terminalCount === 0 ? '<p class="outcome-analytics-empty">\u6682\u65e0\u5df2\u8bb0\u5f55\u7ed3\u679c\u3002</p>' : "";
-  const style = '<style>.outcome-analytics-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.outcome-tier-table,.outcome-keyword-table{width:100%;min-width:880px;border-collapse:collapse}.outcome-tier-table th,.outcome-tier-table td,.outcome-keyword-table th,.outcome-keyword-table td{padding:7px;border-bottom:1px solid #d8e0e6;text-align:left;white-space:nowrap}.outcome-analytics-context,.outcome-analytics-diagnostics,.outcome-analytics-unclassified,.outcome-analytics-empty{margin:10px 0;color:#5b6773;font-size:13px}</style>';
+  const style = '<style>.outcome-analytics-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.outcome-tier-table,.outcome-keyword-table{width:100%;min-width:880px;border-collapse:collapse}.outcome-tier-table th,.outcome-tier-table td,.outcome-keyword-table th,.outcome-keyword-table td{padding:7px;border-bottom:1px solid #d8e0e6;text-align:left;white-space:nowrap}.outcome-analytics-context,.outcome-analytics-diagnostics,.outcome-analytics-unclassified,.outcome-analytics-empty{margin:10px 0;color:var(--rf-ink-soft);font-size:13px}</style>';
   return style + '<section class="panel outcome-analytics"><h2>\u7ed3\u679c\u7edf\u8ba1\uff08\u53ea\u8bfb\uff09</h2><p class="outcome-analytics-context">\u5f53\u524d\u65b9\u6848\uff1a' + planName + '\uff1b\u7eb3\u5165\u5c97\u4f4d\uff1a' + includedCount + '\uff1b\u5df2\u8bb0\u5f55\u7ec8\u6001\uff1a' + terminalCount + '\u3002</p><div class="outcome-analytics-table-wrap"><table class="outcome-tier-table"><thead><tr><th>\u63a8\u8350\u6863\u4f4d</th>' + outcomeAnalyticsMetricHeaders() + '</tr></thead><tbody>' + tiers + '</tbody></table></div><p class="outcome-analytics-diagnostics">\u5f85\u5206\u6790\u6216\u5f85\u5237\u65b0\uff08\u4e0d\u7eb3\u5165\u56db\u6863\u6bd4\u8f83\uff09\uff1a' + outcomeDiagnosticsCount(aggregate) + '</p><p class="outcome-analytics-unclassified">\u672a\u5206\u7c7b\u8bb0\u5f55\uff1a' + unclassified.total + '\uff1b\u672a\u77e5\u63a8\u8350\u6863\u4f4d\uff1a' + unclassified.unknownDecisionBucket + '\uff1b\u672a\u77e5\u72b6\u6001\uff1a' + unclassified.unknownApplicationStatus + '</p>' + noRecordedResults + '<h3>\u641c\u7d22\u65b9\u5411\uff08\u5173\u952e\u8bcd\uff09</h3>' + keywords + '<p class="queue-summary">\u4ec5\u4f9b\u89c2\u5bdf\uff0c\u4e0d\u8db3\u4ee5\u8c03\u53c2</p><p class="queue-summary">\u63d0\u793a\uff1a\u8c03\u6574\u5339\u914d\u77e9\u9635\u3001\u6743\u91cd\u6216\u63d0\u793a\u8bcd\u524d\uff0c\u5fc5\u987b\u53d6\u5f97\u7528\u6237\u786e\u8ba4\u3002</p></section>';
 }
 
@@ -6397,10 +6426,37 @@ function renderCompactDashboard(data) {
     ? `<section class="panel"><form method="post" action="/api/analyze-jobs"><input type="hidden" name="planId" value="${escapeAttr(filters.planId)}"><button class="apply">批量重试全部待分析岗位（${queue.counts.analysis_pending}）</button></form><p class="line">仅使用已保存的岗位详情，模型并发固定为 ${PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency}，不会访问招聘网站。</p></section>`
     : "";
   return renderLegacyDashboardPage({ title, currentPath, todayPath, planId: filters.planId, stage: "岗位", body: `<style>
-body{margin:0;background:#f5f7f8;color:#1f2933;font-family:Segoe UI,Microsoft YaHei,sans-serif}main{max-width:1100px;margin:0 auto;padding:22px 18px 48px}nav{display:flex;gap:14px;margin-bottom:20px}a{color:#1265a8;text-decoration:none}a:hover{text-decoration:underline}h1{font-size:24px;margin:0 0 7px}.hint{color:#5b6773;margin:0 0 16px}.panel{background:#fff;border:1px solid #d8e0e6;border-radius:8px;padding:12px 14px;margin:12px 0}.pool-tabs{display:flex;flex-wrap:wrap;gap:8px}.pool-tabs+.pool-tabs{margin-top:9px}.pool-tab{padding:7px 10px;border:1px solid #ccd7df;border-radius:6px;background:#fff;color:#344450}.pool-tab.active{background:#e6f3f0;border-color:#68aa9b;color:#155f54;font-weight:700;text-decoration:none}.queue-summary{margin-top:10px;color:#5b6773;font-size:13px}.pager{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:14px}.pager a,.pager span{padding:7px 10px;border:1px solid #ccd7df;border-radius:5px;background:#fff}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.filters input,.filters select,input,select{box-sizing:border-box;min-width:0;padding:8px;border:1px solid #b9c5ce;border-radius:5px;background:#fff}.job{background:#fff;border:1px solid #d7e0e6;border-radius:8px;padding:14px 16px;margin:10px 0}.job-top{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.job-side{display:grid;justify-items:end;gap:8px}.job-export-choice{font-size:12px;color:#53616d;white-space:nowrap}.job-export-choice input{margin:0 4px 0 0}.readonly-job .job-export-choice{display:flex;align-items:center;gap:6px}.readonly-job .job-export-choice input{width:18px;height:18px;min-height:18px}.job-title{font-size:16px;font-weight:700;line-height:1.35}.job-meta,.job-reason,.job-risk,.line{margin-top:7px;font-size:14px;line-height:1.45;color:#53616d}.job-reason{color:#27604f}.job-risk{color:#9a4b42}.decision{display:inline-block;white-space:nowrap;border:1px solid #d8e0e6;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.decision.primary{background:#e6f3f0;border-color:#86b9ad;color:#155f54}.decision.apply{background:#eef4fa;border-color:#9cbcdc;color:#245b87}.decision.caution{background:#fff6df;border-color:#ead29a;color:#825b13}.analysis_pending{background:#f1f3f5;border-color:#b9c3cc;color:#46535e}.refresh{background:#f5f0fd;border-color:#c8b8e6;color:#64419b}.not_recommended{background:#f9e9e7;border-color:#e5b3ae;color:#9b3f37}.quick-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.quick-actions select{max-width:190px}.export-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.export-actions form{margin:0}button{padding:7px 10px;cursor:pointer;border:1px solid #aab8c2;border-radius:5px;background:#fff;color:#25313a}button:disabled{cursor:not-allowed;opacity:.55}.apply{background:#176b5b;border-color:#176b5b;color:#fff}.skip{color:#8a3a33}.details{margin-top:11px;border-top:1px solid #e4e9ed;padding-top:9px}.details summary{cursor:pointer;color:#4f6170;font-size:13px}.detail-body{margin-top:10px}.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.chip{border:1px solid #d8dee4;border-radius:999px;padding:3px 7px;font-size:12px;background:#f6f8fa}.risk{background:#f9e9e7;border-color:#e5b3ae}.jd{white-space:pre-wrap;background:#f7f9fa;border-left:3px solid #2a7185;padding:9px 10px;font-size:13px;line-height:1.55}.detail-actions,.follow{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}.detail-actions input,.follow input{flex:1 1 220px}textarea{box-sizing:border-box;width:100%;min-height:52px;margin-top:8px;padding:8px;border:1px solid #b9c5ce;border-radius:5px;background:#fafcfd}@media(max-width:760px){.filters{grid-template-columns:1fr 1fr}.job-top{display:block}.job-side{justify-items:start;margin-top:8px}.decision{margin-top:7px}}</style><main id="main-content">
-<h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(hint)}${latestBatchId ? ` 主扫描批次 #${latestBatchId}` : ""}</p>
-  ${queue ? renderCompactPoolTabs(queue, filters.planId, queue.profileId) : renderCompactFilters(filters)}${exportControls}${outcomeAnalyticsPanel}${analysisRetry}
-<section class="job-ledger" aria-label="岗位记录">${jobs.map((job) => renderCompactJob(job, { ...filters, exportEnabled: !queue && filters.exportEnabled })).join("") || "<section class=\"panel\">这个分组目前没有岗位。</section>"}</section>${queue ? renderCompactPager(queue, filters.planId) : ""}</main><script>async function copyGreeting(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}${exportScript}</script>` });
+.offergo-jobs{max-width:1100px;margin:0 auto;padding:22px 18px 48px;color:var(--rf-ink)}
+.offergo-jobs a{color:var(--rf-teal)}.offergo-jobs h1{font-size:24px;margin:0 0 7px}.offergo-jobs .hint{color:var(--rf-ink-soft);margin:0 0 16px}
+.offergo-jobs :is(.panel,.job){background:var(--rf-surface);border:1px solid var(--rf-rule);border-radius:8px;padding:12px 14px;margin:12px 0}
+.offergo-jobs .pool-tabs{display:flex;flex-wrap:wrap;gap:8px}.offergo-jobs .pool-tabs+.pool-tabs{margin-top:9px}
+.offergo-jobs .pool-tab{padding:7px 10px;border:1px solid var(--rf-rule);border-radius:6px;background:var(--rf-surface);color:var(--rf-ink-soft)}
+.offergo-jobs .pool-tab.active{background:var(--rf-mist);border-color:var(--rf-teal);color:var(--rf-teal-deep);font-weight:700;text-decoration:none}
+.offergo-jobs .queue-summary{margin-top:10px;color:var(--rf-ink-soft);font-size:13px}.offergo-jobs .pager{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:14px}
+.offergo-jobs .pager :is(a,span){padding:7px 10px;border:1px solid var(--rf-rule);border-radius:5px;background:var(--rf-surface)}
+.offergo-jobs .filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.offergo-jobs :is(input,select,textarea){box-sizing:border-box;min-width:0;padding:8px;border:1px solid var(--rf-rule);border-radius:5px;background:var(--rf-surface);color:var(--rf-ink)}
+.offergo-jobs .job{padding:14px 16px;margin:10px 0}.offergo-jobs .job-top{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.offergo-jobs .job-side{display:grid;justify-items:end;gap:8px}.offergo-jobs .job-export-choice{font-size:12px;color:var(--rf-ink-soft);white-space:nowrap}
+.offergo-jobs .job-export-choice input{margin:0 4px 0 0}.offergo-jobs .readonly-job .job-export-choice{display:flex;align-items:center;gap:6px}.offergo-jobs .readonly-job .job-export-choice input{width:18px;height:18px;min-height:18px}
+.offergo-jobs .job-title{font-size:16px;font-weight:700;line-height:1.35}.offergo-jobs :is(.job-meta,.job-reason,.job-risk,.line){margin-top:7px;font-size:14px;line-height:1.45;color:var(--rf-ink-soft)}
+.offergo-jobs .job-reason{color:var(--rf-teal-deep)}.offergo-jobs .job-risk{color:var(--rf-red,#9a4b42)}
+.offergo-jobs .decision{display:inline-block;white-space:nowrap;border:1px solid var(--rf-rule);border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}
+.offergo-jobs .decision.primary{background:var(--rf-mist);border-color:var(--rf-teal);color:var(--rf-teal-deep)}.offergo-jobs .decision.apply{color:var(--rf-blue,#245b87)}
+.offergo-jobs .decision.caution{color:var(--rf-amber,#825b13)}.offergo-jobs .not_recommended{color:var(--rf-red,#9b3f37)}
+.offergo-jobs :is(.quick-actions,.export-actions){display:flex;flex-wrap:wrap;gap:8px;align-items:center}.offergo-jobs .quick-actions{margin-top:12px}.offergo-jobs .quick-actions select{max-width:190px}.offergo-jobs .export-actions form{margin:0}
+.offergo-jobs button{padding:7px 10px;cursor:pointer;border:1px solid var(--rf-rule);border-radius:5px;background:var(--rf-surface);color:var(--rf-teal-deep)}.offergo-jobs button:disabled{cursor:not-allowed;opacity:.55}
+.offergo-jobs button.apply{background:var(--rf-teal);border-color:var(--rf-teal);color:var(--rf-surface)}.offergo-jobs .skip{color:var(--rf-red,#8a3a33)}
+:root[data-theme="dark"] .offergo-jobs button:not(.apply):not(.secondary):not(.quiet):not(.theme-toggle){color:var(--rf-teal)}
+.offergo-jobs .details{margin-top:11px;border-top:1px solid var(--rf-rule);padding-top:9px}.offergo-jobs :is(.details summary,.job-statistics>summary){cursor:pointer;color:var(--rf-ink-soft);font-size:13px}.offergo-jobs .detail-body{margin-top:10px}
+.offergo-jobs .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.offergo-jobs .chip{border:1px solid var(--rf-rule);border-radius:999px;padding:3px 7px;font-size:12px;background:var(--rf-mist)}
+.offergo-jobs .jd{white-space:pre-wrap;background:var(--rf-mist);border-left:3px solid var(--rf-teal);padding:9px 10px;font-size:13px;line-height:1.55}
+.offergo-jobs :is(.detail-actions,.follow){display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px}.offergo-jobs :is(.detail-actions,.follow) input{flex:1 1 220px}
+.offergo-jobs textarea{width:100%;min-height:52px;margin-top:8px}.offergo-jobs .job-statistics{margin-top:20px;padding:12px 14px;border:1px solid var(--rf-rule);border-radius:8px}
+@media(max-width:760px){.offergo-jobs .filters{grid-template-columns:1fr 1fr}.offergo-jobs .job-top{display:block}.offergo-jobs .job-side{justify-items:start;margin-top:8px}.offergo-jobs .decision{margin-top:7px}}</style><main id="main-content" class="offergo-jobs">
+<h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(hint)}</p>
+  ${queue ? renderCompactPoolTabs(queue, filters.planId, queue.profileId) : renderCompactFilters(filters)}${exportControls}${analysisRetry}
+<section class="job-ledger" aria-label="岗位记录">${jobs.map((job) => renderCompactJob(job, { ...filters, exportEnabled: !queue && filters.exportEnabled })).join("") || "<section class=\"panel\">这个分组目前没有岗位。</section>"}</section>${queue ? renderCompactPager(queue, filters.planId) : ""}${outcomeAnalyticsPanel || latestBatchId ? `<details class="job-statistics"><summary>${outcomeAnalyticsPanel ? "查看岗位与沟通统计" : "查看运行详情"}</summary>${outcomeAnalyticsPanel}${latestBatchId ? `<p class="hint">本轮任务编号：#${escapeHtml(latestBatchId)}</p>` : ""}</details>` : ""}</main><script>async function copyGreeting(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}${exportScript}</script>` });
 }
 
 function renderCompactJobExportControls(filters) {
@@ -6427,14 +6483,14 @@ function jobExportFilterInputs(filters) {
 
 function renderCompactPoolTabs(queue, planId, profileId = "") {
   const scopes = [["all", "全部待处理", queue.scopeCounts.all || 0], ["new", "本轮新增", queue.scopeCounts.new || 0], ["repeated", "本轮重复", queue.scopeCounts.repeated || 0], ["backlog", "历史未处理", queue.scopeCounts.backlog || 0]];
-  const tabs = [["focus", "主投 + 可投", (queue.counts.primary || 0) + (queue.counts.apply || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "待语义分析", queue.counts.analysis_pending || 0], ["detail_pending", "待读详情", queue.counts.detail_pending || 0], ["activity_pending", "活跃待核验", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
+  const tabs = [["focus", "主投 + 可投", (queue.counts.primary || 0) + (queue.counts.apply || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "等待分析", queue.counts.analysis_pending || 0], ["detail_pending", "等待补齐资料", queue.counts.detail_pending || 0], ["activity_pending", "等待确认招聘状态", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
   const scopeLinks = scopes.map(([key, label, count]) => `<a class="pool-tab ${queue.scope === key ? "active" : ""}" href="${queueHref(planId, queue.pool, key, 1, queue.site)}">${escapeHtml(label)} ${count}</a>`).join("")
     + `<a class="pool-tab" href="/communication/new?planId=${escapeAttr(planId)}${queue.site === 'zhaopin' ? '&site=zhaopin' : ''}">${queue.site === 'zhaopin' ? '选择岗位打招呼' : '批量沟通清单'}</a>`
     + (profileId ? `<a class="pool-tab" href="/messages?profileId=${escapeAttr(profileId)}${queue.site === 'zhaopin' ? '&workSite=zhaopin' : ''}">消息发现</a>` : "");
   const poolLinks = tabs.filter(([key]) => queue.site !== 'zhaopin' || !['activity_pending', 'no_reply', 'waiting_reply', 'needs_user_action', 'interview'].includes(key)).map(([key, label, count]) => `<a class="pool-tab ${queue.pool === key ? "active" : ""}" href="${queueHref(planId, key, queue.scope, 1, queue.site)}">${escapeHtml(label)} ${count}</a>`).join("");
   const from = queue.total ? (queue.page - 1) * queue.pageSize + 1 : 0;
   const to = Math.min(queue.total, queue.page * queue.pageSize);
-  return `<section class="panel"><div class="pool-tabs">${scopeLinks}</div><div class="pool-tabs">${poolLinks}</div><div class="queue-summary">当前显示 ${from}-${to} / 共 ${queue.total} 条；范围以主扫描批次 #${escapeHtml(queue.latestMainBatchId || "-")} 为准。</div></section>`;
+  return `<section class="panel"><div class="pool-tabs">${scopeLinks}</div><div class="pool-tabs">${poolLinks}</div><div class="queue-summary">当前显示 ${from}-${to} / 共 ${queue.total} 条。</div></section>`;
 }
 
 function renderCompactPager(queue, planId) {
@@ -6506,7 +6562,7 @@ function compactJobNarrative(job, { salaryLabel, risk }) {
     : industryContext
       ? `${company}所在方向为${industryContext}；这个机会的核心是${role}。`
       : `${company}的具体业务在当前岗位资料中没有展开；可以确认的机会重点是${role}。`;
-  const fit = (Array.isArray(analysis.fitReasons) ? analysis.fitReasons : [])
+  const fit = evidenceFitReasons(analysis)
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .slice(0, 2)

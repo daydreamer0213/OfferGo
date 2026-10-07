@@ -1,4 +1,45 @@
 const PLATFORMS = new Set(["boss", "zhaopin"]);
+const { MESSAGE_ACTION_WINDOW_MS } = require("../core/message_requested_actions");
+
+function messageReplyWindowExpired({ actionGroup, lastDirection, lastActivityAt } = {}, now = new Date()) {
+  const activityMs = Date.parse(String(lastActivityAt || ""));
+  const nowMs = new Date(now).getTime();
+  return ["needs_action", "needs_review"].includes(actionGroup) && lastDirection === "friend"
+    && Number.isFinite(activityMs) && Number.isFinite(nowMs)
+    && nowMs - activityMs > MESSAGE_ACTION_WINDOW_MS;
+}
+
+function getConfirmedFutureInterview(db, { profileId, cardId, lastActivityAt, messageGroupKey, now = new Date() } = {}) {
+  const card = db.prepare("SELECT stage, scheduled_at, last_event_at FROM candidate_progress_cards WHERE id = ? AND profile_id = ?")
+    .get(Number(cardId), Number(profileId));
+  const scheduledMs = Date.parse(card?.scheduled_at || "");
+  if (!card || card.stage !== "interview_scheduled" || !Number.isFinite(scheduledMs) || scheduledMs <= new Date(now).getTime()) return null;
+  const activity = lastActivityAt || db.prepare(`SELECT created_at FROM message_inbound_contexts
+    WHERE profile_id = ? AND card_id = ? AND message_group_key = ?`).get(Number(profileId), Number(cardId), messageGroupKey)?.created_at;
+  const confirmedMs = Date.parse(card.last_event_at || "");
+  if (!Number.isFinite(confirmedMs) || !Number.isFinite(Date.parse(activity || "")) || Date.parse(activity) > confirmedMs) return null;
+  return { scheduledAt: card.scheduled_at };
+}
+
+function assertMessageReplyWindowOpen(db, { profileId, cardId, messageGroupKey, expectedLastMessageId = null, now = new Date() } = {}) {
+  const context = db.prepare(`SELECT contexts.*, cards.source AS platform FROM message_inbound_contexts contexts
+    JOIN candidate_progress_cards cards ON cards.id = contexts.card_id AND cards.profile_id = contexts.profile_id
+    WHERE contexts.profile_id = ? AND contexts.card_id = ? AND contexts.message_group_key = ?`)
+    .get(Number(profileId), Number(cardId), messageGroupKey);
+  if (!context || context.message_intent === "follow_up") return;
+  const messageId = expectedLastMessageId || context.last_message_id;
+  const event = db.prepare(`SELECT occurred_at, first_observed_at FROM message_events
+    WHERE profile_id = ? AND platform = ? AND conversation_key = ? AND platform_message_id = ? AND direction = 'friend'
+    ORDER BY id DESC LIMIT 1`).get(Number(profileId), context.platform, context.conversation_key, messageId);
+  const inbox = db.prepare(`SELECT last_activity_at FROM message_inbox_items
+    WHERE profile_id = ? AND platform = ? AND conversation_key = ? AND last_message_id = ? AND last_direction = 'friend'`)
+    .get(Number(profileId), context.platform, context.conversation_key, messageId);
+  // Anchor the pending group to its actual HR message, never a later sync or the conversation's first contact.
+  const lastActivityAt = event?.occurred_at || event?.first_observed_at || inbox?.last_activity_at || context.created_at;
+  if (messageReplyWindowExpired({ actionGroup: "needs_action", lastDirection: "friend", lastActivityAt }, now)) {
+    throw Object.assign(new Error("这条消息已超过 7 天未回复，不再处理。"), { code: "MESSAGE_REPLY_WINDOW_EXPIRED" });
+  }
+}
 
 function listIncomingLinkedContexts(db, profileId) {
   return db.prepare(`SELECT contexts.*, cards.source AS platform, cards.job_id, jobs.title, jobs.company
@@ -104,6 +145,9 @@ function updateMessageGroupFactRequest(db, { profileId, cardId, messageGroupKey,
 }
 
 module.exports = {
+  getConfirmedFutureInterview,
+  messageReplyWindowExpired,
+  assertMessageReplyWindowOpen,
   listIncomingLinkedContexts,
   listClassifiedMessageHistory,
   listRawUnresolvedMessageItems,

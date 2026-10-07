@@ -8,7 +8,8 @@ const {
 const {
   getDurableMessageDraftContext,
   getMessageGroupClassification,
-  updateMessageGroupFactRequest
+  updateMessageGroupFactRequest,
+  assertMessageReplyWindowOpen
 } = require("../../storage/message_discovery_store");
 const { messageReplyProfile } = require("../../core/message_discovery");
 const { deriveRequestedActions } = require('../../core/message_requested_actions');
@@ -54,6 +55,13 @@ async function answerMissingMessageFact({
     throw answerFactError("MESSAGE_DISCOVERY_CONTEXT_INVALID", "message fact context is unavailable", 409);
   }
   const answeredAt = now();
+  try {
+    assertMessageReplyWindowOpen(db, { profileId: profile, cardId: card,
+      messageGroupKey: groupKey, now: answeredAt });
+  } catch (error) {
+    if (error.code !== "MESSAGE_REPLY_WINDOW_EXPIRED") throw error;
+    throw answerFactError(error.code, error.message, 409);
+  }
   saveCandidateFact(db, { profileId: profile, factKey: key, factValue: answer, source: "user_provided" });
   const facts = listCandidateFacts(db, profile, { job: { id: jobRow.job_id, sourceId: jobRow.source_id, company: jobRow.company } })
     .filter((fact) => fact.factKey !== key)

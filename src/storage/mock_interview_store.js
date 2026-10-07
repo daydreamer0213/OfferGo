@@ -167,6 +167,13 @@ function getMockInterviewSession(db, { profileId, planId, sessionId }) {
   return sessionRow(db, ownedSessionRow(db, profileId, planId, sessionId));
 }
 
+function findMockInterviewOperation(db, { profileId, planId, operationId }) {
+  const row = db.prepare(`SELECT * FROM mock_interview_sessions WHERE profile_id = ? AND plan_id = ?
+    AND json_extract(model_identity_json, '$.operationId') = ? ORDER BY id DESC LIMIT 1`)
+    .get(positiveId(profileId, 'profileId'), positiveId(planId, 'planId'), String(operationId));
+  return sessionRow(db, row);
+}
+
 function listMockInterviewSessions(db, input = {}) {
   const boundedLimit = Math.max(1, Math.min(100, Number(input.limit) || 30));
   const clauses = ["profile_id = ?"];
@@ -337,6 +344,7 @@ function recordMockInterviewRetry(db, input = {}) {
 module.exports = {
   createMockInterviewSession,
   getMockInterviewSession,
+  findMockInterviewOperation,
   listMockInterviewSessions,
   appendMockInterviewQuestion,
   answerMockInterviewTurn,

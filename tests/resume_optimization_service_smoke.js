@@ -189,6 +189,23 @@ try {
   }), /原文/);
   assert.strictEqual(db.prepare("SELECT count(*) AS n FROM resume_optimizations").get().n, rowsBeforeMalformed);
 
+  const unchangedService = createResumeOptimizationService({ db, adapter: {
+    async generateResumeOptimization() { return { headline: '现稿已清楚，无需修改', suggestions: [] }; }
+  } });
+  for (const mode of ['general', 'job_specific']) {
+    const unchanged = await unchangedService.createDraft({ profileId: owner.profileId, planId: owner.planId,
+      sourceResumeVersionId: owner.resumeVersionId, mode, jobId: mode === 'job_specific' ? validJobId : undefined });
+    assert.deepStrictEqual(unchanged.changeLedger, []);
+    assert.strictEqual(unchanged.finalText, document('resume-owner', '候选人甲').text);
+    const savedUnchanged = unchangedService.saveDraft({ profileId: owner.profileId, planId: owner.planId,
+      draftId: unchanged.id, finalText: unchanged.finalText });
+    assert.strictEqual(savedUnchanged.integrity.valid, true);
+    assert.strictEqual(unchangedService.activateDraft({ profileId: owner.profileId, planId: owner.planId,
+      draftId: unchanged.id, finalText: unchanged.finalText }).status, 'activated');
+    assert.strictEqual(require('../src/storage/candidate_store').getCandidateResumeDocument(db,
+      { profileId: owner.profileId, resumeVersionId: owner.resumeVersionId }).text, document('resume-owner', '候选人甲').text);
+  }
+
   const descriptiveIdsService = createResumeOptimizationService({ db, adapter: {
     async generateResumeOptimization() {
       return { headline: "展开已有工作与技能", suggestions: [
@@ -370,7 +387,8 @@ try {
     sourceResumeVersionId: owner.resumeVersionId,
     targetDirection: "AI 应用工程师"
   });
-  assert.strictEqual(mockDraft.suggestions[0].originalText, "参与企业知识库开发");
+  assert.strictEqual(mockDraft.suggestions.length, 0);
+  assert.strictEqual(mockDraft.finalText, document('unused', '候选人甲').text);
 
   const punctuationText = '标点测试\n项目经历：参与接口联调，做检索测试。\n技能：Ｎｏｄｅ．ｊｓ';
   const punctuation = storage.saveProfileAnalysis(db, {

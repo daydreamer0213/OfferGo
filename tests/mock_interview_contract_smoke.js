@@ -43,6 +43,14 @@ assert.deepStrictEqual(legacyBrief.jobFocus.requirements, ['旧岗位要求']);
 assert.deepStrictEqual(legacyBrief.jobFocus.matchingEvidence, { resume: ['旧证据'] });
 
 const generalBrief = buildInterviewBrief({ sessionKind: 'resume_general' });
+for (const questionKind of ['behavioral', 'arbitrary_invalid_kind']) {
+  assert.throws(() => validateInterviewStep({ answerReview: null, complete: false,
+    nextQuestion: { text: '请讲一次与同学协作解决问题的经历。', focus: 'collaboration',
+      resumeEvidenceIds: ['R2'], basedOnTurnNumber: null, answerEvidence: '', questionKind }
+  }, { ...stepContext, interviewBrief: generalBrief, turns: [] }),
+  error => error.code === 'MOCK_INTERVIEW_QUESTION_KIND_INVALID',
+  'invalid dialogue kinds must be rejected with a targeted repair reason, never coerced from interview styles');
+}
 const progress = buildInterviewProgress(generalBrief, [
   { turnNumber: 1, question: '请介绍职业方向。', focus: 'intro', answer: '想从事应用开发' },
   { turnNumber: 2, questionText: '遇到排障难题时如何定位？', questionFocus: 'problem_solving', answerText: '比较日志' },

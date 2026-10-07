@@ -1,4 +1,6 @@
 const assert = require("assert");
+require('./confirmed_primary_gap_regressions');
+require("./matching_responsibility_evidence_regressions");
 const fs = require("fs");
 const path = require("path");
 const { loadConfigs, normalizeSemanticMatchingMode } = require("../src/config");
@@ -70,6 +72,7 @@ const db = openDb(dbPath);
 
 (async () => {
   try {
+    jobExplanationEvidenceSmoke();
     await stableUnderstandingAndCandidateMatchSmoke();
     await contractRepairAndFailureSmoke();
     await multiTrackValidationIdempotenceSmoke();
@@ -844,8 +847,8 @@ async function initialFailureProvenanceSmoke() {
 
 async function pipelineVersionCacheSmoke() {
   assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v19");
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v44");
-  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v1");
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v45-effect-evidence");
+  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect");
   const currentRevision = {
     profileVersion: "profile",
     searchPlanVersion: "plan",
@@ -1576,8 +1579,8 @@ async function multiTrackValidationIdempotenceSmoke() {
   assert(!JSON.stringify(analyzerResult).includes(privacySentinel),
     "analyzer wrapper must not preserve raw extra values");
 
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v44",
-    "joint-fit threshold changes must invalidate v43 match caches");
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v45-effect-evidence",
+    "source evidence and duty evidence fixes must invalidate previous match caches");
   assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v19",
     "foundation requirement extraction clarification must invalidate v18 understandings");
   const currentRevision = {
@@ -2323,9 +2326,9 @@ function staleAnalysisSmoke() {
   assert(contractUpgradeReasons.includes("decision_rules_changed"), "old revisions without local decision rules must be stale");
   assert.deepStrictEqual(PIPELINE_VERSIONS, {
     understandJob: "job-understanding-v19",
-    matchJob: "match-decision-v44",
-    decisionRules: "four-tier-weighted-v4.8-screening-v1",
-    communication: "communication-v2"
+    matchJob: "match-decision-v45-effect-evidence",
+    decisionRules: "four-tier-weighted-v4.8-screening-v2-effect",
+    communication: "communication-v3-candidate-speaker"
   });
   const decisionRulesOnlyChanged = analysisStaleReasons({
     revision: { ...oldPipelineRevision, pipelineVersions: { ...PIPELINE_VERSIONS, decisionRules: "previous-rules" } }
@@ -4393,6 +4396,33 @@ async function compactMatchEvidenceContractSmoke() {
   }, { jobUnderstanding: chineseYearsUnderstanding });
   assert.notStrictEqual(chineseYearsGap.recommendation, "skip", "中文“两年”写法的年限差距不得成为硬淘汰");
   assert.deepStrictEqual(chineseYearsGap.hardBlockers, []);
+}
+
+function jobExplanationEvidenceSmoke() {
+  const jobUnderstanding = {
+    roleSummary: '开发订单接口并排查重复提交',
+    responsibilityEvidence: ['JD：负责订单接口幂等、重试和故障排查'],
+    coreRequirements: [
+      { id: 'R1', label: '本科', foundation: false, central: false, indispensable: false, evidence: 'JD：本科学历' },
+      { id: 'R2', label: 'Python', foundation: true, central: false, indispensable: false, evidence: 'JD：掌握Python' }
+    ], eligibilityItems: [], jobQuality: { level: 'normal', concerns: [] }
+  };
+  const sparse = { roleAlignment: 'aligned', roleResumeEvidence: ['简历：订单项目定位重复提交并改造接口幂等'],
+    roleGaps: [], matches: [{ id: 'R1', state: 'matched', resumeEvidence: '简历：本科学历' },
+      { id: 'R2', state: 'matched', resumeEvidence: '简历：用Python开发订单重试接口' }], eligibility: [],
+    responsibilityMatches: [{ id: 'D1', state: 'matched', resumeEvidence: '简历：订单项目定位重复提交并改造接口幂等' }] };
+  const result = validateModelResultRaw('matchJob', sparse, { jobUnderstanding });
+  assert.match(result.fitReasons[0], /定位重复提交.*接口幂等.*订单接口幂等、重试和故障排查/,
+    'actual work and candidate action must precede education/tool labels');
+  assert.strictEqual(result.recommendation, 'apply');
+  const roleOnly = validateModelResultRaw('matchJob', { ...sparse, responsibilityMatches: [] }, { jobUnderstanding });
+  assert.match(roleOnly.fitReasons[0], /订单项目定位重复提交/,
+    'stored role evidence must survive even without per-responsibility matches');
+  const compact = validateModelResultRaw('matchJob', { matches: sparse.matches, eligibility: [],
+    uncertainties: [], cautions: [], certainty: 'high' }, { jobUnderstanding });
+  assert(compact.fitReasons.some(reason => reason.includes('用Python开发订单重试接口')),
+    'compact matching must not reduce actual evidence to a tool label');
+  assert.strictEqual(compact.recommendation, 'apply');
 }
 
 function roleAlignmentEvidenceContractSmoke() {

@@ -300,3 +300,4 @@ assert.equal(tooShort.valid, false);
 assert(tooShort.errors.some((item) => item.code === "RESUME_TEXT_TOO_SHORT"));
 
 console.log("resume_optimization_contract_smoke ok");
+require('./resume_optimization_effect_regressions');

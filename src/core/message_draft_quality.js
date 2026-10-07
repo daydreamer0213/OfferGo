@@ -54,6 +54,8 @@ function extractHighRiskClaims(text) {
 
 function likelyCandidateNumericAchievement(value) {
   const text = String(value || "");
+  // A stated test-data size is evidence even without an achievement verb.
+  if (numericTestDataScope(text)) return true;
   const candidateContext = /我|本人|曾|过往|此前|累计|参与|主导|项目经历|工作经历/;
   const personalHistory = /本人|我(?:曾|之前|此前|过去|做过|参与|主导|负责过|解决过|处理过)|曾|过往|此前|累计|项目经历|工作经历/;
   const employerContext = /岗位|职位|贵司|公司|团队|招聘方|您介绍/;
@@ -89,7 +91,12 @@ function assessMessageDraftQuality({ text, recentTexts = [], evidenceTexts = [] 
     .flatMap((value) => extractHighRiskClaims(value));
   const evidenceKeys = new Set(evidenceClaims.map((claim) => `${claim.kind}:${claimSignature(claim)}`));
   const errors = extractHighRiskClaims(text)
-    .filter((claim) => !evidenceKeys.has(`${claim.kind}:${claimSignature(claim)}`))
+    .filter((claim) => !evidenceKeys.has(`${claim.kind}:${claimSignature(claim)}`)
+      && !(claim.kind === 'numeric_achievement' && numericTestDataScope(claim.value)
+        && testDataObject(claim.value) === 'data'
+        && evidenceClaims.some(evidence => evidence.kind === 'numeric_achievement'
+          && numericTestDataScope(evidence.value)
+          && testDataQuantity(evidence.value) === testDataQuantity(claim.value))))
     .map((claim) => ({ code: "MESSAGE_DRAFT_FACT_UNSUPPORTED", ...claim }));
   return {
     valid: errors.length === 0,
@@ -155,7 +162,12 @@ function claimSignature({ kind, value }) {
     const negative = /尚未|没有|还没|未|不再|不/.test(value);
     return /离职/.test(value) !== negative ? 'left' : 'employed';
   }
-  if (["percentage", "duration", "numeric_achievement"].includes(kind)) {
+  if (kind === "numeric_achievement") {
+    return numericTestDataScope(value)
+      ? `${testDataQuantity(value)}:${testDataObject(value)}:test_data`
+      : `${numericToken(value)}:${semanticToken(kind, value)}:ordinary`;
+  }
+  if (["percentage", "duration"].includes(kind)) {
     return `${numericToken(value)}:${semanticToken(kind, value)}`;
   }
   if (["arrival", "interview_availability"].includes(kind)) {
@@ -168,6 +180,25 @@ function claimSignature({ kind, value }) {
     return `${polarity}:${qualifier}`;
   }
   return normalized;
+}
+
+function numericTestDataScope(value) {
+  return /测试环境|测试数据|测试集|压测数据/.test(String(value || ""));
+}
+
+function testDataQuantity(value) {
+  const quantities = String(value || '').normalize('NFKC')
+    .match(/\d+(?:\.\d+)?\s*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)/g) || [];
+  return quantities.map(numericToken).join('|');
+}
+
+function testDataObject(value) {
+  const normalized = String(value || '').normalize('NFKC');
+  const quantity = /\d+(?:\.\d+)?\s*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)/.exec(normalized);
+  const object = normalized.slice((quantity?.index || 0) + (quantity?.[0].length || 0),
+    (quantity?.index || 0) + (quantity?.[0].length || 0) + 12);
+  const named = object.match(/订单|合同|客户|用户|请求|调用|工单|项目|公司|企业|门店|店铺/);
+  return named ? semanticToken('numeric_achievement', named[0]) : 'data';
 }
 
 function scheduleToken(value) {

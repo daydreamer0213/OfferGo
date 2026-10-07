@@ -258,40 +258,34 @@ class MockModelAdapter {
     return { kind, jobId: jobUnderstanding.jobId || "", messages: [message], missingFact: null, evidence: { jd: jobEvidence, resume: resumeEvidence }, tone: "自然、稳健、不夸大" };
   }
 
-  async generateResumeOptimization({ evidenceCatalog = [] } = {}) {
-    const resumeEvidence = evidenceCatalog.find((item) => item?.kind === "resume"
-      && String(item.text || "").length >= 6
-      && !/已隐藏|已遮盖/.test(String(item.text || ""))
-      && !/^(个人总结|项目经历|工作经历|技能|教育经历)$/.test(String(item.text || "").trim()));
-    if (!resumeEvidence) throw new Error("Mock 定向简历需要至少一条可编辑的简历证据");
-    const originalText = String(resumeEvidence.text).trim();
+  async generateResumeOptimization() {
     return {
-      headline: "把与目标岗位直接相关的经历放到更清楚的位置",
-      suggestions: [{
-        id: "S1",
-        operation: "replace",
-        originalText,
-        proposedText: `相关经历：${originalText}`,
-        reason: "只调整表达层级，不增加候选人事实",
-        evidenceIds: [resumeEvidence.id],
-        editingPrinciple: "structure"
-      }]
+      headline: "离线 Mock 占位草稿：保留原文，未评估或优化简历内容。",
+      suggestions: []
     };
   }
 
   async generateMockInterviewStep({ context = {}, settings = {}, turns = [] } = {}) {
     const job = context.job || {};
-    const resumeEvidence = (Array.isArray(context.resumeEvidenceCatalog) ? context.resumeEvidenceCatalog : [])[0];
+    // Only choose a line describing an action for the fixed practice question.
+    // This is not a semantic assessment of the resume or the user's answer.
+    const resumeEvidence = (Array.isArray(context.resumeEvidenceCatalog) ? context.resumeEvidenceCatalog : []).find((item) => {
+      const text = String(item?.text || "").trim();
+      return item?.id && text
+        && !/^(?:[\[【（(].*(?:已隐藏|已遮盖).*?[\]】）)]|个人总结|项目经历|工作经历|教育经历|技能)$/.test(text)
+        && !/^(?:姓名|联系方式|手机|电话|邮箱|求职意向|目标岗位|教育经历|毕业院校)[:：]/.test(text)
+        && /(?<!未|没有|不曾|尚未)(?:参与|负责|完成|实现|搭建|设计|优化|整理|(?:测试|开发).*(?:接口|系统|应用|服务|项目|功能))/.test(text);
+    });
     if (!resumeEvidence?.id || !String(resumeEvidence.text || "").trim()) {
-      throw new Error("Mock 模拟面试需要至少一条简历证据");
+      throw new Error("离线 Mock 模拟面试需要一条描述实际工作或项目行动的简历证据，姓名和栏目标题不能作为经历。");
     }
     const resumeEvidenceIds = [String(resumeEvidence.id)];
-    const resumeExcerpt = clip(String(resumeEvidence.text).replace(/\s+/g, " "), 42);
+    const resumeExcerpt = clip(String(resumeEvidence.text).replace(/\s+/g, " "), 800);
     const history = Array.isArray(turns) ? turns : [];
     if (!history.length) {
       const questionText = context.sessionKind === "resume_general" || !context.job
-        ? `简历中写到“${resumeExcerpt}”，请介绍这段经历以及你具体做了什么。`
-        : `简历中写到“${resumeExcerpt}”，请结合真实经历介绍你为什么适合${job.company ? `${job.company}的` : ""}${job.title || "该岗位"}。`;
+        ? `离线 Mock 练习题：简历中写到“${resumeExcerpt}”，请介绍这段经历以及你具体做了什么。`
+        : `离线 Mock 练习题：简历中写到“${resumeExcerpt}”，请结合真实经历介绍你为什么适合${job.company ? `${job.company}的` : ""}${job.title || "该岗位"}。`;
       return {
         answerReview: null,
         nextQuestion: {
@@ -312,15 +306,15 @@ class MockModelAdapter {
     const focus = focusOrder[(history.length - 1) % focusOrder.length];
     return {
       answerReview: {
-        conclusion: answer.length >= 30 ? "回答已经覆盖核心信息，可以继续补充个人行动和结果。" : "回答较短，需要补充具体背景、个人行动和结果。",
-        strengths: answer ? ["回答与当前问题直接相关"] : [],
-        improvements: answer.length >= 30 ? ["进一步明确个人贡献边界"] : ["补充一个真实具体例子"],
+        conclusion: "离线 Mock 已记录回答，未评估是否切题、事实真实性或内容质量。",
+        strengths: [],
+        improvements: [],
         turnNumbers: [Number(last.turnNumber)]
       },
       nextQuestion: complete ? null : {
         text: context.sessionKind === "resume_general" || !context.job
-          ? `你刚才提到“${answerExcerpt}”，请结合简历中的“${resumeExcerpt}”继续说明你的个人行动和取舍。`
-          : `你刚才提到“${answerExcerpt}”，请结合${job.title || "该岗位"}继续说明你的个人行动和取舍。`,
+          ? `离线 Mock 练习题：你刚才提到“${answerExcerpt}”，请结合简历中的“${resumeExcerpt}”继续说明你的个人行动和取舍。`
+          : `离线 Mock 练习题：你刚才提到“${answerExcerpt}”，请结合${job.title || "该岗位"}继续说明你的个人行动和取舍。`,
         focus,
         resumeEvidenceIds,
         basedOnTurnNumber: Number(last.turnNumber),
@@ -335,25 +329,22 @@ class MockModelAdapter {
     const target = history[Math.min(1, Math.max(0, history.length - 1))] || history[0];
     const turnNumber = Number(target?.turnNumber || 1);
     return {
-      conclusion: "本轮回答与岗位方向基本相关，下一轮重点把个人行动和结果说得更具体。",
-      strengths: ["能够直接回答问题", "表达保持在已有经历范围内"],
-      improvements: ["补充个人贡献边界", "用背景、行动、结果组织项目回答"],
-      followUpRisks: [{ turnNumber, reason: "回答中的个人行动仍可能被继续追问" }],
-      retryRecommendations: [{ turnNumber, reason: "优先重练这题并补充具体行动与结果" }],
+      conclusion: "离线 Mock 仅记录本轮练习，不评估是否切题、事实真实性或内容质量。以下回答结构仅供练习参考。",
+      strengths: [],
+      improvements: [],
+      followUpRisks: [],
+      retryRecommendations: [{ turnNumber, reason: "可选择这题再次练习；离线 Mock 未判断这题的回答质量。" }],
       answerStructures: [{ turnNumber, outline: ["说明背景", "说明个人行动", "说明结果和复盘"] }]
     };
   }
 
   async reviewMockInterviewRetry({ turn = {} } = {}) {
-    const retryAnswer = String(turn.retryAnswer || "").trim();
-    const originalAnswer = String(turn.originalAnswer || "").trim();
-    const improved = retryAnswer.length > originalAnswer.length;
     return {
       turnNumber: Number(turn.turnNumber),
-      conclusion: improved ? "重答补充了更多可复盘信息。" : "重答已经保存，但还需要补充更具体的个人行动。",
-      improved,
-      strengths: improved ? ["比原回答更完整"] : ["保持了回答主题一致"],
-      remainingImprovements: ["继续明确个人行动和可验证结果"]
+      conclusion: "离线 Mock 已记录重答，未评估是否进步；未标记为改进不表示回答变差。",
+      improved: false,
+      strengths: [],
+      remainingImprovements: []
     };
   }
 }

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { assertPackageDocumentClosure } = require("./helpers/package_document_closure");
 
 const root = path.resolve(__dirname, "..");
 const powershell = path.join(
@@ -686,6 +687,7 @@ function assertStandardInstallerStageBoundary() {
     const stageMatch = combined(result).match(/Installer stage:\s*(.+)\r?$/m);
     assert(stageMatch, `missing installer stage path:\n${combined(result)}`);
     const stageDir = stageMatch[1].trim();
+    assertPackageDocumentClosure(stageDir);
     assert(fs.existsSync(path.join(stageDir, "scripts", "migrate-browser-profile.ps1")), "installer stage must include explicit profile migration");
     assert(fs.existsSync(path.join(stageDir, "scripts", "prepare-user-data.ps1")), "installer stage must include stable user-data preparation");
     assert(fs.existsSync(path.join(stageDir, "OfferGo.Launcher.exe")), "installer stage must include the native startup window");
