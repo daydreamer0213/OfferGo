@@ -240,6 +240,19 @@ function normalizeTurnReasonItems(value, validTurns, label) {
   });
 }
 
+function reportHighlights(value, validTurns, label) {
+  if (!Array.isArray(value) || value.length > 3) throw new Error(`${label}格式无效`);
+  return boundedTextArray(value.map(item => {
+    if (typeof item === 'string') return item;
+    if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.text !== 'string') {
+      throw new Error(`${label}文字格式无效`);
+    }
+    const turnNumber = Number(item.turnNumber);
+    if (!Number.isInteger(turnNumber) || !validTurns.has(turnNumber)) throw new Error(`${label}引用了不存在的题号`);
+    return `第${turnNumber}题：${cleanText(item.text, 980, label)}`;
+  }), label, { maxItems: 3 });
+}
+
 function validateInterviewReport(raw, context = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("面试复盘格式无效");
   rejectProbabilityFields(raw);
@@ -265,8 +278,8 @@ function validateInterviewReport(raw, context = {}) {
       return [{ turnNumber: Number(item.turnNumber), subject, text, sourceQuote }];
     }) } : {}),
     conclusion: cleanText(raw.conclusion, 3_000, "复盘结论"),
-    strengths: boundedTextArray(raw.strengths, "最强项", { maxItems: 3 }),
-    improvements: boundedTextArray(raw.improvements, "改进项", { maxItems: 3 }),
+    strengths: reportHighlights(raw.strengths, validTurns, "最强项"),
+    improvements: reportHighlights(raw.improvements, validTurns, "改进项"),
     followUpRisks: normalizeTurnReasonItems(raw.followUpRisks, validTurns, "追问风险"),
     retryRecommendations: normalizeTurnReasonItems(raw.retryRecommendations, validTurns, "重练建议"),
     answerStructures

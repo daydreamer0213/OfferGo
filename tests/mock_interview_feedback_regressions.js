@@ -2,6 +2,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const storage = require('../src/core/storage');
 const { createMockInterviewService } = require('../src/application/mock_interview');
+const { validateInterviewReport } = require('../src/core/mock_interview');
+
+test('report highlights retain model text and the valid question reference instead of object coercion', () => {
+  const raw = {conclusion:'个人行动清楚，验证操作可补充。',
+    strengths:[{turnNumber:1,text:'说明了本人负责工单状态图。'}],
+    improvements:[{turnNumber:1,text:'补充如何核对异常状态。'}],
+    followUpRisks:[],retryRecommendations:[],answerStructures:[]};
+  const result=validateInterviewReport(raw,{turns:[{turnNumber:1,answerText:'我完成了状态图。'}]});
+  assert.deepEqual(result.strengths,['第1题：说明了本人负责工单状态图。']);
+  assert.deepEqual(result.improvements,['第1题：补充如何核对异常状态。']);
+  assert.throws(()=>validateInterviewReport({...raw,strengths:[{turnNumber:9,text:'不存在的题目'}]},
+    {turns:[{turnNumber:1}]}),/题号/);
+});
 
 function setup(alwaysMissing = false) {
   const db = storage.openDb(':memory:');

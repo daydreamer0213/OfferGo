@@ -18,6 +18,15 @@ function integrity(sourceText, finalText = sourceText) {
   return validateResumeActivationText({ sourceText, generatedText: sourceText, finalText, suggestions: [] });
 }
 
+test('moving a proven personal contribution to a line after employment dates remains activatable', () => {
+  const originalText = '在5人团队参与订单后台开发，个人完成订单状态与发票导出接口。';
+  const sourceText = `${base}工作经历\n后端开发工程师｜2024.07—2026.09\n${originalText}`;
+  const validated = draft(sourceText, originalText, '个人完成订单状态与发票导出接口；在5人团队参与订单后台开发。');
+  const generatedText = renderOptimizedResume(sourceText, validated.suggestions);
+  const result = validateResumeActivationText({sourceText,generatedText,finalText:generatedText,suggestions:validated.suggestions});
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
 test('already clear resumes can produce a complete unchanged draft with no suggestions', () => {
   const sourceText = `${base}课程项目：整理访谈反馈形成需求表，绘制Figma页面原型并完成课程展示。`;
   const validated = validateResumeOptimizationDraft({ headline: '现稿已清楚，无需修改', suggestions: [] },
@@ -25,6 +34,18 @@ test('already clear resumes can produce a complete unchanged draft with no sugge
   assert.deepEqual(validated.suggestions, []);
   assert.equal(renderOptimizedResume(sourceText, validated.suggestions), sourceText);
   assert.equal(integrity(sourceText).valid, true);
+});
+
+test('model-escaped line separators become actual resume lines without changing technical escape examples', () => {
+  const originalText = '个人负责商品上架、详情页信息整理与活动数据日报。';
+  const sourceText = `${base}${originalText}`;
+  const validated = draft(sourceText, originalText, '个人负责商品上架。\\n整理详情页信息，并维护活动数据日报。');
+  const text = renderOptimizedResume(sourceText, validated.suggestions);
+  assert(text.includes('个人负责商品上架。\n整理详情页信息'));
+  assert.equal(text.includes('\\n'), false);
+  const technical = '做文本解析时用字符串“\\n”表示换行。';
+  const technicalDraft = draft(`${base}${technical}`, technical, '文本解析：用字符串“\\n”表示换行。');
+  assert.equal(technicalDraft.suggestions[0].proposedText, '文本解析：用字符串“\\n”表示换行。');
 });
 
 test('pending supplement and confirmation are legitimate workflow states rather than template blanks', () => {

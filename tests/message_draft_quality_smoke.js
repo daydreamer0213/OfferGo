@@ -79,6 +79,21 @@ const supported = assessMessageDraftQuality({
 assert.equal(supported.valid, true, JSON.stringify(supported.errors));
 assert(supported.errors.length === 0);
 
+for (const newline of ['\n', '\r\n']) {
+  const chronology = `后端开发工程师｜2024.07—2026.09${newline}个人完成订单状态与发票导出接口。`;
+  assert.equal(extractHighRiskClaims(chronology).some(claim => claim.kind === 'numeric_achievement'), false,
+    'a dated role and the next-line word personal are not an achievement quantity');
+}
+assert.equal(assessMessageDraftQuality({text:'本人完成 200 个客户的资料整理。', evidenceTexts:[]}).valid, false,
+  'ordinary unsupported achievement quantities remain checked');
+assert.equal(assessMessageDraftQuality({
+  text:'我10月9日下午14点到17点方便线上面试，您看这个时间可以吗？',
+  evidenceTexts:['2026年10月9日下午14点到17点方便线上面试。']
+}).valid,true,'an explicit calendar date is not a changed work duration');
+assert.equal(extractHighRiskClaims('2026年10月9日参加面试。').some(c=>c.kind==='duration'),false);
+assert.equal(assessMessageDraftQuality({text:'我有3年后端经验。',evidenceTexts:['我有2年后端经验。']}).valid,false,
+  'actual experience duration must remain checked');
+
 const supportedAvailabilityParaphrase = assessMessageDraftQuality({
   text: "我本周三可以到岗。",
   recentTexts: [],

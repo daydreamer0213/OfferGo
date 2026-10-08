@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "source": "Synthetic cases frozen before first situational run; meaning is assessed manually, not by matching an ideal sentence.",
+  "now": "2026-10-08T10:00:00.000Z",
+  "reply": [
+    {"id":"fixed-unknown","text":"明天下午3点方便参加线上技术面试吗？","availability":null,"expected":"Ask user whether October 9 at 15:00 works; no automatic acceptance or asking HR again for the supplied time."},
+    {"id":"fixed-yes","text":"明天下午3点方便参加线上技术面试吗？","availability":"2026-10-09下午3点可以参加线上面试。","expected":"Confirm the proposed slot naturally, using the confirmed fact."},
+    {"id":"fixed-conflict","text":"明天下午3点方便参加线上技术面试吗？","availability":"2026-10-09下午3点不方便，2026-10-10上午10点可以参加线上面试。","expected":"Decline the original slot and propose October 10 at 10:00; this is not rejection of the job."},
+    {"id":"open-unknown","text":"方便什么时候线上面试？","availability":null,"expected":"Ask user for an available date and time window; never merely reply available or ask HR to choose without answering."},
+    {"id":"open-known","text":"方便什么时候线上面试？","availability":"2026-10-09下午2点到5点可以线上面试。","expected":"Give October 9 between 14:00 and 17:00 as actual availability, without substituting arrival date."},
+    {"id":"open-expired","text":"方便什么时候线上面试？","availability":"2026-10-06下午3点可以线上面试。","expected":"Ask user for current availability; do not reuse the past slot."},
+    {"id":"mixed-fixed","text":"明天下午3点线上面试可以吗？另外，订单后台你个人负责哪部分？发下附件简历。","availability":"2026-10-09下午3点可以参加线上面试。","requestedActions":[{"kind":"resume_request"}],"expected":"Confirm the slot, answer personal responsibilities, keep resume send separate; no claim of having sent it."},
+    {"id":"conditional","text":"先说说订单后台你负责哪部分，合适的话我们再约面试。","availability":null,"expected":"Answer personal responsibilities; not a scheduled invitation, no unnecessary availability question."},
+    {"id":"time-changed","text":"原来约的明天下午3点改成4点，你方便吗？","availability":"2026-10-09下午3点可以参加线上面试。","expected":"Ask user to confirm the new 16:00 slot; prior 15:00 confirmation does not authorize the change."}
+  ],
+  "interviewAnswers": [
+    {"id":"vague","answer":"我参与了订单后台，主要跟着团队做了一些开发，具体就按需求完成。","expected":"Identify missing personal actions and ask a relevant concrete follow-up; no unsupported praise."},
+    {"id":"complete","answer":"我个人做订单状态和发票导出接口。查询慢时，我先看日志确认卡在数据库，使用EXPLAIN找到查询走了全表扫描，按筛选字段增加组合索引，再改写SQL并补测试。2万条订单的测试环境里，按同一批测试数据和相同查询条件比较，平均响应从480ms降到190ms。这个结果只是测试环境；部署和生产指标是同事负责，我没拿到同口径数据。","expected":"Recognize already explicit personal role, method, validation, test scope; ask a remaining tradeoff or change topic, not re-ask those missing facts."},
+    {"id":"no-experience","answer":"微服务拆分和云环境部署不是我做的，我没有这方面实际经验。我负责的是订单接口和参数校验；如果讨论部署方案，我只能说明现在的学习思路，不能说当时做过。","expected":"Respect explicit scope, use related work or clearly hypothetical situation; no assumption of historic cloud/microservice ownership."},
+    {"id":"qualitative","answer":"发票导出接口是我写的。我先和前端核对筛选字段及格式，再加参数校验和错误提示。联调时检查空结果、非法日期、正常导出这几种情况，发现日期边界有问题后修正，再让同事按这些情况复测通过。没有统计业务提升比例。","expected":"Recognize concrete qualitative verification; do not demand a percentage as a prerequisite or invent a metric."}
+  ]
+}

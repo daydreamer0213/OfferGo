@@ -1726,6 +1726,17 @@ function modelUnavailablePresentationSmoke() {
 
 function completedResultPresentationSmoke() {
   const fixture = createFixture();
+  for (const status of ['needs_user_action', 'running']) {
+    const retryPage = renderMessageDiscoveryPage({
+      db, searchParams: new URLSearchParams({ profileId: fixture.profileId }),
+      controller: { pageState: () => ({ status, results: [], platformRuns: [],
+        reasonCode: 'MESSAGE_DISCOVERY_MODEL_NOT_READY', phase: 'analyzing_job' }) },
+      helpers: { getCandidateProfile: () => ({}), renderFramedPage: ({ content }) => content,
+        escapeHtml: String, escapeAttr: String, newProgressRequestKey: () => 'retry-presentation' }
+    });
+    if (status === 'running') assert.doesNotMatch(retryPage, /模型暂不可用/, 'an active retry must not announce the previous model failure');
+    else assert.match(retryPage, /模型暂不可用/, 'the stopped failure must still explain how to recover');
+  }
   const conversationKey = `sha256:${"d".repeat(64)}`;
   const result = { platform: "boss", cardId: fixture.card.id, conversationKey,
     contextComplete: true, messageIntent: "rejection", drafts: [], manualActions: [],

@@ -72,7 +72,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     .filter(entry => ["needs_user_action", "stopped"].includes(entry.status)).map(entry => entry.reasonCode)]
     .filter(code => code && !itemReasonCodes.has(code));
   const reason = [...new Set(pageReasonCodes)].map(messageDiscoveryReasonText).join(" ");
-  const showPageReason = Boolean(reason);
+  const showPageReason = status.status !== "running" && Boolean(reason);
   const phaseNotice = messageDiscoveryPhaseText(status);
   const contactKey = String(searchParams.get("contact") || "").trim();
   const incomingContacts = listIncomingContacts(db, { profileId })

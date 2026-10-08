@@ -151,6 +151,8 @@ function validateResumeOptimizationDraft(raw, context = {}) {
 
   const seenIds = new Set();
   const ranges = [];
+  const containsLiteralNewlineExample = /\\(?:r\\n|n)/.test(sourceText)
+    || catalog.some(item => /\\(?:r\\n|n)/.test(String(item?.text || '')));
   const suggestions = raw.suggestions.map((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("修改建议格式无效");
     const id = cleanText(value.id || `S${index + 1}`, 40, "建议 ID");
@@ -161,7 +163,9 @@ function validateResumeOptimizationDraft(raw, context = {}) {
     const operation = cleanText(value.operation, 30, "修改操作");
     if (!SUPPORTED_OPERATIONS.has(operation)) throw new Error(`不支持的修改操作：${operation}`);
     const originalText = cleanText(value.originalText, 10_000, "建议原文");
-    const proposedText = cleanText(value.proposedText, 10_000, "建议文字", { required: operation === "remove" ? false : true });
+    let proposedText = cleanText(value.proposedText, 10_000, "建议文字", { required: operation === "remove" ? false : true });
+    // Decode model formatting only when the supplied material has no literal escape example.
+    if (!containsLiteralNewlineExample) proposedText = proposedText.replace(/\\r\\n|\\n/g, '\n');
     if (operation === "remove" && proposedText) throw new Error("删除操作不能同时提供替换文字");
     const reason = cleanText(value.reason, 1_000, "修改理由");
     const editingPrinciple = cleanText(value.editingPrinciple, 40, "修改原则");
