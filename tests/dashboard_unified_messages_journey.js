@@ -250,15 +250,21 @@ async function factAnswerKeepsCurrentContact(context, base, db) {
   seed(db,'zhaopin',profileId,planId,false,'22');
   const target=seed(db,'boss',profileId,planId,true,'21');
   require('../src/core/candidate_progress').recordDiscoveredMessageGroupClassification(db,{
-    cardId:target.cardId,platform:'boss',threadKey:digest('fact-thread'),messageKeys:[digest('fact-question')],
+    cardId:target.cardId,platform:'boss',threadKey:digest('conversationboss:CCL1234567890J001234567821'),messageKeys:[digest('fact-question')],
     messageGroupKey:target.key,messageIntent:'information_request',messageCategory:'salary',
     missingFactKey:'expected_salary',missingFactQuestion:'期望薪资是多少？',manualActions:[],
     progressUpdate:{stage:'needs_user_action'},occurredAt:NOW
   });
+  const latestQuestion='最新问题：英语口语怎么样？';
+  const storedContext=storage.listMessageInboundContexts(db,{profileId}).find(item=>item.cardId===target.cardId);
+  upsertMessageInboxItem(db,{profileId,platform:'boss',conversationKey:storedContext.conversationKey,
+    jobId:target.jobId,cardId:target.cardId,sourceJobId:storedContext.sourceJobId,lastMessageId:'378917037748742',
+    lastActivityAt:NOW,lastDirection:'friend',latestExcerpt:latestQuestion,actionGroup:'needs_action',actionCode:'reply',observedAt:NOW});
   const page=await context.newPage();
   try {
     await page.goto(base+'/messages?profileId='+profileId);
     const row=page.locator('.message-list-item[data-platform="boss"][data-pending="true"]');
+    assert.equal(await row.locator('em').innerText(),latestQuestion,'the contact preview must follow the latest stored HR message, not an older draft context');
     const key=await row.locator('[data-message-view]').getAttribute('data-message-view');
     assert.notEqual(await page.locator('[data-message-view]:checked').getAttribute('data-message-view'),key);
     await row.click();

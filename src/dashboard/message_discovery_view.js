@@ -184,7 +184,9 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     const viewId = `message-view-${viewKey}`;
     const title = job.title || "岗位处理结果";
     const company = job.company || "公司待确认";
-    const preview = messagePreview(result);
+    const preview = inboxItem?.latestExcerpt
+      ? messagePreview({ ...result, inboundMessages: [{ kind: "text", text: inboxItem.latestExcerpt }], manualActions: [] })
+      : messagePreview(result);
     const actionGroup = inboxItem?.actionGroup || (waitingForRecruiter ? "waiting" : pending ? "needs_action" : "done");
     const statusText = expired ? "超过 7 天，已结束处理" : waitingForRecruiter ? "等待对方反馈"
       : completedResumeAction && actionGroup === "done" ? "简历邀请已处理"
