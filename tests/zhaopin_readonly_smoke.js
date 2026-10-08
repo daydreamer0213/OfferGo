@@ -79,6 +79,11 @@ async function main() {
   assert.equal(target.searchParams.get("el"), "4");
   assert.equal(target.searchParams.get("kw"), "AI 应用");
   assert.equal(target.searchParams.get("pageMode"), "search");
+  const districtTemplate = canonicalizeZhaopinSearchTemplate('https://www.zhaopin.com/jobs/?pageMode=search&jl=763&re=2052&kw=AI应用开发工程师');
+  assert.equal(new URL(buildZhaopinSearchUrl({ keyword: '大模型应用开发工程师', searchTemplate: districtTemplate })).searchParams.get('re'), '2052', 'the observed district filter must survive keyword changes');
+  const { zhaopinSearchDisplaySummary } = require('../src/core/zhaopin_search_scope');
+  assert.equal(zhaopinSearchDisplaySummary(['番禺区', '地铁', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业']), '地点：番禺区 · 其余条件不限');
+  assert.equal(zhaopinSearchDisplaySummary(['番禺区', '地铁', '8K-10K', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业']), '地点：番禺区 · 薪资：8K-10K');
 
   const playwright = await loadPlaywright();
   if (!playwright) return;
@@ -215,6 +220,24 @@ async function main() {
     assert.ok(currentDetail, "current selected card and summary IDs match the trusted link");
     assert.equal(currentDetail.company, "合成甲公司");
     assert.equal(currentDetail.clientCompany, "合成客户公司");
+
+    await page.evaluate(() => {
+      document.querySelector('#current-card .job-card__company-name').textContent = '合成客户公司';
+      document.getElementById('current-card').__vueParentComponent.proxy.$props.job.companyName = '合成客户公司';
+    });
+    const clientListedState = await adapter.readSearchState('ZHAOPIN-SEARCH');
+    const clientListedDetail = await adapter.readVisiblePaneDetail('ZHAOPIN-SEARCH', clientListedState.cards[0]);
+    assert.ok(clientListedDetail, 'a fully verified headhunter job may list the client rather than the publisher on its card');
+    assert.equal(clientListedDetail.company, '合成甲公司');
+    assert.equal(clientListedDetail.clientCompany, '合成客户公司');
+    await page.evaluate(() => { document.getElementById('current-summary').__vueParentComponent.proxy.position.number = ''; });
+    assert.equal(await adapter.readVisiblePaneDetail('ZHAOPIN-SEARCH', clientListedState.cards[0]), null,
+      'client-company matching must not bypass incomplete component identity');
+    await page.evaluate(() => {
+      document.getElementById('current-summary').__vueParentComponent.proxy.position.number = 'CCSYNTH001J00000000001';
+      document.querySelector('#current-card .job-card__company-name').textContent = '合成甲公司';
+      document.getElementById('current-card').__vueParentComponent.proxy.$props.job.companyName = '合成甲公司';
+    });
 
     await page.evaluate(() => { document.querySelector(".job-company-info__name").textContent = "合成丙公司"; });
     const wrongPublisherState = await adapter.readSearchState("ZHAOPIN-SEARCH");
@@ -520,6 +543,19 @@ async function backgroundReadinessSmoke(page, fixtureHtml) {
   assert.deepEqual(success.bridge.calls.filter((call) => call.type === "lifecycle" || call.type === "cdp").map((call) => call.type === "lifecycle" ? "lifecycle" : call.params.enabled), ["lifecycle", true, false]);
   assert.equal((await success.bridge.listTabs()).find((tab) => tab.active).id, "dashboard", "background rendering must preserve the foreground tab");
   assert.equal(success.bridge.calls.some((call) => call.type === "bringToFront"), false);
+
+  await reset();
+  const frozenProbe = renderingBridge();
+  const evaluateProbe = frozenProbe.bridge.evalValue.bind(frozenProbe.bridge);
+  frozenProbe.bridge.evalValue = async (...args) => {
+    const rendering = frozenProbe.bridge.calls.filter(call => call.type === 'cdp').at(-1);
+    if (!rendering?.params.enabled) throw Object.assign(new Error('background Runtime.evaluate timed out'), { code: 'BROWSER_TIMEOUT' });
+    return evaluateProbe(...args);
+  };
+  const frozenAdapter = new ZhaopinSiteAdapter({ browser: frozenProbe.bridge, sleepFn: frozenProbe.render });
+  assert.equal((await frozenAdapter.preflight({ tabId: 'ZHAOPIN-SEARCH' })).isSearchPage, true);
+  assert.deepEqual(frozenProbe.bridge.calls.filter(call => call.type === 'cdp').map(call => call.params.enabled), [true, false]);
+  assert.equal((await frozenProbe.bridge.listTabs()).find(tab => tab.active).id, 'dashboard');
 
   for (const [label, prepare, run] of [
     ["timeout", reset, (adapter) => adapter.waitForSearchReady("ZHAOPIN-SEARCH", { ...options, keyword: "不同关键词" })],

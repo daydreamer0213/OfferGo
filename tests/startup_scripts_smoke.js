@@ -491,10 +491,12 @@ async function testForeignDashboardIdentityRejected() {
     ], {
       cwd: outsideCwd,
       env: fixtureEnv(),
-      timeout: 10000
+      // A fresh Windows PowerShell process also loads the TCP/CIM providers.
+      // On a live acceptance machine that alone can take about ten seconds.
+      timeout: 30000
     });
     assert.notStrictEqual(result.status, 0, `${mode} health listener must be rejected`);
-    assert.match(combinedOutput(result), /identity|current project|listener PID|DASHBOARD_BROWSER_AUTHORITY_MISMATCH/i);
+    assert.match(combinedOutput(result), /identity|current project|listener PID|DASHBOARD_BROWSER_AUTHORITY_MISMATCH/i, `${mode} must fail with an identity rejection rather than a fixture timeout`);
     await stopChild(child);
     await waitForPortClosed(dashboardPort);
   }
@@ -892,7 +894,7 @@ function invokeStartupHelperBatch(calls) {
       "-PayloadPath", payloadPath,
       "-HelperPath",
       path.join(projectRoot, "scripts", "lib", "startup-identity.ps1")
-    ], { cwd: outsideCwd, timeout: 10000 });
+    ], { cwd: outsideCwd, timeout: 30000 });
     const output = combinedOutput(result);
     if (result.status !== 0) throw new Error(output);
     return JSON.parse(String(result.stdout || "").trim());

@@ -879,6 +879,24 @@ class BossSiteAdapter {
           return code && label && currentCodes.includes(code) ? [{ param, code, label }] : [];
         })
       ),
+      subwayOptions: new URL(location.href).searchParams.getAll("multiSubway").flatMap(value => String(value).split(",")).flatMap(code => {
+        const match = code.match(/^(\\d+):(\\d+(?:_\\d+)*)$/);
+        if (!match) return [];
+        const line = document.querySelector('.subway-line-list [ka="sel_subway_line_' + match[1] + '"]');
+        const lineName = Array.from(line?.childNodes || []).filter(node => node.nodeType === 3).map(node => node.textContent).join('').trim();
+        if (!lineName) return [];
+        const group = Array.from(document.querySelectorAll('.selected-subway-section > ul > li')).find(node =>
+          String(node.querySelector('.selected-subway-name')?.textContent || '').trim().replace(/[：:]$/, '') === lineName);
+        if (!group) return [];
+        const stations = new Map(Array.from(group.querySelectorAll('.selected-subway-list a')).flatMap(node => {
+          const id = String(node.querySelector('i[ka^="close_select_subway_"]')?.getAttribute('ka') || '').match(/^close_select_subway_(\\d+)$/)?.[1];
+          const label = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
+          return id && label ? [[id, label]] : [];
+        }));
+        const ids = match[2].split('_');
+        if (stations.size !== ids.length || new Set(ids).size !== ids.length || ids.some(id => !stations.has(id))) return [];
+        return [{ param: 'multiSubway', code, label: lineName + '（' + ids.map(id => stations.get(id)).join('、') + '）' }];
+      }),
       urlOptions: Array.from(document.querySelectorAll('a[href*="/web/geek/jobs"]')).flatMap((node) => {
         try {
           const currentUrl = new URL(location.href);
@@ -906,7 +924,8 @@ class BossSiteAdapter {
       catalog: parseBossFilterCatalog(state?.rawFields || []),
       urlOptions: dedupeBossUrlOptions([
         ...(state?.urlOptions || []),
-        ...(state?.currentOptions || [])
+        ...(state?.currentOptions || []),
+        ...(state?.subwayOptions || [])
       ])
     };
   }

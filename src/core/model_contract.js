@@ -786,7 +786,7 @@ function evidenceFitReasons(analysis = {}) {
   for (const item of list(analysis.responsibilityMatches)) {
     if (['matched', 'transferable'].includes(item?.state)) add(item.resumeEvidence, item.jdEvidence, item.state);
   }
-  if (['aligned', 'mostly_aligned', 'partially_aligned'].includes(analysis.roleAlignment)) {
+  if (['aligned', 'mostly_aligned'].includes(analysis.roleAlignment) && reasons.length === 0) {
     for (const evidence of list(analysis.roleResumeEvidence)) {
       add(evidence, analysis.roleSummary, analysis.roleAlignment === 'aligned' ? 'matched' : 'transferable');
     }
@@ -794,7 +794,7 @@ function evidenceFitReasons(analysis = {}) {
   const requirements = list(analysis.requirementMatches).filter(item => ['matched', 'transferable'].includes(item?.state));
   requirements.sort((a, b) => Number(Boolean(b.central || b.foundation)) - Number(Boolean(a.central || a.foundation)));
   for (const item of requirements) add(item.resumeEvidence, item.requirement, item.state);
-  return [...new Set(reasons.concat(list(analysis.fitReasons).map(text).filter(Boolean)))].slice(0, 8);
+  return [...new Set(reasons.length ? reasons : list(analysis.fitReasons).map(text).filter(Boolean))].slice(0, 8);
 }
 
 function isAbsentResumeEvidence(value) {

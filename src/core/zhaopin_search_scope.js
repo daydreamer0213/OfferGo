@@ -2,9 +2,9 @@ const ZHAOPIN_ORIGIN = "https://www.zhaopin.com";
 const ZHAOPIN_SEARCH_PATH = "/jobs/";
 const TRACKING_PARAMS = new Set(["from", "source", "src", "trackId", "lid", "ref", "refer", "_", "timestamp"]);
 const PAGING_PARAMS = new Set(["page", "pageNum"]);
-const SEARCH_PARAMS = new Set(["pageMode", "jl", "sl", "el", "we", "ct", "cs", "et", "kw", ...TRACKING_PARAMS, ...PAGING_PARAMS]);
+const SEARCH_PARAMS = new Set(["pageMode", "jl", "re", "sl", "el", "we", "ct", "cs", "et", "kw", ...TRACKING_PARAMS, ...PAGING_PARAMS]);
 const DEFAULT_FILTER_LABELS = new Set([
-  "地区", "薪资", "学历", "经验", "公司性质", "融资阶段", "公司人数", "工作性质", "职位类别", "公司行业"
+  "地区", "地铁", "薪资", "学历", "经验", "公司性质", "融资阶段", "公司人数", "工作性质", "职位类别", "公司行业"
 ]);
 
 function selectedZhaopinFilters(values) {
@@ -17,6 +17,7 @@ function zhaopinSearchDisplaySummary(values) {
   const labels = (Array.isArray(values) ? values : []).map(value => String(value || "").replace(/\s+/g, " ").trim());
   const location = labels[0] && labels[0] !== "地区" ? labels[0].replace(/^(?:地点|城市|区域)：/, "") : "不限";
   const names = ["", "薪资", "学历", "经验", "公司性质", "融资阶段", "公司人数", "工作性质", "职位类别", "公司行业"];
+  if (labels.length === names.length + 1) names.splice(1, 0, '地铁');
   const others = labels.length === names.length
     ? labels.slice(1).flatMap((value, index) => value && !DEFAULT_FILTER_LABELS.has(value) ? [`${names[index + 1]}：${value}`] : [])
     : selectedZhaopinFilters(labels.slice(1));

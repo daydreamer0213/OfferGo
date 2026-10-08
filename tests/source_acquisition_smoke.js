@@ -353,6 +353,24 @@ async function inheritedPageInspectionSmoke() {
   assert.deepStrictEqual(platformPolicy.unresolvedParams, [
     { param: "unknownStable", codes: ["opaque-7"] }
   ]);
+
+  fixture.url = 'https://www.zhipin.com/web/geek/jobs?city=101280100&multiSubway=76:1490_1491_1489_1492_1493_1494_355437_355436_355435,100006:353372_353371_353370_353369_353373';
+  fixture.subwayGroups = [
+    { code: '76', name: '7号线', stations: { 355435: '裕丰围', 355436: '长洲', 355437: '深井', 1489: '大学城南', 1490: '板桥', 1491: '员岗', 1492: '南村万博', 1493: '汉溪长隆', 1494: '钟村' } },
+    { code: '100006', name: '18号线', stations: { 353369: '磨碟沙', 353370: '龙潭', 353371: '沙溪', 353372: '南村万博', 353373: '番禺广场' } }
+  ];
+  const subway = await adapter.inspectInheritedSearchPage({ tabId: 'BOSS-SEARCH' });
+  const subwayScope = buildInheritedSearchScope({ profileId: 7, rawUrl: subway.url });
+  const subwayPolicy = compilePlatformRuntimePolicy({ searchScope: subwayScope.searchScope, catalog: subway.catalog, urlOptions: subway.urlOptions, cityCodes: CITY_CODES });
+  assert.deepStrictEqual(subwayPolicy.unresolvedParams, [], 'selected stations from both lines must resolve without changing the search URL');
+  assert.equal(subwayPolicy.filters.acquisitionOnly.multiSubway.labels.length, 2);
+  assert.match(subwayPolicy.filterSummary.join(' '), /7号线.*板桥/);
+  assert.match(subwayPolicy.filterSummary.join(' '), /18号线.*番禺广场/);
+  assert.equal(navigations + clicks + sessionCreations, 0, 'reading current station labels must stay read-only');
+  delete fixture.subwayGroups[1].stations[353373];
+  const incomplete = await adapter.inspectInheritedSearchPage({ tabId: 'BOSS-SEARCH' });
+  const incompletePolicy = compilePlatformRuntimePolicy({ searchScope: subwayScope.searchScope, catalog: incomplete.catalog, urlOptions: incomplete.urlOptions, cityCodes: CITY_CODES });
+  assert.equal(incompletePolicy.unresolvedParams[0].param, 'multiSubway', 'a missing selected station must remain unresolved, not silently broaden the scope');
 }
 
 function inheritedFilterDomSandbox(fixture) {
@@ -387,11 +405,21 @@ function inheritedFilterDomSandbox(fixture) {
     document: {
       querySelector(selector) {
         if (selector === ".city-label.active .cur-city-label") return { textContent: "广州" };
+        const lineCode = selector.match(/sel_subway_line_(\d+)/)?.[1];
+        const group = fixture.subwayGroups?.find(item => item.code === lineCode);
+        if (group) return { childNodes: [{ nodeType: 3, textContent: group.name }, { nodeType: 1, textContent: String(Object.keys(group.stations).length) }] };
         return null;
       },
       querySelectorAll(selector) {
         if (selector === ".condition-filter-select") return filterNodes;
         if (selector === 'a[href*="/web/geek/jobs"]') return linkNodes;
+        if (selector === '.selected-subway-section > ul > li') return (fixture.subwayGroups || []).map(group => ({
+          querySelector: () => ({ textContent: group.name + '：' }),
+          querySelectorAll: () => Object.entries(group.stations).map(([code, label]) => ({
+            textContent: label,
+            querySelector: () => ({ getAttribute: () => 'close_select_subway_' + code })
+          }))
+        }));
         return [];
       }
     }

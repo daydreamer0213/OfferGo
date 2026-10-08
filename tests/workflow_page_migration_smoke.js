@@ -360,14 +360,28 @@ async function assertClientContracts(vm) {
       progressSnapshot: interruptedSnapshot
     }));
     const pages = new Map([["/review", reviewVm], ["/paused", pausedVm], ["/interrupted", interruptedVm]]);
+    pages.set("/resume-check", resumableInterruptedVm);
+    let resumeRequests = 0;
+    const resumeNavigations = [];
     let transitionPageLoads = 0;
     let transitionStatusRequests = 0;
+    let pauseTransitionLoads = 0;
     const reviewPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
     server.removeAllListeners("request");
     server.on("request", (req, res) => {
+      if (req.url === "/api/workflow-run/resume") {
+        resumeRequests += 1;
+        if (resumeRequests === 1) {
+          res.writeHead(409, { "content-type": "text/html" });
+          return res.end('<main><h1>搜索条件已经变化</h1><form method="post" action="/api/workflow-run/resume"><input name="scopeChoice" value="original" type="hidden"><button>继续开始时的条件</button></form></main>');
+        }
+        res.writeHead(303, { location: "/review" });
+        return res.end();
+      }
       if (req.url === "/assets/workflow.js") return serve(res, "application/javascript", fs.readFileSync(asset));
       if (req.url === "/assets/roleflow.css") return serve(res, "text/css", fs.readFileSync(stylesheet));
       if (req.url?.startsWith("/api/workflow-status")) {
+        if (String(req.headers.referer || "").includes("/pause-transition")) return json(res, validSnapshot("paused"));
         if (String(req.headers.referer || "").includes("/transition")) {
           transitionStatusRequests += 1;
           return json(res, interruptedSnapshot);
@@ -377,6 +391,10 @@ async function assertClientContracts(vm) {
       if (req.url === "/transition") {
         transitionPageLoads += 1;
         return serve(res, "text/html", workflowDocument(transitionPageLoads === 1 ? vm : resumableInterruptedVm));
+      }
+      if (req.url === "/pause-transition") {
+        pauseTransitionLoads += 1;
+        return serve(res, "text/html", workflowDocument(pauseTransitionLoads === 1 ? vm : pausedVm));
       }
       if (pages.has(req.url)) return serve(res, "text/html", workflowDocument(pages.get(req.url)));
       res.writeHead(404); res.end();
@@ -398,6 +416,28 @@ async function assertClientContracts(vm) {
     await reviewPage.locator('input[name="jobIds"][value="2"]').check();
     assert.strictEqual(await reviewPage.locator("#workflow-confirm").isDisabled(), true, "review confirmation must respect quota after selection changes");
     await reviewPage.close();
+
+    const resumePage = await browser.newPage();
+    resumePage.on("request", request => {
+      if (request.method() === "POST" && request.url().endsWith("/api/workflow-run/resume")) resumeNavigations.push(request.isNavigationRequest());
+    });
+    await resumePage.goto(`${baseUrl}/resume-check`);
+    await resumePage.getByRole("button", { name: "继续本轮", exact: true }).click();
+    assert.equal(await waitFor(() => resumeRequests === 1, 3000), true, "one resume request must reach the existing endpoint");
+    assert.deepEqual(resumeNavigations, [false], "resume must leave the Dashboard document readable while the server inspects browser tabs");
+    await resumePage.getByRole("button", { name: "继续开始时的条件", exact: true }).waitFor();
+    assert.equal(resumePage.url(), `${baseUrl}/resume-check`, "scope choice remains in the current work page");
+    await resumePage.getByRole("button", { name: "继续开始时的条件", exact: true }).click();
+    await resumePage.waitForURL(`${baseUrl}/review`);
+    assert.deepEqual(resumeNavigations, [false, false], "scope choice must use the same non-navigating submission");
+    assert.equal(resumeRequests, 2);
+    await resumePage.close();
+    const pausePage = await browser.newPage();
+    await pausePage.goto(`${baseUrl}/pause-transition`);
+    assert.equal(await waitFor(() => pauseTransitionLoads === 2, 4000), true, "paused scan must refresh the headline and next step even when acquisition phase is unchanged");
+    await pausePage.waitForLoadState('networkidle');
+    assert.match(await pausePage.locator('h1').innerText(), /暂停/);
+    await pausePage.close();
 
     for (const [url, label] of [["/paused", "继续本轮"], ["/interrupted", "检查沟通中断项"]]) {
       const phasePage = await browser.newPage({ viewport: { width: 375, height: 812 } });

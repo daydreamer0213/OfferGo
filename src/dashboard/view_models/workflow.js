@@ -2,6 +2,7 @@
 
 const { scopeShortId } = require("../../core/inherited_search_scope");
 const { communicationAmbiguityState } = require("../../core/communication_ambiguity");
+const { evidenceFitReasons } = require("../../core/model_contract");
 const { userFacingError, communicationStopError } = require("../user_facing_errors");
 
 const ANALYSIS_STATUS_LABELS = Object.freeze({
@@ -127,10 +128,10 @@ function progressView(snapshot, progressJobs = []) {
       succeeded: number(communication.succeeded), stopped: number(communication.stopped)
     },
     tracks: {
-      scan: progressTrack(tracks.scan, "扫描岗位", `已完成 ${number(scanTargets.completed)} 个目标；已处理 ${number(scanTargets.processed)}，部分 ${number(scanTargets.partial)}、失败 ${number(scanTargets.failed)}`),
-      jd: progressTrack(tracks.jd, "完整 JD", `已读取 ${number(details.read)} 个需要完整 JD 的岗位；待补 ${number(details.pending)}；无需详情 ${number(details.notRequired)}${details.growing ? "；数量仍随扫描增长" : ""}`),
-      analysis: progressTrack(tracks.analysis, "分析岗位", `已完成 ${number(analysis.terminal)} 个；本轮直接完成 ${directSucceeded}、失败后已解决 ${resolvedAfterFailure}、当前未解决 ${unresolvedFailed}、本地规则处理 ${Math.max(0, skipped - detailRequired)}、停止 ${number(analysis.stopped)}；历史失败 ${historicalFailed}`),
-      communication: progressTrack(tracks.communication, "沟通岗位", `已到达终态 ${number(communication.terminal)} 个；成功 ${number(communication.succeeded)}、待人工确认 ${number(communication.ambiguous)}、停止 ${number(communication.stopped)}`)
+      scan: progressTrack(tracks.scan, "扫描岗位", "按本轮搜索词和平台条件查找岗位"),
+      jd: progressTrack(tracks.jd, "完整 JD", "读取岗位职责和任职要求"),
+      analysis: progressTrack(tracks.analysis, "分析岗位", "结合你的简历判断岗位是否合适"),
+      communication: progressTrack(tracks.communication, "沟通岗位", "确认各个岗位的沟通结果")
     },
     currentActivityLabel: scanActivityLabel(source.scan, source.phaseKey),
     analysisJobs: (progressJobs || []).map((job) => ({
@@ -280,7 +281,7 @@ function reviewRow(job = {}) {
   const analysis = job.analysis || {};
   return {
     id: String(job.id || ""), url: safeExternalUrl(job.url), title: String(job.title || ""), company: String(job.company || ""), salary: String(job.salary || "薪资待确认"), experience: String(job.experience || "经验待确认"),
-    schedule: scheduleLabel(analysis), evidence: evidenceLabel(analysis), reason: (analysis.fitReasons || []).slice(0, 2).join("；") || (job.matches || []).slice(0, 3).join("、") || "匹配证据已保存",
+    schedule: scheduleLabel(analysis), evidence: evidenceLabel(analysis), reason: evidenceFitReasons(analysis).slice(0, 2).join("\n") || (job.matches || []).slice(0, 3).join("、") || "匹配证据已保存",
     hardBlockers: (analysis.hardBlockers || []).map((item) => typeof item === "string" ? item : item?.requirement || item?.reason || "").filter(Boolean).map(String),
     tier: workflowTier(job.workflowTier), defaultChecked: Boolean(job.defaultChecked)
   };
@@ -323,7 +324,15 @@ function scanWaitLabel(scanWait, now = Date.now()) { const retryAt = Date.parse(
 function duration(seconds) { const value = Math.max(0, Math.ceil(number(seconds))); if (value < 60) return `${value} 秒`; if (value < 3600) return `${Math.ceil(value / 60)} 分钟`; const hours = Math.floor(value / 3600); const minutes = Math.ceil((value % 3600) / 60); return minutes ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`; }
 function etaLabel(eta = {}) { if (eta.status === "available") return `预计剩余 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（基于最近 ${number(eta.sampleSize)} 个完成岗位估算）`; if (eta.status === "paused") return eta.minSeconds == null || eta.maxSeconds == null ? "已暂停；样本不足，正在估算" : `已暂停；剩余区间冻结为 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（${number(eta.sampleSize)} 个样本）`; return eta.status === "estimating" ? "正在估算" : "当前阶段不估算剩余时间"; }
 function activityLabel(activity = {}) { const action = { analysis_started: "开始分析", analysis_succeeded: "已成功保存", analysis_failed: "分析失败", analysis_skipped: "已按本地规则处理", waiting_lease_expiry: "正在等待安全收尾", control_requested: "正在执行控制请求" }[activity.type] || "状态已更新"; return `任务 #${number(activity.taskId)} ${action}${activity.attempt ? `，第 ${number(activity.attempt)} 次尝试` : ""}${activity.modelRole === "backup" ? "，备用模型" : ""}${activity.errorCode ? `，${String(activity.errorCode)}` : ""}`; }
-function evidenceLabel(analysis = {}) { const foundation = (analysis.requirementMatches || []).filter((item) => item?.foundation); const covered = foundation.filter((item) => ["matched", "transferable"].includes(item.state)).map((item) => item.requirement).filter(Boolean).join("、") || "暂无"; const unresolved = foundation.filter((item) => !["matched", "transferable"].includes(item.state)).map((item) => item.requirement).filter(Boolean).join("、") || "暂无"; const track = analysis.selectedTrackLabel ? `匹配分支：${String(analysis.selectedTrackLabel)} · ` : ""; const alignment = { aligned: "一致", mostly_aligned: "基本一致", partially_aligned: "部分一致", misaligned: "不一致", insufficient_evidence: "证据不足，待确认" }[analysis.roleAlignment] || "历史分析，待重新计算"; return `${track}岗位主体：${String(analysis.roleSummary || "岗位主体待确认")} · 主体匹配：${alignment} · 主体依据：${Array.isArray(analysis.roleResumeEvidence) ? analysis.roleResumeEvidence.length : 0} 条 · 已覆盖根基：${covered} · 待确认根基：${unresolved}`; }
+function evidenceLabel(analysis = {}) {
+  const unresolved = (analysis.requirementMatches || [])
+    .filter((item) => item?.foundation && !["matched", "transferable"].includes(item.state))
+    .map((item) => item.requirement).filter(Boolean);
+  return [
+    analysis.roleSummary ? `主要工作：${String(analysis.roleSummary)}` : "",
+    unresolved.length ? `需要了解的要求：${unresolved.join("、")}` : ""
+  ].filter(Boolean).join("；");
+}
 function scheduleLabel(analysis = {}) { return { double_weekend: "双休", alternating_weekend: "大小周/单双休", single_weekend: "单休", unknown: "未说明" }[analysis.workSchedule || "unknown"]; }
 function workflowTier(tier) { return { primary: "主投", apply: "可投", caution: "慎投" }[tier] || "待分析"; }
 function workflowStatusLabel(status) { return { created: "本轮已建立", scanning: "正在筛选岗位", analyzing: "正在分析岗位", paused: "本轮已暂停", review_required: "等待确认本轮清单", communicating: "正在沟通", interrupted: "本轮已中断，等待继续", completed: "本轮已完成", failed: "本轮未完成", stopped: "本轮已停止" }[status] || "本轮进行中"; }

@@ -15,6 +15,60 @@
   let lastKey = page.dataset.pollingKey || "";
   let lastActivityKey = "";
   let reloadRequested = false;
+  let submissionInFlight = false;
+
+  function bindWorkflowSubmissions(root) {
+    root.querySelectorAll('form[action="/api/workflow-run/resume"], form[data-workflow-control-form]').forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (submissionInFlight) return;
+        submissionInFlight = true;
+        stopTimer();
+        const body = new URLSearchParams(new FormData(form));
+        const buttons = [...page.querySelectorAll('button[type="submit"], form button:not([type]), [data-workflow-control]')];
+        const previous = buttons.map((button) => [button, button.disabled]);
+        buttons.forEach((button) => { button.disabled = true; });
+        let result = node("[data-workflow-submission-result]");
+        if (!result) {
+          result = document.createElement("section");
+          result.dataset.workflowSubmissionResult = "";
+          result.className = "workflow-alert";
+          page.prepend(result);
+        }
+        result.setAttribute("role", "status");
+        result.textContent = "正在检查并处理本轮操作，请稍候…";
+        try {
+          // Keep this document alive: tab inspection must be able to read it
+          // while the server is handling the request.
+          const response = await fetch(form.getAttribute("action"), { method: "POST", body });
+          if (response.redirected) {
+            location.assign(response.url);
+            return;
+          }
+          result.setAttribute("role", "alert");
+          if (response.headers.get("content-type")?.includes("application/json")) {
+            const issue = await response.json();
+            result.textContent = issue.error || "操作未完成，请检查本轮状态。";
+          } else {
+            const content = new DOMParser().parseFromString(await response.text(), "text/html").querySelector("main");
+            if (!content) throw new Error("workflow response has no explanation");
+            content.querySelector("nav")?.remove();
+            result.replaceChildren(...[...content.childNodes].map((node) => document.importNode(node, true)));
+            if (result.querySelector('form[action="/api/workflow-run/resume"]')) {
+              form.hidden = true;
+              bindWorkflowSubmissions(result);
+            }
+          }
+        } catch {
+          result.setAttribute("role", "alert");
+          result.textContent = "暂时无法确认本次操作的结果。请刷新本轮查看状态，再决定是否继续。";
+        } finally {
+          submissionInFlight = false;
+          previous.forEach(([button, disabled]) => { button.disabled = disabled; });
+        }
+      });
+    });
+  }
 
   const node = (selector) => page.querySelector(selector);
   const nodes = (selector) => [...page.querySelectorAll(selector)];
@@ -193,8 +247,8 @@
   const structureChanged = (snapshot) => {
     const phaseChanged = String(snapshot.progress.phaseKey || "") !== String(page.dataset.workflowPhaseKey || "");
     const status = String(snapshot.workflow.status || "");
-    const terminalStatusChanged = terminal.has(status) && status !== String(page.dataset.workflowStatus || "");
-    return phaseChanged || terminalStatusChanged;
+    const statusChanged = Boolean(status) && status !== String(page.dataset.workflowStatus || "");
+    return phaseChanged || statusChanged;
   };
 
   const pollProgress = async () => {
@@ -247,7 +301,7 @@
     }, delay);
   }
 
-  nodes("[data-workflow-control-form]").forEach((form) => form.addEventListener("submit", () => controls(true)));
+  bindWorkflowSubmissions(page);
   nodes('[data-action="stop-preview"]').forEach((button) => button.addEventListener("click", () => { const confirmation = node("[data-stop-confirmation]"); if (confirmation) confirmation.hidden = false; }));
   node('[data-action="stop-cancel"]')?.addEventListener("click", () => { const confirmation = node("[data-stop-confirmation]"); if (confirmation) confirmation.hidden = true; });
   const review = document.getElementById("workflow-review-form");

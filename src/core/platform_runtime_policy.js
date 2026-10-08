@@ -125,7 +125,7 @@ function compileZhaopinPlatformRuntimePolicy({ searchScope, filterSummary = [] }
     throw policyError("PLATFORM_SCOPE_INVALID", "智联运行策略缺少继承范围。");
   }
   const params = new URL(searchScope.templateUrl).searchParams;
-  const nativeParams = ["jl", "sl", "el", "we", "ct", "cs", "et"]
+  const nativeParams = ["jl", "re", "sl", "el", "we", "ct", "cs", "et"]
     .flatMap((name) => params.getAll(name).map((value) => `${name}=${value}`))
     .sort();
   const payload = {
@@ -345,7 +345,7 @@ function formatPolicySummary(filters, unresolved) {
     if (filters[key]?.labels?.length) values.push(`${label}：${filters[key].labels.join("、")}`);
   }
   for (const [key, value] of Object.entries(filters.acquisitionOnly || {})) {
-    if (value.labels?.length) values.push(`${key}：${value.labels.join("、")}`);
+    if (value.labels?.length) values.push(`${key === 'multiSubway' ? '地铁' : key}：${value.labels.join("、")}`);
   }
   if (unresolved.length) values.push(`未解析参数：${unresolved.map((item) => item.param).join("、")}`);
   return values;

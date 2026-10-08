@@ -333,6 +333,26 @@ server.listen(0, "127.0.0.1", async () => {
     await ordinaryBudgetAdapter.chatJson("return json", { test: true }, { kind: "draftCommunication" });
     assert.deepStrictEqual(ordinaryBudgets, [{ maxTokens: 4096, timeoutMs: 120000 }]);
 
+    for (const kind of ["generateResumeOptimization", "reviewMockInterview"]) {
+      const budgets = [];
+      const budgetAdapter = new OpenAICompatibleAdapter({
+        baseUrl, apiKeyEnv: "ZHIPPING_TEST_MODEL_KEY", model: "long-output-budget-test",
+        timeoutMs: 120000, maxTokens: 4096, maxRetries: 1, logger
+      });
+      budgetAdapter.requestJson = async ({ maxTokens, timeoutMs }) => {
+        budgets.push({ maxTokens, timeoutMs });
+        if (maxTokens < 16384) throw Object.assign(new Error(`${kind} output truncated`), {
+          code: "MODEL_OUTPUT_TRUNCATED", retryable: true, requestedMaxTokens: maxTokens
+        });
+        return { value: { ok: true }, httpStatus: 200, contentLength: 11 };
+      };
+      assert.deepStrictEqual(await budgetAdapter.chatJson("return json", {}, { kind }), { ok: true });
+      assert.deepStrictEqual(budgets, [
+        { maxTokens: 8192, timeoutMs: 240000 },
+        { maxTokens: 16384, timeoutMs: 300000 }
+      ]);
+    }
+
     const abortAdapter = new OpenAICompatibleAdapter({
       baseUrl,
       apiKeyEnv: "ZHIPPING_TEST_MODEL_KEY",

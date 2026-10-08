@@ -619,7 +619,12 @@ async function journey() {
     assert.equal(storage.getWorkflowRun(db, runId).site, 'zhaopin', 'running source remains frozen after page selection changes');
     await page.goto(`${base}/workflow?runId=${runId}`);
     assert.equal(await page.locator('[data-runtime-status]').getAttribute('data-site'), 'zhaopin');
+    const pauseResponse = page.waitForResponse(response => response.request().method() === 'POST' && ['/api/workflow-run/control', '/api/workflow-control'].includes(new URL(response.url()).pathname));
+    const pauseNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '暂停本轮', exact: true }).click();
+    const pauseResult = await pauseResponse;
+    assert.equal(pauseResult.status(), 303, pauseResult.status() === 303 ? 'pause accepted' : 'pause response: ' + await pauseResult.text());
+    await pauseNavigation;
     await waitFor(() => storage.getWorkflowRun(db, runId).controlState === 'pause_requested', 'HTTP pause request');
     releaseAnalysis();
     await waitFor(() => storage.getWorkflowRun(db, runId).status === 'paused', 'real executor pauses');

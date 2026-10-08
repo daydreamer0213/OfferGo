@@ -185,6 +185,15 @@ const { createMockInterviewService } = require('../src/application/mock_intervie
     assert.equal(await a.locator('.resume-opt-create-form [data-resume-error]').getByRole('link', { name: '查看运行诊断' }).getAttribute('href'), '/diagnostics?requestId=' + encodeURIComponent(resumeFailure.requestId));
     assert.equal(await a.locator('[data-resume-mode-picker]').inputValue(), 'general');
     await a.screenshot({ path: path.join(dataRoot, 'resume-timeout.png'), fullPage: true });
+    adapter.generateResumeOptimization = async () => { throw Object.assign(new Error('synthetic truncated output'), { code: 'MODEL_OUTPUT_TRUNCATED' }); };
+    const truncatedResponse = a.waitForResponse(response => response.url().endsWith('/api/resume-optimization') && response.status() >= 400);
+    await a.getByRole('button', { name: '生成完整草稿', exact: true }).click();
+    const truncatedFailure = await (await truncatedResponse).json();
+    assert(truncatedFailure.error.includes('模型返回的内容不完整'));
+    assert(truncatedFailure.error.includes('已有资料'));
+    assert(!truncatedFailure.error.includes('服务处理失败'));
+    await a.locator('.resume-opt-create-form [data-resume-error]').filter({ hasText: '模型返回的内容不完整' }).waitFor();
+    assert.equal(await a.locator('[data-resume-mode-picker]').inputValue(), 'general');
     assert.deepEqual(pageErrors, []);
     console.log('dashboard_generation_audit_journey ok ' + dataRoot);
   } finally { if (browser) await browser.close(); if (server) await new Promise(resolve => server.close(resolve)); db.close(); }

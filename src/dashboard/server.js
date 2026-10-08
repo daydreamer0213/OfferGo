@@ -639,13 +639,18 @@ function createDashboardServer({
   };
   const inspectWorkflowResumeBrowserReadiness = (authority) =>
     runBrowserRead(async () => {
-      await ensureManagedWorkspaceReady("workflow_resume", authority.site);
-      if (authority.site === 'zhaopin') {
-        const browser = browserFactory(authority);
-        await new ZhaopinSiteAdapter({ browser, logger }).preflight();
-        return { status: 'ready', ready: true, message: '智联搜索页已就绪。', action: '', checkedAt: new Date().toISOString() };
+      try {
+        await ensureManagedWorkspaceReady("workflow_resume", authority.site);
+        if (authority.site === 'zhaopin') {
+          const browser = browserFactory(authority);
+          await new ZhaopinSiteAdapter({ browser, logger }).preflight();
+          return { status: 'ready', ready: true, message: '智联搜索页已就绪。', action: '', checkedAt: new Date().toISOString() };
+        }
+        return await resolvedWorkflowResumeBrowserReadinessProbe(authority);
+      } catch (error) {
+        error.details = { ...error.details, site: authority.site || "boss", operation: "workflow_resume_readiness" };
+        throw error;
       }
-      return resolvedWorkflowResumeBrowserReadinessProbe(authority);
     });
   const resolveSerializedAcquisitionContext = (input) =>
     runBrowserRead(() => acquisitionContextResolver(input));
@@ -2878,7 +2883,7 @@ function safeAcquisitionPreviewLabel(value) {
   const label = String(value || "").trim().slice(0, 160);
   if (!label || /^未解析参数[：:]/.test(label)) return "";
   if (/https?:\/\/|securityid|cookie|authorization|(?:^|[^a-z])token(?:[^a-z]|$)|tabid/i.test(label)) return "";
-  const match = /^(地点|城市|区域|薪资|经验|学历|求职类型|职位类型|平台条件)[：:]\s*(.+)$/.exec(label);
+  const match = /^(地点|城市|区域|地铁|薪资|经验|学历|求职类型|职位类型|平台条件)[：:]\s*(.+)$/.exec(label);
   if (match) return `${match[1]}：${match[2].slice(0, 120)}`;
   const separator = label.indexOf("：");
   if (separator > 0) return `平台条件：${label.slice(separator + 1, separator + 121)}`;
@@ -4468,9 +4473,13 @@ function canGenerateGreeting(job) {
 
 function renderCommunicationResult({ result, job, profile, plan, hrMessage }) {
   const title = { greeting: "定制招呼语", hr_reply: "HR 回复", follow_up: "无回复跟进" }[result.kind] || "沟通草稿";
-  const messages = (result.messages || []).map((message, index) => `<section class="panel"><textarea id="communication-${index}" readonly>${escapeHtml(message)}</textarea><button type="button" onclick="copyCommunication('communication-${index}')">复制</button></section>`).join("");
+  const messages = (result.messages || []).map((message, index) => {
+    const editor = `<label>${index ? "另一种说法" : "回复草稿"}<textarea id="communication-${index}" rows="7" readonly>${escapeHtml(message)}</textarea></label><button type="button" onclick="copyCommunication('communication-${index}')">复制这段回复</button>`;
+    return index ? `<details class="card pad"><summary>另一种说法</summary>${editor}</details>` : `<section class="card pad">${editor}</section>`;
+  }).join("");
   const missing = result.missingFact ? `<section class="panel"><p>${escapeHtml(result.missingFact.question)}</p><form class="form-stack" method="post" action="/api/communication"><input type="hidden" name="mode" value="${escapeAttr(result.kind)}"><input type="hidden" name="jobId" value="${job.id}"><input type="hidden" name="profileId" value="${profile.id}"><input type="hidden" name="planId" value="${plan.id}"><input type="hidden" name="hrMessage" value="${escapeAttr(hrMessage)}"><input type="hidden" name="factKey" value="${escapeAttr(result.missingFact.key)}"><label>你的真实情况<textarea name="factValue" required></textarea></label><button>保存事实并生成回复</button></form></section>` : "";
-  return renderPage(title, `<main><nav>${navLinks({ currentPath: `/queue?planId=${plan.id}`, todayPath: `/queue?planId=${plan.id}`, planId: plan.id })}</nav><h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}。文案只生成到本页，不会自动发送。</p>${missing}${messages || (!missing ? '<section class="panel">没有生成可发送文案。</section>' : "")}</main><script>async function copyCommunication(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}</script>`);
+  return renderLegacyDashboardPage({ title, currentPath: `/queue?planId=${plan.id}`, todayPath: `/plan?planId=${plan.id}`, planId: plan.id, stage: title,
+    body: `<main id="main-content"><h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}。文案只生成到本页，不会自动发送。</p>${hrMessage ? `<section class="card pad"><h2>HR 的消息</h2><p>${escapeHtml(hrMessage)}</p></section>` : ""}${missing}${messages || (!missing ? '<section class="card pad">没有生成可发送文案。</section>' : "")}<p><a href="/queue?planId=${escapeAttr(plan.id)}">返回岗位记录</a></p></main><script>async function copyCommunication(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}</script>` });
 }
 
 function parseBody(rawBody, contentType) {
@@ -5687,9 +5696,9 @@ function renderRoleEvidenceSummary(analysis = {}, className = "line", tag = "spa
   return `<${tag} class="${escapeAttr(className)}">${track}岗位主体：${escapeHtml(String(analysis.roleSummary || "岗位主体待确认"))} · 主体匹配：${escapeHtml(roleAlignmentLabel(analysis.roleAlignment))} · 主体依据：${Array.isArray(analysis.roleResumeEvidence) ? analysis.roleResumeEvidence.length : 0} 条 · 已覆盖根基：${escapeHtml(covered)} · 待确认根基：${escapeHtml(unresolved)}</${tag}>`;
 }
 
-function renderErrorPage(message, back, { code = "", requestId = "" } = {}) {
+function renderErrorPage(message, back, { code = "", requestId = "", site = "boss" } = {}) {
   const issue = code
-    ? userFacingError(code, message)
+    ? userFacingError(code, message, { site })
     : {
       title: "操作没有完成",
       impact: String(message || "当前页面暂时不可用。"),
@@ -5817,10 +5826,10 @@ function openLocalFolder(folder) {
   });
 }
 
-function respondUiError(res, error, back, { logger, requestId, event, fallbackCode }) {
+function respondUiError(res, error, back, { logger, requestId, event, fallbackCode, site = "boss" }) {
   const issue = publicError(error, { fallbackCode });
   logger.error(event, { requestId, error: errorMeta(error), errorCode: issue.code });
-  sendHtml(res, renderErrorPage(issue.message, back, { code: issue.code, requestId }), issue.statusCode);
+  sendHtml(res, renderErrorPage(issue.message, back, { code: issue.code, requestId, site }), issue.statusCode);
 }
 
 function respondUnexpectedError(res, error, requestId, requestPath) {

@@ -377,6 +377,18 @@ function assertRendererIsPureAndEscapesHtml() {
   const runningCard = renderTodayPage(running).match(/<section class="card today-discovery-plan"[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(runningCard, /地点：广州 · 经验：1-3年/);
   assert.doesNotMatch(runningCard, /继承模式/);
+  const zhaopinRunning = buildTodayViewModel({
+    site: 'zhaopin',
+    profile: { id: 7 },
+    planRecord: { id: 12, profileId: 7 },
+    workflowState: { activeRun: { planner: {
+      acquisitionMode: 'inherited',
+      platformPolicy: { site: 'zhaopin', filterSummary: ['番禺区', '地铁', '薪资', '学历', '经验', '公司性质', '融资阶段', '公司人数', '工作性质', '职位类别', '公司行业'] }
+    } } },
+    validation: { valid: true },
+    run: { state: 'running' }
+  });
+  assert.equal(zhaopinRunning.form.acquisition.activeSnapshot.summary, '地点：番禺区 · 其余条件不限');
 }
 
 function assertEarlyScanConfirmationRendering() {

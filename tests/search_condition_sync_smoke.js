@@ -41,6 +41,8 @@ async function main() {
       let current = '城市：广州';
       let reads = 0;
       let failRead = false;
+      let failBossOnly = false;
+      let zhaopinReads = 0;
       let holdNextBoss = false;
       let releaseBoss = null;
       await page.route('**/*', async route => {
@@ -50,11 +52,13 @@ async function main() {
         if (url.pathname === '/api/browser-readiness') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ready', ready: true }) });
         if (url.pathname === '/api/acquisition-preview' || url.pathname === '/api/platform-search/save') {
           reads++;
+          if (url.pathname === '/api/platform-search/save') zhaopinReads++;
           if (url.pathname === '/api/acquisition-preview' && holdNextBoss) {
             holdNextBoss = false;
             await new Promise(resolve => { releaseBoss = resolve; });
           }
           if (failRead) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: '搜索页暂时无法读取' }) });
+          if (failBossOnly && url.pathname === '/api/acquisition-preview') return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'BOSS 搜索页暂时无法读取' }) });
           return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ready', summary: current, message: '搜索条件已更新', changed: true }) });
         }
         return route.fulfill({ status: 204 });
@@ -79,9 +83,19 @@ async function main() {
         holdNextBoss = true;
         await page.evaluate(() => window.dispatchEvent(new Event('focus')));
         await waitUntil(() => releaseBoss);
+        const savedKeywords = await page.locator('[data-discovery-keywords]').innerText();
         await page.getByLabel('本次找岗平台').selectOption('both');
+        assert.equal(await page.locator('[data-discovery-keywords]').innerText(), savedKeywords, 'choosing both platforms must keep the saved job titles visible');
         releaseBoss();
         await page.locator('[data-discovery-scope]').getByText(/BOSS：城市：佛山；智联：城市：佛山/).waitFor({ timeout: 3000 });
+        failBossOnly = true;
+        const beforeZhaopin = zhaopinReads;
+        current = '城市：广州 · 区域：番禺区';
+        await page.getByRole('button', { name: '重新读取搜索条件' }).click();
+        await page.locator('[data-condition-status]').getByText(/BOSS 搜索页暂时无法读取/).waitFor({ timeout: 3000 });
+        assert.equal(zhaopinReads, beforeZhaopin + 1, 'failure on BOSS must not skip the independent Zhaopin read');
+        assert.match(await page.locator('[data-discovery-scope]').innerText(), /智联：城市：广州 · 区域：番禺区/, 'the successful platform must display its current filters');
+        assert.match(await page.locator('[data-discovery-scope]').innerText(), /BOSS：城市：佛山/, 'the failed platform keeps its last trusted filters');
       }
       await page.close();
     }

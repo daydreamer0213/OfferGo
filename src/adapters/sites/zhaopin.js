@@ -408,26 +408,35 @@ class ZhaopinSiteAdapter {
     throwIfAborted(signal);
     await this.assertBoundTab(tabId);
     throwIfAborted(signal);
-    await this.browser.evalValue(tabId, ZHAOPIN_PAGE_HELPERS_EXPRESSION);
-    throwIfAborted(signal);
-    await this.assertBoundTab(tabId);
-    throwIfAborted(signal);
-    const rawState = await this.browser.evalValue(tabId, "(() => window.__zhaopinReadSearchState())()");
-    throwIfAborted(signal);
-    const state = assertSafeSearchState(rawState);
-    const identity = safeIdentity(state.detail?.url);
-    const observedSourceId = state.detail?.observedSourceId;
-    state.detailSourceIdConfirmed = Boolean(identity)
-      && state.detail?.observedSourceIdConflict !== true
-      && (state.detail?.observedSourceIdSupplied !== true || observedSourceId === identity.sourceId);
-    state.detailSourceIdFullyConfirmed = state.detailSourceIdConfirmed
-      && state.detail?.observedSourceIdsComplete === true
-      && observedSourceId === identity?.sourceId;
-    if (state.detail) {
-      const { observedSourceId: _observedSourceId, observedSourceIdSupplied: _observedSourceIdSupplied, observedSourceIdsComplete: _observedSourceIdsComplete, observedSourceIdConflict: _observedSourceIdConflict, ...detail } = state.detail;
-      state.detail = identity ? { ...detail, ...identity } : detail;
+    const releaseRendering = await this.openSearchRenderScope(tabId);
+    let operationError = null;
+    try {
+      await this.browser.evalValue(tabId, ZHAOPIN_PAGE_HELPERS_EXPRESSION);
+      throwIfAborted(signal);
+      await this.assertBoundTab(tabId);
+      throwIfAborted(signal);
+      const rawState = await this.browser.evalValue(tabId, "(() => window.__zhaopinReadSearchState())()");
+      throwIfAborted(signal);
+      const state = assertSafeSearchState(rawState);
+      const identity = safeIdentity(state.detail?.url);
+      const observedSourceId = state.detail?.observedSourceId;
+      state.detailSourceIdConfirmed = Boolean(identity)
+        && state.detail?.observedSourceIdConflict !== true
+        && (state.detail?.observedSourceIdSupplied !== true || observedSourceId === identity.sourceId);
+      state.detailSourceIdFullyConfirmed = state.detailSourceIdConfirmed
+        && state.detail?.observedSourceIdsComplete === true
+        && observedSourceId === identity?.sourceId;
+      if (state.detail) {
+        const { observedSourceId: _observedSourceId, observedSourceIdSupplied: _observedSourceIdSupplied, observedSourceIdsComplete: _observedSourceIdsComplete, observedSourceIdConflict: _observedSourceIdConflict, ...detail } = state.detail;
+        state.detail = identity ? { ...detail, ...identity } : detail;
+      }
+      return state;
+    } catch (error) {
+      operationError = error;
+      throw error;
+    } finally {
+      await releaseSearchRenderScope(releaseRendering, operationError);
     }
-    return state;
   }
 
   async readVisiblePaneDetail(tabId, card, signal = null, assertTabBindings = null, beforeEmptyRetry = null, allowSelectedPaneTransition = false) {
@@ -546,12 +555,14 @@ function detailMatches(card, detail, detailSourceIdConfirmed = true, detailSourc
   const publisher = detail?.publisherCompany || "";
   const exactComponentIdentity = detailSourceIdFullyConfirmed === true && card?.currentSourceIdSupplied === true
     && Boolean(card?.sourceId) && card.sourceId === detail?.sourceId;
+  const clientListed = exactComponentIdentity && Boolean(detail?.clientCompany)
+    && sameText(detail.clientCompany, card?.company);
   return detailSourceIdConfirmed === true && Boolean(detail?.title && detail?.description && detail?.url)
     && sameText(detail.title, card.title)
     && (!card.currentSourceIdSupplied || (Boolean(card.sourceId) && card.sourceId === detail.sourceId))
     && (!card.salary || sameText(detail.salary, card.salary))
-    && (!card.company || !publisher || sameText(publisher, card.company))
-    && (!card.company || sameText(company, card.company) || (Boolean(detail.clientCompany) && !detail.company))
+    && (!card.company || !publisher || sameText(publisher, card.company) || clientListed)
+    && (!card.company || sameText(company, card.company) || clientListed || (Boolean(detail.clientCompany) && !detail.company))
     && (!card.location || sameLocation(detail.location, card.location, exactComponentIdentity));
 }
 

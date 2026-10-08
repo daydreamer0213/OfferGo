@@ -4,7 +4,9 @@ const MAX_ADAPTIVE_RESPONSE_TOKENS = 16384;
 const MAX_ADAPTIVE_TIMEOUT_MS = 300000;
 const ALWAYS_LONG_STRUCTURED_TASKS = new Set([
   "analyzeResume",
-  "recommendSearchPlan"
+  "recommendSearchPlan",
+  "generateResumeOptimization",
+  "reviewMockInterview"
 ]);
 const THINKING_LONG_STRUCTURED_TASKS = new Set([
   "understandJob",

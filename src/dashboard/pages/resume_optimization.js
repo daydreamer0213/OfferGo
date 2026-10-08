@@ -78,8 +78,8 @@ function renderSelectedDraft(dashboard, draft) {
   const jobs = dashboard.selectedJobs || [];
   const activated = draft.status === "activated";
   return `<section class="resume-opt-workspace resume-workbench" aria-labelledby="resume-opt-draft-title">
-    <div class="resume-opt-conclusion"><div><p class="section-label">当前优化结论</p><h2 id="resume-opt-draft-title">${escapeHtml(draft.headline || "完整定向简历草稿")}</h2></div><span class="status ${activated ? "good" : "waiting"}">${activated ? "已启用新版本" : "可以继续编辑"}</span></div>
-    <dl class="resume-opt-binding"><div><dt>参考简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>目标投递方向</dt><dd>${escapeHtml(draft.mode === "general" ? "通用整理" : draft.targetDirection || "历史草稿未记录")}</dd></div></dl>
+    <div class="resume-opt-conclusion"><div><p class="section-label">当前优化结论</p><h2 id="resume-opt-draft-title">${escapeHtml(draft.headline || (draft.mode === "general" ? "完整简历草稿" : "完整定向简历草稿"))}</h2></div><span class="status ${activated ? "good" : "waiting"}">${activated ? "已启用新版本" : "可以继续编辑"}</span></div>
+    <dl class="resume-opt-binding"><div><dt>参考简历</dt><dd>${escapeHtml(resume?.name || `简历版本 ${draft.sourceResumeVersionId}`)}</dd></div><div><dt>${draft.mode === "general" ? "优化类型" : "目标投递方向"}</dt><dd>${escapeHtml(draft.mode === "general" ? "通用优化" : draft.targetDirection || "历史草稿未记录")}</dd></div></dl>
     ${draft.draftFormat === "whole_draft" ? renderWholeDraft(dashboard, draft, evidence) : renderLegacyDraft(draft, evidence)}
     ${draft.mode === "general" ? "" : renderSelectedJobs(jobs, draft)}
     ${activated ? renderActivatedNotice(dashboard, draft) : ""}

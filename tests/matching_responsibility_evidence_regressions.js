@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { validateModelResult } = require("../src/core/model_contract");
+const { validateModelResult, evidenceFitReasons } = require("../src/core/model_contract");
 const { applyRuleGuard } = require("../src/core/job_analysis");
 
 // Replay the evidence fields recorded in jobs-first.json, backend-junior/job-3.
@@ -69,5 +69,20 @@ check("unknown duties do not invent bilateral evidence or unblock a retry", () =
   assert.equal(guard(result).recommendation, null);
 });
 
+check("a partial match explains evidenced duties without claiming the whole role", () => {
+  const reasons = evidenceFitReasons({
+    roleAlignment: 'partially_aligned',
+    roleSummary: '设计运动控制算法、完成机器人动力学建模，并协助大模型测试',
+    roleResumeEvidence: ['简历：完成知识库检索链路开发'],
+    responsibilityMatches: [{ state: 'transferable', jdEvidence: 'JD：协助大模型测试', resumeEvidence: '简历：做过问答输出测试' }],
+    fitReasons: ['旧解释：知识库检索经验能支持机器人动力学建模']
+  });
+  assert(reasons.some(reason => reason.includes('问答输出测试') && reason.includes('协助大模型测试')));
+  assert(!reasons.some(reason => reason.includes('动力学建模')));
+});
+check("legacy explanations remain available without structured duty or requirement evidence", () => {
+  assert.deepEqual(evidenceFitReasons({ fitReasons: ['已有相关开发经验'] }), ['已有相关开发经验']);
+});
+
 if (failed) process.exitCode = 1;
-else console.log("matching_responsibility_evidence_regressions ok (4 checks)");
+else console.log("matching_responsibility_evidence_regressions ok (6 checks)");

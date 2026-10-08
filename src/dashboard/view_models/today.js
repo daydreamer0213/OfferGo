@@ -42,7 +42,7 @@ function buildTodayViewModel(input = {}) {
     activeSnapshot: activePlanner ? {
       mode: activePlanner.acquisitionMode,
       planHash: activePlanner.planHash || "",
-      summary: acquisitionSummary(activePlanner)
+      summary: acquisitionSummary(activePlanner, site)
     } : null
   };
 
@@ -194,13 +194,14 @@ function buildBossFilter(snapshot, catalog) {
   return { known: true, summary: formatNativeFilterSummary(snapshot) || "未命中可用的 BOSS 预筛档位", discoveredAt: String(catalog.discoveredAt || "").replace("T", " ").slice(0, 16) };
 }
 
-function acquisitionSummary(planner = {}) {
+function acquisitionSummary(planner = {}, site = 'boss') {
   if (planner.acquisitionMode === "generated") {
     const cities = (planner.cityScopes || []).map((item) => item.city || item.cityCode).filter(Boolean);
     const filters = Object.values(planner.nativeFilters?.labels || {}).flat();
     return [...cities, ...filters].join(" · ") || "按本轮保存的搜索条件";
   }
   const filters = (planner.platformPolicy?.filterSummary || []).filter(Boolean);
+  if (site === 'zhaopin') return zhaopinSearchDisplaySummary(filters);
   return filters.join(" · ") || "按本轮保存的搜索页条件";
 }
 

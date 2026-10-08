@@ -6,6 +6,11 @@ const ERROR_GUIDANCE = Object.freeze({
     impact: "这次请求没有完成；已有资料仍保留。",
     nextAction: "稍后重试本次操作。如果反复超时，请到“模型与设置”检查连接。"
   },
+  MODEL_OUTPUT_TRUNCATED: {
+    title: "模型返回的内容不完整",
+    impact: "本次没有生成可用结果，已有资料仍保留。",
+    nextAction: "可以重试本次操作；如果反复出现，请到“模型与设置”检查当前模型。"
+  },
   RESUME_OPTIMIZATION_REVISION_CONFLICT: {
     title: "这份简历已在另一页面修改",
     impact: "本次没有覆盖已保存的内容，你的输入仍保留在当前页面。",

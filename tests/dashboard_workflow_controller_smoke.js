@@ -160,6 +160,11 @@ async function main() {
   assert.equal(controlBody.errorCode, "MODEL_CONFIGURATION_REQUIRED");
   assert.equal(controlBody.settingsHref, "/settings#model-profile-batch_screening");
   assert.equal(controlBody.requestId, "request-control-fail");
+  service.control = async () => { throw Object.assign(new Error('timeout'), { code: 'BROWSER_TIMEOUT', details: { site: 'zhaopin' } }); };
+  const platformFailure = responseRecorder();
+  await controller.control(request('workflowRunId=zhaopin-existing&action=resume'), platformFailure);
+  assert.match(JSON.parse(platformFailure.body).error, /智联页面响应较慢/);
+  assert.doesNotMatch(JSON.parse(platformFailure.body).error, /BOSS/);
   assert.equal(errors.length, 0);
 
   console.log("dashboard_workflow_controller_smoke ok");

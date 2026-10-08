@@ -76,6 +76,7 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
           logger,
           requestId,
           event: "workflow_run_resume_failed",
+          site: error.details?.site,
           fallbackCode: "WORKFLOW_RUN_RESUME_FAILED"
         }
       );
@@ -107,7 +108,7 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
         error: errorMeta(error),
         errorCode: issue.code
       });
-      const guidance = userFacingError(issue.code, issue.message);
+      const guidance = userFacingError(issue.code, issue.message, { site: error.details?.site });
       return sendJson(res, issue.statusCode, {
         error: `${guidance.title}：${guidance.impact} ${guidance.nextAction}`,
         errorCode: issue.code,

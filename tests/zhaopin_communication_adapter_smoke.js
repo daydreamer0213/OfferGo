@@ -403,13 +403,23 @@ async function main() {
     await page.goto(SEARCH_URL);
     await page.evaluate(() => { window.fixture.reset(); window.fixture.select(0); });
     const backgroundCleanupError = Object.assign(new Error("background rendering cleanup failed"), { code: "BROWSER_COMMAND_FAILED" });
+    const preparationCleanupBrowser = fakeBrowser(page, {
+      hideNextPageJobBTitleUntilRendered: true,
+      focusDisableError: backgroundCleanupError
+    });
+    await assert.rejects(() => prepareSession(adapterFor(preparationCleanupBrowser), preparationCleanupBrowser),
+      error => error === backgroundCleanupError);
+    assert.equal(preparationCleanupBrowser.calls.filter(call => call.kind === "prechat").length, 0,
+      "a cleanup failure during readiness must stop before external communication");
     let backgroundCleanupFailures = 0;
+    let backgroundCleanupArmed = false;
     const backgroundCleanupBrowser = fakeBrowser(page, {
       hideNextPageJobBTitleUntilRendered: true,
-      focusDisableError: () => backgroundCleanupFailures++ === 0 ? backgroundCleanupError : null
+      focusDisableError: () => backgroundCleanupArmed && backgroundCleanupFailures++ === 0 ? backgroundCleanupError : null
     });
     const backgroundCleanupAdapter = adapterFor(backgroundCleanupBrowser);
     await prepareSession(backgroundCleanupAdapter, backgroundCleanupBrowser);
+    backgroundCleanupArmed = true;
     await assert.rejects(() => backgroundCleanupAdapter.inspectCommunicationJob(JOB_B), (error) => error === backgroundCleanupError);
     assert.equal(backgroundCleanupBrowser.calls.filter((call) => call.kind === "prechat").length, 0, "cleanup failure cannot authorize dispatch");
     await page.evaluate(() => { window.fixture.reset(); window.fixture.select(0); });
@@ -423,12 +433,14 @@ async function main() {
       code: "BROWSER_COMMAND_FAILED",
       cause: priorCleanupCause
     });
+    let combinedCleanupArmed = false;
     const combinedFailureBrowser = fakeBrowser(page, {
       hideNextPageJobBTitleUntilRendered: true,
-      focusDisableError: combinedCleanupError
+      focusDisableError: () => combinedCleanupArmed ? combinedCleanupError : null
     });
     const combinedFailureAdapter = adapterFor(combinedFailureBrowser);
     await prepareSession(combinedFailureAdapter, combinedFailureBrowser);
+    combinedCleanupArmed = true;
     await assert.rejects(() => combinedFailureAdapter.inspectCommunicationJob(backgroundMissing), (error) => {
       assert(error instanceof AggregateError, "cleanup failure and original lookup failure must both be retained");
       assert.equal(error.code, "BROWSER_COMMAND_FAILED");
