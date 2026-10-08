@@ -10,7 +10,7 @@ permissions:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -26,6 +26,20 @@ jobs:
       - name: Prepare Windows test storage
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path "D:\DevData" | Out-Null
+      - name: Prepare browser checks
+        shell: pwsh
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+          npm_config_cache: D:\DevData\npm-cache
+        run: |
+          $browserChecksRoot = "D:\DevData\OfferGo-browser-checks"
+          New-Item -ItemType Directory -Force -Path $browserChecksRoot | Out-Null
+          Copy-Item -Path ".github/browser-tests/package*.json" -Destination $browserChecksRoot
+          npm ci --prefix $browserChecksRoot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:NODE_PATH = Join-Path $browserChecksRoot "node_modules"
+          "NODE_PATH=$env:NODE_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          node -e "require('playwright').chromium.launch({channel:'msedge',headless:true}).then(browser=>browser.close()).catch(error=>{console.error(error);process.exitCode=1})"
       - name: Prepare portable Node runtime
         shell: pwsh
         run: |
@@ -38,4 +52,4 @@ jobs:
             -Force
       - name: Run offline checks
         shell: pwsh
-        run: .\.runtime\node\node.exe --disable-warning=ExperimentalWarning .\tests\run_all.js
+        run: .\.runtime\node\node.exe --disable-warning=ExperimentalWarning .\tests\run_all.js --browser-required
