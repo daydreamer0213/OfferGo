@@ -744,7 +744,10 @@ async function main() {
   assert.equal(restoredZhaopinActions[0].platformMessageId, "207");
   assert.equal(restoredZhaopinActions[0].metadata.cardType, "11");
   assert.match(understoodPage.body, new RegExp(`data-message-key="${restoredZhaopinActions[0].messageKey}"`));
-  assert(understoodPreviews.some(text => text.includes(OPEN_HR_TEXT)), "newest question must precede an older long greeting");
+  const latestBossCard = [...understoodPage.body.matchAll(/<label class="message-list-item"[\s\S]*?<\/label>/g)]
+    .map(match => match[0]).find(card => card.includes('<strong>AI 应用开发工程师</strong>'));
+  assert(latestBossCard?.includes(RESUME_REQUEST_SUMMARY), "the list must preview the latest resume request from the durable inbox");
+  assert(!latestBossCard.includes(OPEN_HR_TEXT), "the older question remains in the thread, not the latest-message preview");
   assert(understoodPreviews.some(text => text.includes("有 &lt;证书&gt; 吗？")), "same intent must still show its distinct question with HTML escaping");
   assert(!understoodPage.body.includes("有 <证书> 吗？"));
   assert(understoodPage.body.includes("AI 应用开发工程师"));
@@ -3130,6 +3133,7 @@ function runMessageDiscoveryClient(markup, scenario, options = {}) {
     action: { nodeName: "INPUT", name: "action", toString() { return "[object HTMLInputElement]"; } },
     formData: [["action", "start"], ["profileId", "1"]],
     getAttribute(name) { return name === "action" ? "/api/message-discovery" : null; },
+    querySelector(selector) { return selector === '[name="action"]' ? { value: "start" } : null; },
     querySelectorAll(selector) { return selector === "button" ? [button] : []; },
     addEventListener(type, handler) { handlers.set(type, handler); }
   };
