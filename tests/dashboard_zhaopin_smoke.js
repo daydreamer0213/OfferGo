@@ -629,7 +629,9 @@ async function journey() {
     releaseAnalysis();
     await waitFor(() => storage.getWorkflowRun(db, runId).status === 'paused', 'real executor pauses');
     await Promise.all([...pendingChildren]);
-    await page.reload(); await audit('paused');
+    await page.locator('[data-workflow-status="paused"]').waitFor();
+    await page.waitForLoadState('load');
+    await audit('paused');
     await page.goto(`${base}/plan?planId=${saved.planId}&site=boss`);
     assert.equal(storage.getWorkflowRun(db, runId).site, 'zhaopin', 'page selector cannot change frozen workflow source');
     // Stop this test client's live polling before closing and reopening its synthetic server.
@@ -647,7 +649,9 @@ async function journey() {
     bridge.tabs[1].windowId = 'window';
     const result = storage.listReportJobs(db, { batchId: storage.getWorkflowRun(db, runId).scanBatchId });
     assert.equal(result.length, 3); assert(result.every(job => job.analysis.semanticStatus === 'complete'));
-    await page.reload(); await audit('completed');
+    await page.locator('[data-workflow-status="completed"]').waitFor();
+    await page.waitForLoadState('load');
+    await audit('completed');
     assert.equal(await page.locator('[data-overview-recommendations]').count(), 0);
     assert.equal(await page.locator('[data-overview-next-action]').count(), 0, 'completed ZL has no duplicate next step');
     assert.doesNotMatch(await page.locator('.workflow-primary').innerText(), /等待下一次状态更新|可用推荐/);
