@@ -218,15 +218,65 @@ async function main() {
     await page.getByRole('button',{name:'同步最新消息',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('button[data-page-primary]')||document.querySelector('button[data-page-primary]').disabled);await page.getByRole('button',{name:'安全停止',exact:true}).waitFor({state:'visible'});
     await page.waitForFunction(()=>Array.from(document.querySelectorAll('form[data-discovery-form]')).find(form=>form.querySelector('[name=action]').value==='stop').querySelector('button').disabled===false);
     assert.match(await page.locator('main').innerText(),/正在加载并读取消息/);assert.equal(httpBossCalls,0);assert.equal(httpReaderCalls,2);
+    // One live progress region must own the running state; frozen server
+    // snapshots cannot keep announcing a previous phase or previous counts.
+    assert.equal(await page.locator('.message-state:visible, .message-sync-progress:visible, .message-freshness:visible').count(),0);
+    let progressPhase='analyzing_job';
+    await page.route('**/api/message-discovery-status?*',async route=>{
+      const snapshot=await (await fetch(route.request().url())).json();
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...snapshot,phase:progressPhase,queued:7,processed:3})});
+    });
+    await page.waitForFunction(()=>document.querySelector('[data-discovery-feedback]').textContent.includes('已处理 3 条'));
+    const jobProgress=await page.locator('[data-discovery-feedback]').innerText();
+    progressPhase='analyzing_messages';
+    await page.waitForFunction(previous=>document.querySelector('[data-discovery-feedback]').textContent!==previous,jobProgress);
+    assert.equal(await page.locator('.message-state:visible, .message-sync-progress:visible').count(),0);
+    assert.equal(await page.getByText('当前没有需要处理的消息。点击“同步最新消息”开始检查。',{exact:true}).count(),0);
+    await page.unroute('**/api/message-discovery-status?*');
     await page.getByRole('button',{name:'安全停止',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.message-state h2')?.textContent==='已安全停止');assert.equal(httpReaderCalls,2);
     const stoppedStatus=await (await fetch(base+'/api/message-discovery-status?profileId='+profileId)).json();assert.equal(stoppedStatus.status,'stopped');assert.equal(stoppedStatus.unresolved,0);assert.equal(stoppedStatus.reasonCode,'MESSAGE_DISCOVERY_STOPPED');
     const stoppedState=await page.locator('.message-state').innerText();assert.match(stoppedState,/已按你的操作安全停止/);assert.doesNotMatch(stoppedState,/无法确认本地岗位与会话是否一致/);assert.equal(await historicalRow.count(),0);
     assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
     await contactFiltersAndHistory(context, base, db);
+    await factAnswerKeepsCurrentContact(context, base, db);
     await activeBatchRemainsStoppableInUnifiedInbox(chromium);
     console.log('dashboard_unified_messages_journey ok: serial discovery, restore, source-safe HTTP/UI, autosave, unified inbox navigation, 1440/390, active BOSS stop after reload');
   }finally{if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));for(const controller of controllers)await controller.close();db.close();fs.rmSync(root,{recursive:true,force:true});}
 }
+
+async function factAnswerKeepsCurrentContact(context, base, db) {
+  const profileId = Number(db.prepare("INSERT INTO candidate_profiles(display_name,profile_json,created_at,updated_at) VALUES ('补问候选人','{}',?,?)").run(NOW,NOW).lastInsertRowid);
+  const planId = Number(db.prepare("INSERT INTO search_plans(profile_id,name,plan_json,is_active,created_at,updated_at) VALUES (?,'补问计划','{}',1,?,?)").run(profileId,NOW,NOW).lastInsertRowid);
+  seed(db,'zhaopin',profileId,planId,false,'22');
+  const target=seed(db,'boss',profileId,planId,true,'21');
+  require('../src/core/candidate_progress').recordDiscoveredMessageGroupClassification(db,{
+    cardId:target.cardId,platform:'boss',threadKey:digest('fact-thread'),messageKeys:[digest('fact-question')],
+    messageGroupKey:target.key,messageIntent:'information_request',messageCategory:'salary',
+    missingFactKey:'expected_salary',missingFactQuestion:'期望薪资是多少？',manualActions:[],
+    progressUpdate:{stage:'needs_user_action'},occurredAt:NOW
+  });
+  const page=await context.newPage();
+  try {
+    await page.goto(base+'/messages?profileId='+profileId);
+    const row=page.locator('.message-list-item[data-platform="boss"][data-pending="true"]');
+    const key=await row.locator('[data-message-view]').getAttribute('data-message-view');
+    assert.notEqual(await page.locator('[data-message-view]:checked').getAttribute('data-message-view'),key);
+    await row.click();
+    await page.locator('[data-message-detail-panel]:visible textarea[name="factValue"]').fill('12-15K');
+    let received;
+    await page.route('**/api/message-discovery',async route=>{
+      received=new URLSearchParams(route.request().postData());
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'needs_fact',draftCount:0})});
+    });
+    await Promise.all([page.waitForEvent('load'),page.locator('[data-message-detail-panel]:visible form[data-discovery-form] button').click()]);
+    assert.equal(received.get('action'),'answer_fact');
+    assert.equal(received.get('factValue'),'12-15K');
+    assert.equal(await page.locator('[data-message-view="'+key+'"]').isChecked(),true,
+      'answering one missing fact must keep the same HR conversation open for the next question');
+    assert.equal(await page.locator('[data-message-detail-panel="'+key+'"] textarea[name="factValue"]').isVisible(),true);
+  } finally { await page.close(); }
+}
+
 async function contactFiltersAndHistory(context, base, db) {
   const profileId = Number(db.prepare("INSERT INTO candidate_profiles(display_name,profile_json,created_at,updated_at) VALUES ('筛选合成候选人','{}',?,?)").run(NOW,NOW).lastInsertRowid);
   const planId = Number(db.prepare("INSERT INTO search_plans(profile_id,name,plan_json,is_active,created_at,updated_at) VALUES (?,'合成计划','{}',1,?,?)").run(profileId,NOW,NOW).lastInsertRowid);

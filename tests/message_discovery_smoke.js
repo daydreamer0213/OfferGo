@@ -889,6 +889,50 @@ async function threadAndContextResolutionSmoke() {
   assert.strictEqual(summary.status, "completed");
   assert.strictEqual(companyMismatchResolverCalls, 1, "a company mismatch must enter trusted job-context recovery");
 
+
+  const repeatedTitle = createFixture({ suffix: "same-title-new-source", title: "Same Title Engineer" });
+  const oldThread = safeDigest(["older-conversation"]);
+  db.prepare("UPDATE candidate_progress_cards SET thread_key = ? WHERE id = ?")
+    .run(oldThread, repeatedTitle.card.id);
+  let newSourceCalls = 0;
+  let newSourceJobId;
+  summary = await runBossMessageDiscovery({
+    db, profileId: repeatedTitle.profileId,
+    reader: fakeReader([selectedConversation({ title: repeatedTitle.title,
+      sourceJobId: "boss:new-source-same-title", messageId: "123456789012420" })]),
+    resolveJobContext: async ({ target, candidate }) => {
+      newSourceCalls += 1;
+      assert.strictEqual(candidate, null, "a different source job must not reuse the old same-title conversation");
+      const fresh = createFixture({ suffix: "new-source-same-title", title: repeatedTitle.title,
+        profileId: repeatedTitle.profileId, planId: repeatedTitle.planId });
+      db.prepare("UPDATE jobs SET source_id = ? WHERE id = ?").run(target.sourceJobId, fresh.jobId);
+      newSourceJobId = fresh.jobId;
+      return resolvedContext(listMessageDiscoveryCandidates(db, { profileId: repeatedTitle.profileId })
+        .find(item => item.jobId === fresh.jobId), target.conversationKey);
+    },
+    classifyMessageGroup: async ({ job }) => {
+      assert.strictEqual(job.id, newSourceJobId);
+      return classification();
+    }, now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(newSourceCalls, 1, "a new source ID with the same title and company must enter trusted context recovery");
+  assert.strictEqual(summary.processed, 1);
+  assert.strictEqual(summary.unresolved, 0);
+  assert.strictEqual(db.prepare("SELECT thread_key FROM candidate_progress_cards WHERE id = ?")
+    .get(repeatedTitle.card.id).thread_key, oldThread);
+
+  let conflictingResolverCalls = 0;
+  summary = await runBossMessageDiscovery({
+    db, profileId: repeatedTitle.profileId,
+    reader: fakeReader([selectedConversation({ title: repeatedTitle.title,
+      sourceJobId: "boss:job-same-title-new-source", messageId: "123456789012421" })]),
+    resolveJobContext: async () => { conflictingResolverCalls += 1; throw new Error("same source thread conflict must stop"); },
+    classifyMessageGroup: async () => { throw new Error("same source thread conflict must not classify"); },
+    now: () => NOW, sleepFn: async () => {}
+  });
+  assert.strictEqual(conflictingResolverCalls, 0);
+  assert.strictEqual(summary.reasonCode, "BOSS_MESSAGE_THREAD_MISMATCH");
+
   const legacy = createFixture({ suffix: "legacy-thread", title: "Legacy Thread Engineer" });
   const legacyThreadKey = safeDigest(["boss", PRIVATE_RECRUITER, legacy.title]);
   const legacyCanonicalKey = safeDigest(["conversation", "0"]);
@@ -2520,9 +2564,17 @@ async function messageGroupBoundarySmoke() {
 
   const platformOnly = createFixture({ suffix: "group-platform-only", title: "Group Platform Only Engineer" });
   let platformOnlyModelCalls = 0;
+  let platformOnlyContextCalls = 0;
+  const noticeThread = safeDigest(["conversation", "0"]);
+  upsertMessageInboxItem(db, { profileId: platformOnly.profileId, platform: "boss",
+    conversationKey: noticeThread, sourceJobId: "boss:job-group-platform-only",
+    jobId: platformOnly.jobId, cardId: platformOnly.card.id, lastMessageId: "820000000000001",
+    lastActivityAt: NOW, lastDirection: "friend", unread: true, positionTitle: platformOnly.title,
+    company: platformOnly.company, latestExcerpt: "请回答之前的问题", actionGroup: "needs_action", actionCode: "reply", observedAt: NOW });
   const platformOnlySummary = await runBossMessageDiscovery({
     db,
     profileId: platformOnly.profileId,
+    resolveJobContext: async ({ target, candidate }) => { platformOnlyContextCalls += 1; return resolvedContext(candidate, target.conversationKey); },
     reader: fakeReader([selectedConversation({
       title: platformOnly.title,
       messages: [message("friend", "830000000000000", "岗位竞争情况", "platform_notice")]
@@ -2531,8 +2583,13 @@ async function messageGroupBoundarySmoke() {
       platformOnlyModelCalls += 1;
       return classification();
     },
+    now: () => NOW,
     sleepFn: async () => {}
   });
+  const noticeInbox = getMessageInboxItem(db, { profileId: platformOnly.profileId, platform: "boss", conversationKey: noticeThread });
+  assert.strictEqual(noticeInbox.actionGroup, "needs_action", "an ignored platform notice must not resolve an unanswered HR question");
+  assert.strictEqual(noticeInbox.lastMessageId, "820000000000001");
+  assert.strictEqual(platformOnlyContextCalls, 0, "a platform-only group must not spend time fetching or analyzing a job");
   assert.strictEqual(platformOnlyModelCalls, 0, "a platform-only group must not call the text model");
   assert.strictEqual(platformOnlySummary.processed, 0);
   assert.deepStrictEqual(platformOnlySummary.results, []);
@@ -2541,6 +2598,21 @@ async function messageGroupBoundarySmoke() {
     1,
     "a platform-only group must commit its row preview so it is not rediscovered as HR communication"
   );
+
+
+  const retainedQuestion = createFixture({ suffix: "notice-after-unanswered", title: "Notice After Unanswered Engineer" });
+  const retainedMessage = message("friend", "831000000000000", "请介绍你负责的接口工作。");
+  await runBossMessageDiscovery({ db, profileId: retainedQuestion.profileId,
+    reader: fakeReader([selectedConversation({ title: retainedQuestion.title, messages: [retainedMessage] })]),
+    classifyMessageGroup: async () => classification(), now: () => NOW, sleepFn: async () => {} });
+  await runBossMessageDiscovery({ db, profileId: retainedQuestion.profileId,
+    reader: fakeReader([selectedConversation({ title: retainedQuestion.title,
+      messages: [message("friend", "831000000000000", "请介绍你负责的接口工作。"),
+        message("friend", "831000000000001", "岗位竞争情况", "platform_notice")] })]),
+    classifyMessageGroup: async () => { throw new Error("the already classified HR question must not be classified again"); },
+    now: () => NOW, sleepFn: async () => {} });
+  const retainedInbox = getMessageInboxItem(db, { profileId: retainedQuestion.profileId, platform: "boss", conversationKey: noticeThread });
+  assert.strictEqual(retainedInbox.actionGroup, "needs_action", "a full thread containing an old unanswered HR question and a new notice must keep the question pending");
 
   const unknownCard = createFixture({ suffix: "group-unknown-card", title: "Group Unknown Card Engineer" });
   const unknownCardSummary = await runBossMessageDiscovery({

@@ -333,6 +333,30 @@ server.listen(0, "127.0.0.1", async () => {
     await ordinaryBudgetAdapter.chatJson("return json", { test: true }, { kind: "draftCommunication" });
     assert.deepStrictEqual(ordinaryBudgets, [{ maxTokens: 4096, timeoutMs: 120000 }]);
 
+    for (const thinkingMode of ["enabled", "disabled"]) {
+      const budgets = [];
+      const messageBudgetAdapter = new OpenAICompatibleAdapter({
+        baseUrl, apiKeyEnv: "ZHIPPING_TEST_MODEL_KEY", model: "message-budget-test",
+        timeoutMs: 120000, maxTokens: 4096, maxRetries: 0, thinkingMode, logger
+      });
+      messageBudgetAdapter.requestJson = async ({ kind, maxTokens, timeoutMs }) => {
+        assert.strictEqual(kind, "draftMessageGroup");
+        budgets.push({ maxTokens, timeoutMs });
+        if (thinkingMode === "enabled" && maxTokens < 8192) {
+          throw Object.assign(new Error("multi-question reply reasoning truncated"), {
+            code: "MODEL_OUTPUT_TRUNCATED", retryable: true, requestedMaxTokens: maxTokens
+          });
+        }
+        return { value: { ok: true }, httpStatus: 200, contentLength: 11 };
+      };
+      assert.deepStrictEqual(await messageBudgetAdapter.draftMessageGroup({
+        messages: [{ text: "现在在职吗，期望薪资多少？项目怎样排查验证？有性能数据吗？" }]
+      }), { ok: true });
+      assert.deepStrictEqual(budgets, [thinkingMode === "enabled"
+        ? { maxTokens: 8192, timeoutMs: 240000 }
+        : { maxTokens: 4096, timeoutMs: 120000 }]);
+    }
+
     for (const kind of ["generateResumeOptimization", "reviewMockInterview"]) {
       const budgets = [];
       const budgetAdapter = new OpenAICompatibleAdapter({

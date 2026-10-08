@@ -49,7 +49,7 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
     };
     try {
       const result = await adapter.draftMessageGroup(input, { signal });
-      return validateMessageReply(result, {
+      const context = {
         facts: input.facts,
         answerMemories: input.answerMemories,
         candidateEvidence: input.candidateEvidence,
@@ -58,7 +58,23 @@ function createMessageReplyAnalyzer({ adapter, logger = null } = {}) {
         platform: input.platform,
         requestedActions: input.requestedActions,
         sourceMessages: input.messages.map((message) => message.text)
-      });
+      };
+      // An ended job in a resume does not establish today's employment state.
+      // Reuse explicit current information; otherwise continue fact confirmation.
+      const resumeEmployment = mergeCandidateFacts([], [{ text: input.currentResume?.text || "", updatedAt: now }])
+        .some(fact => fact.factKey === "employment_status");
+      if (result.messageIntent === "information_request" && result.messages?.length
+        && !input.facts.some(fact => fact.key === "employment_status") && !resumeEmployment
+        && /(?:在职|离职)(?:了)?[吗？?]|(?:现在|目前|当前|你|您).{0,8}(?:在职|离职).{0,6}[吗？?]|(?:是否|还).{0,4}在职/.test(query)) {
+        return validateMessageReply({ ...result, messages: [], usedFactKeys: [], usedMemoryIds: [], usedEvidenceIds: [],
+          requiredFactKeys: [...new Set([...(result.requiredFactKeys || []), "employment_status"])],
+          missingFact: { key: "employment_status", question: "你目前是在职、离职，还是正在寻找新机会？" },
+          coverage: result.coverage.map(item => ({ ...item, covered: false })),
+          ...(result.responseStrategy ? { responseStrategy: { concern: result.responseStrategy.concern,
+            focus: "先确认当前在职状态，再结合已确认资料回答本轮其他问题。" } } : {})
+        }, context);
+      }
+      return validateMessageReply(result, context);
     } catch (error) {
       if (typeof logger?.warn === "function") {
         logger.warn("message_reply_analyzer_failed", { code: String(error?.code || "MESSAGE_REPLY_FAILED") });

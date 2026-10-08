@@ -9,6 +9,7 @@ const ALWAYS_LONG_STRUCTURED_TASKS = new Set([
   "reviewMockInterview"
 ]);
 const THINKING_LONG_STRUCTURED_TASKS = new Set([
+  "draftMessageGroup",
   "understandJob",
   "matchResponsibilities",
   "matchRequirements"

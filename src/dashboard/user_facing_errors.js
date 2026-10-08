@@ -144,7 +144,7 @@ function userFacingError(code, technicalMessage = "", { site = "boss" } = {}) {
     impact: /[\u3400-\u9fff]/.test(readable)
       ? readable
       : "当前进度已保留，OfferGo 不会自动执行下一步。",
-    nextAction: "返回本轮查看状态；若再次发生，请复制技术信息到运行诊断。",
+    nextAction: "点击“返回”，按页面提示调整后重试。若仍无法完成，可到“运行诊断”查看记录。",
     technicalMessage: readable
   };
 }

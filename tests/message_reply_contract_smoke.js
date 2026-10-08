@@ -870,6 +870,49 @@ async function main() {
   });
   assert.notStrictEqual(revisedMockDraft.messages[0], defaultMockDraft.messages[0], "mock adapter must exercise the bounded revision path");
 
+
+  const inferredEmployment = safeReply({
+    messageSummary: '对方询问在职状态、薪资及分页问题。',
+    requiredFactKeys: ['employment_status', 'expected_salary'],
+    usedFactKeys: ['employment_status', 'expected_salary'],
+    responseItems: [{ id: 'current_employment', kind: 'question', required: true },
+      { id: 'salary', kind: 'question', required: true }, { id: 'pagination', kind: 'question', required: true }],
+    coverage: ['current_employment', 'salary', 'pagination'].map(id => ({ responseItemId: id, covered: true })),
+    messages: ['目前已离职，期望12-15K，我补充了稳定排序。']
+  });
+  const employmentAnalyzer = createMessageReplyAnalyzer({ adapter: {
+    async draftMessageGroup() { return inferredEmployment; }
+  } });
+  const salaryFact = { key: 'expected_salary', value: '12-15K', source: 'user_provided', updatedAt: NOW };
+  const missingEmployment = await employmentAnalyzer({
+    currentResume: { text: '后端开发，上一份工作2026年6月结束。' },
+    messages: [{ text: '现在在职吗，期望薪资多少？分页问题怎么排查？' }],
+    facts: [salaryFact], now: NOW
+  });
+  assert.deepStrictEqual(missingEmployment.messages, []);
+  assert.strictEqual(missingEmployment.missingFact.key, 'employment_status');
+  assert(missingEmployment.missingFact.question.includes('在职'));
+  assert(missingEmployment.coverage.every(item => !item.covered));
+  assert.deepStrictEqual(missingEmployment.usedFactKeys, []);
+
+  const undeclaredEmploymentAnalyzer = createMessageReplyAnalyzer({ adapter: {
+    async draftMessageGroup() { return { ...inferredEmployment, requiredFactKeys: [], usedFactKeys: ['expected_salary'] }; }
+  } });
+  const undeclaredEmployment = await undeclaredEmploymentAnalyzer({ messages: [{ text: '现在在职吗？' }],
+    facts: [salaryFact], currentResume: { text: '上一份工作2026年6月结束。' }, now: NOW });
+  assert.strictEqual(undeclaredEmployment.missingFact?.key, 'employment_status');
+  assert.deepStrictEqual(undeclaredEmployment.messages, []);
+  const explicitResumeEmployment = await undeclaredEmploymentAnalyzer({ messages: [{ text: '现在在职吗？' }],
+    facts: [salaryFact], currentResume: { text: '我目前已经离职。' }, now: NOW });
+  assert.deepStrictEqual(explicitResumeEmployment.messages, inferredEmployment.messages,
+    'explicit current resume information must remain usable without an extra confirmation barrier');
+
+  const confirmedEmployment = await employmentAnalyzer({ messages: [{ text: '现在在职吗？' }],
+    facts: [salaryFact, { key: 'employment_status', value: '已离职', source: 'user_provided', updatedAt: NOW }], now: NOW });
+  assert.deepStrictEqual(confirmedEmployment.messages, inferredEmployment.messages);
+  await assert.rejects(employmentAnalyzer({ messages: [{ text: '这个岗位需要在职时协作过接口，介绍项目吧。' }],
+    facts: [salaryFact], now: NOW }), error => error.code === 'MESSAGE_REPLY_FACT_NOT_SUPPLIED');
+
   console.log("message_reply_contract_smoke ok");
 }
 

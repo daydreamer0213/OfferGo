@@ -392,6 +392,19 @@ async function runBossMessageDiscovery({
         observedAt: timelineObservedAt
       });
     }
+    if (selectedSnapshot?.messages?.length && selectedSnapshot.messages.every(item =>
+      ["platform_notice", "media_ignored"].includes(item?.contentKind))) {
+      clearSelectedSnapshot(selectedSnapshot);
+      immediateTransaction(db, () => {
+        commitBaseline(db, profileId, target, source, timelineObservedAt);
+        clearUnresolvedMessageDiscoveryItem(db, {
+          profileId, platform: source, conversationKey: target.conversationKey
+        });
+      });
+      retained = unresolvedSummary(db, profileId, source);
+      await paceBeforeNext({ queueIndex, queueLength: queue.length, openedCount, sleepFn, randomFn, signal });
+      continue;
+    }
     const selectedTarget = source === "zhaopin"
       ? { ...target, sourceJobId: String(selectedSnapshot?.sourceJobId || ""), lastMessageId: String(selectedSnapshot?.lastMessageId || "") }
       : target;
@@ -668,8 +681,7 @@ async function runBossMessageDiscovery({
         retained = unresolvedSummary(db, profileId, source);
         const existingInbox = listMessageInboxItems(db, { profileId }).find(item =>
           item.platform === source && item.conversationKey === target.conversationKey);
-        const unchanged = existingInbox?.lastMessageId === selectedTarget.lastMessageId
-          && ["needs_action", "waiting"].includes(existingInbox.actionGroup);
+        const unchanged = ["needs_action", "waiting"].includes(existingInbox?.actionGroup);
         if (!unchanged) markMessageInboxItemDone(db, {
           profileId,
           platform: source,
@@ -1001,6 +1013,11 @@ function resolveUniqueCandidate(candidates, selected, canonicalThreadKey, source
   if (candidate.threadKey
     && candidate.threadKey !== canonicalThreadKey
     && candidate.threadKey !== legacyThreadKey) {
+    if (canonicalSourceId && canonicalBossJobSourceId(selected?.sourceJobId) === canonicalSourceId
+      && canonicalBossJobSourceId(candidate.sourceId)
+      && canonicalBossJobSourceId(candidate.sourceId) !== canonicalSourceId) {
+      return { ok: false, reasonCode: "BOSS_MESSAGE_CARD_NOT_FOUND" };
+    }
     return { ok: false, reasonCode: "BOSS_MESSAGE_THREAD_MISMATCH" };
   }
   return {
