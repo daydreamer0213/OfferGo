@@ -1150,9 +1150,10 @@ let server;
   assert.match(reviewPage.body, /本轮成功目标\s*35/);
   assert.match(reviewPage.body, /<dt>可用推荐<\/dt><dd[^>]*>5<\/dd>/);
   assert.strictEqual(getWorkflowRun(db, workflow.id).inventoryCount >= 6, true);
-  for (const label of ["匹配分支", "大模型应用开发", "岗位主体", "主体匹配", "基本一致", "已覆盖根基", "待确认根基"]) {
+  for (const label of ["主要工作", "负责 RAG 应用交付与持续优化", "你的相关经历", "完成 RAG 应用交付", "生产环境部署"]) {
     assert.match(reviewPage.body, new RegExp(label));
   }
+  assert.doesNotMatch(reviewPage.body, /匹配分支|岗位主体|主体匹配|已覆盖根基|待确认根基/, 'the review list explains actual work and evidence without internal matching fields');
   assert.match(reviewPage.body, /硬性限制：岗位方向需谨慎/);
   assert.match(reviewPage.body, /workflow-tier/);
   for (const tier of ["主投", "可投", "慎投"]) assert.match(reviewPage.body, new RegExp(tier));
