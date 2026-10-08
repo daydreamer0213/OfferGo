@@ -1061,7 +1061,7 @@ async function main() {
   const manualHtml = await response.text();
   assert.strictEqual(response.status, 200, manualHtml);
   assert(manualHtml.includes('id="communication-0"'), "manual paste must still return a draft");
-  assert(!manualHtml.includes("你有 Python 和 RAG 项目经验吗？"));
+  assert(manualHtml.includes("你有 Python 和 RAG 项目经验吗？"), "the user's manual reply result must retain the HR question for comparison with the draft");
 
   const retainedFixture = createFixture();
   recordUnresolvedMessageDiscoveryItem(db, {
