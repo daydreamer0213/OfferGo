@@ -553,7 +553,9 @@ async function main() {
       assert.deepEqual(storage.listReportJobs(db, { batchId }).map(job => job.sourceId), ['SYNTH0'], `${failure} during loading preserves the first checkpoint only`);
       assert.equal(zhaopinActivations(bridge), 1, `${failure} during loading does not re-click the second card`);
       assert.equal(detailReads, 2, `${failure} during loading does not reserve the interrupted detail twice`);
-      assert.deepEqual(bridge.calls.filter(call => call.type === 'cdp').map(call => call.params.enabled), [true, false], `${failure} during loading releases the render scope`);
+      const renderToggles = bridge.calls.filter(call => call.type === 'cdp').map(call => call.params.enabled);
+      assert(renderToggles.length >= 2 && renderToggles.length % 2 === 0, `${failure} releases every opened render scope`);
+      assert.deepEqual(renderToggles, Array.from({ length: renderToggles.length }, (_, index) => index % 2 === 0), `${failure} balances preflight reads and the interrupted render scope without leaving focus enabled`);
     }
 
     const loadingStop = new AbortController();
@@ -717,6 +719,7 @@ async function scanCheckpointContractSmoke() {
       const bridge = fakeBrowser({ terminal: false });
       const focusStates = [];
       let focusEnabled = false;
+      let interruptedScopeStart = -1;
       const cleanupTransportCause = Object.assign(new Error('cleanup transport disconnected'), { code: 'BROWSER_DISCONNECTED' });
       const cleanupFailure = Object.assign(new Error('scan focus cleanup failed'), { code: 'BROWSER_COMMAND_FAILED', cause: cleanupTransportCause });
       bridge.setPageLifecycleActive = async () => {};
@@ -724,7 +727,7 @@ async function scanCheckpointContractSmoke() {
         assert.equal(method, 'Emulation.setFocusEmulationEnabled');
         focusEnabled = params.enabled;
         focusStates.push(params.enabled);
-        if (!params.enabled) throw cleanupFailure;
+        if (!params.enabled && pauseRequested) throw cleanupFailure;
       };
       await assert.rejects(() => new ZhaopinSiteAdapter({ browser: bridge, sleepFn: async () => {}, randomFn: () => 0 }).scan({
         ...base,
@@ -736,6 +739,7 @@ async function scanCheckpointContractSmoke() {
           checkpointProgress(result);
           if (result.activity === 'searching') {
             assert.equal(focusEnabled, true, 'background rendering remains enabled while scrolling for newly rendered cards');
+            interruptedScopeStart = focusStates.length - 1;
             pauseRequested = true;
           }
         }
@@ -746,7 +750,9 @@ async function scanCheckpointContractSmoke() {
         assert.equal(cleanupFailure.cause, cleanupTransportCause, 'scan cleanup transport cause is preserved');
         return true;
       });
-      assert.deepEqual(focusStates, [true, false], 'the target-wide background rendering scope is released exactly once after pause');
+      assert(interruptedScopeStart >= 0, 'the cleanup failure is exercised after the scan actually reaches its pause checkpoint');
+      assert.deepEqual(focusStates.slice(0, interruptedScopeStart), Array.from({ length: interruptedScopeStart }, (_, index) => index % 2 === 0), 'preflight read scopes close before the target scope');
+      assert.deepEqual(focusStates.slice(interruptedScopeStart), [true, false], 'the target-wide background rendering scope is released exactly once after pause');
     }, scrollSnapshot);
     const pausedProgress = storage.getBatch(db, pausedBatchId).filterSnapshot.runtime.scanProgress;
     assert.equal(pausedProgress.activity, 'searching');
