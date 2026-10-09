@@ -74,6 +74,7 @@ const db = openDb(dbPath);
   try {
     jobExplanationEvidenceSmoke();
     await stableUnderstandingAndCandidateMatchSmoke();
+    await qualificationPropagationSmoke();
     await contractRepairAndFailureSmoke();
     await multiTrackValidationIdempotenceSmoke();
     await initialFailureProvenanceSmoke();
@@ -846,9 +847,9 @@ async function initialFailureProvenanceSmoke() {
 }
 
 async function pipelineVersionCacheSmoke() {
-  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v19");
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v45-effect-evidence");
-  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect-graduation-window");
+  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v20-conditions");
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v46-conditions");
+  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1");
   const currentRevision = {
     profileVersion: "profile",
     searchPlanVersion: "plan",
@@ -1579,9 +1580,9 @@ async function multiTrackValidationIdempotenceSmoke() {
   assert(!JSON.stringify(analyzerResult).includes(privacySentinel),
     "analyzer wrapper must not preserve raw extra values");
 
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v45-effect-evidence",
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v46-conditions",
     "source evidence and duty evidence fixes must invalidate previous match caches");
-  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v19",
+  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v20-conditions",
     "foundation requirement extraction clarification must invalidate v18 understandings");
   const currentRevision = {
     profileVersion: "profile",
@@ -2325,9 +2326,9 @@ function staleAnalysisSmoke() {
   const contractUpgradeReasons = analysisStaleReasons({ revision: oldPipelineRevision }, currentPipelineRevision);
   assert(contractUpgradeReasons.includes("decision_rules_changed"), "old revisions without local decision rules must be stale");
   assert.deepStrictEqual(PIPELINE_VERSIONS, {
-    understandJob: "job-understanding-v19",
-    matchJob: "match-decision-v45-effect-evidence",
-    decisionRules: "four-tier-weighted-v4.8-screening-v2-effect-graduation-window",
+    understandJob: "job-understanding-v20-conditions",
+    matchJob: "match-decision-v46-conditions",
+    decisionRules: "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1",
     communication: "communication-v3-candidate-speaker"
   });
   const decisionRulesOnlyChanged = analysisStaleReasons({
@@ -2398,6 +2399,55 @@ function staleAnalysisSmoke() {
   assert(directionChanged.analysis.staleReasons.includes("search_plan_changed"));
   assert.strictEqual(directionChanged.decisionBucket, "analysis_pending");
   assert.notDeepStrictEqual(configs.analysisContext, directionConfigs.analysisContext);
+}
+
+async function qualificationPropagationSmoke() {
+  const fixtures = require('./fixtures/job_match_effect_cases.json').cases;
+  const duties = '负责整理客户订单信息并完成日常记录';
+  const secondDuty = '核对客户信息并交接异常订单';
+  for (const id of ['Q01', 'Q09', 'Q10', 'Q11', 'M04', 'M05']) {
+    const fixture = fixtures.find(item => item.id === id);
+    const configs = configFor(['订单整理']);
+    configs.candidateProfile = { ...fixture.candidateProfile,
+      projects: [{ name: '订单记录', canSay: [duties, secondDuty] }] };
+    configs.analysisContext = runtimeAnalysisContext(configs.candidateProfile, configs.searchPlan);
+    const eligibility = fixture.jobUnderstanding?.eligibilityItems || [{ id: 'E1',
+      label: '必须持有执业药师资格证', evidence: 'JD：必须持有执业药师资格证', trackIds: ['T1'],
+      strength: 'mandatory', alternatives: [{ allOf: [{ kind: 'credential', operator: 'has', value: '执业药师资格证' }] }] }];
+    let calls = 0;
+    const analyze = createJobAnalysisRunner(configs, [], { db, analyzer: {
+      understandJob: async () => {
+        calls++;
+        return { industryContext: '客户服务', hiringTracks: [{ id: 'T1', label: '订单记录', roleSummary: duties,
+          responsibilityEvidence: [`JD：${duties}`, `JD：${secondDuty}`] }],
+        requirements: [{ label: '订单信息记录', trackIds: ['T1'], foundation: true, central: true,
+          indispensable: false, evidence: `JD：${duties}` }], eligibility, riskSignals: [] };
+      },
+      matchJob: async input => {
+        calls++;
+        const dutyRef = input.matchEvidence.entries.find(entry => entry.sourcePath === 'projects[0].canSay[0]').id;
+        const proof = configs.candidateProfile.credentials?.[0]?.details || configs.candidateProfile.education?.[0]?.endDate || '';
+        return { selectedTrackId: 'T1', roleAlignment: 'aligned', roleResumeEvidence: [`简历：${duties}`], roleGaps: [],
+          responsibilityMatches: [{ id: 'D1', state: 'matched', resumeEvidence: `简历：${duties}` },
+            { id: 'D2', state: 'matched', resumeEvidence: `简历：${secondDuty}` }],
+          matches: [{ id: 'R1', state: 'matched', resumeEvidence: `简历：${duties}`, candidateEvidenceRefs: [dutyRef] }],
+          eligibility: proof ? [{ id: 'E1', state: fixture.expected.qualificationStatus === 'conflict' ? 'conflict' : 'satisfied',
+            resumeEvidence: `简历：${proof}` }] : [] };
+      }
+    } });
+    const job = completeJob(`qualification-${id}`, { description: `${fixture.jobFacts.description}。${duties}。${secondDuty}。岗位需根据现有订单表格核对客户信息，发现字段遗漏时联系对应同事确认，按日更新记录并交接异常订单。工作中使用已有记录模板，不承担驾驶或药品专业工作；本用例额外资格要求来自前述明确条件。办公地点广州，工作性质全职，具体待遇按平台展示协商。` });
+    const result = await analyze(job);
+    assert.equal(result.semanticStatus, 'complete', `${id}: ${result.error || ''}`);
+    assert.equal(result.qualificationStatus, fixture.expected.qualificationStatus, id);
+    const expected = fixture.expected.qualificationStatus === 'conflict' ? 'not_recommended'
+      : fixture.expected.qualificationStatus === 'unknown' ? 'caution' : 'primary';
+    assert.equal(result.recommendation, expected, `${id}: ${JSON.stringify({ recommendation: result.recommendation, decisionMetrics: result.decisionMetrics, fitReasons: result.fitReasons })}`);
+    assert.equal(decisionBucket({ analysis: result }), expected, id);
+    const replay = await analyze(job);
+    assert.deepEqual(replay.conditionResults, result.conditionResults, `${id}: cache preserves normalized states`);
+    assert.equal(replay.recommendation, result.recommendation);
+    assert.equal(calls, 2, `${id}: normal qualification must not add model calls`);
+  }
 }
 
 function configFor(skills) {
@@ -4322,6 +4372,7 @@ async function compactMatchEvidenceContractSmoke() {
   const sparseUnderstanding = validateModelResult("understandJob", {
     ...jobUnderstanding,
     coreRequirements: [],
+    eligibilityItems: [],
     eligibilityConstraints: []
   });
   const sparseDecision = validateModelResult("matchJob", {
@@ -4341,6 +4392,7 @@ async function compactMatchEvidenceContractSmoke() {
   const tenureUnderstanding = validateModelResult("understandJob", {
     ...jobUnderstanding,
     coreRequirements: [{ label: "3 年以上相关经验", indispensable: false, evidence: "JD：要求 3 年以上相关经验" }],
+    eligibilityItems: [],
     eligibilityConstraints: []
   });
   const tenureGap = validateModelResult("matchJob", {
@@ -4370,6 +4422,7 @@ async function compactMatchEvidenceContractSmoke() {
   const workHistoryUnderstanding = validateModelResult("understandJob", {
     ...jobUnderstanding,
     coreRequirements: [{ label: "3 年以上相关工作经历", indispensable: false, evidence: "JD：要求 3 年以上相关工作经历" }],
+    eligibilityItems: [],
     eligibilityConstraints: []
   });
   const workHistoryGap = validateModelResult("matchJob", {
@@ -4385,6 +4438,7 @@ async function compactMatchEvidenceContractSmoke() {
   const chineseYearsUnderstanding = validateModelResult("understandJob", {
     ...jobUnderstanding,
     coreRequirements: [{ label: "两年以上工作经验", indispensable: false, evidence: "JD：要求两年以上工作经验" }],
+    eligibilityItems: [],
     eligibilityConstraints: []
   });
   const chineseYearsGap = validateModelResult("matchJob", {

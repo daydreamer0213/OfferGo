@@ -155,6 +155,7 @@ function normalizeSparseRows(raw, {
     const expectedKeys = requireGapDimension && state === "missing"
       ? ["gapDimension", "id", "resumeEvidence", "state"]
       : ["id", "resumeEvidence", "state"];
+    for (const key of ['candidateEvidenceRefs', 'jdEvidenceRefs']) if (Object.prototype.hasOwnProperty.call(item, key)) expectedKeys.push(key);
     exactKeys(item, expectedKeys, `${field} item`);
     if (typeof item.resumeEvidence !== "string") {
       fail(`${field}.resumeEvidence must be a string`);
@@ -186,9 +187,16 @@ function normalizeSparseRows(raw, {
       id,
       state,
       resumeEvidence: resumeEvidence.slice(0, 120),
+      ...(item.candidateEvidenceRefs !== undefined ? { candidateEvidenceRefs: evidenceRefs(item.candidateEvidenceRefs, field) } : {}),
+      ...(item.jdEvidenceRefs !== undefined ? { jdEvidenceRefs: evidenceRefs(item.jdEvidenceRefs, field) } : {}),
       ...(gapDimension ? { gapDimension } : {})
     };
   });
+}
+
+function evidenceRefs(value, field) {
+  if (!Array.isArray(value) || value.length > 8 || value.some(ref => typeof ref !== 'string' || !ref.trim())) fail(`${field} evidence refs must contain up to eight IDs`);
+  return [...new Set(value)];
 }
 
 function deriveRoleAlignment(responsibilityMatches) {
@@ -239,6 +247,7 @@ function buildSplitRequirementInput(input, selectedTrackId) {
     requirements: requirementsForTrack(jobUnderstanding, selectedTrackId),
     eligibility: eligibilityItems(jobUnderstanding)
   };
+  if (input?.evidenceCatalog) result.evidenceCatalog = input.evidenceCatalog.filter(entry => entry.sourceKind !== 'jd');
   if (input?.contractRepair) result.contractRepair = input.contractRepair;
   return result;
 }
@@ -256,6 +265,7 @@ function buildSplitResponsibilityInput(input) {
       responsibilityEvidence: track.responsibilityEvidence || []
     }))
   };
+  if (input?.evidenceCatalog) result.evidenceCatalog = input.evidenceCatalog.filter(entry => entry.sourceKind !== 'jd');
   if (input?.contractRepair) result.contractRepair = input.contractRepair;
   return result;
 }

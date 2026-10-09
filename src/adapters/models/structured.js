@@ -237,7 +237,7 @@ class StructuredModelAdapter {
   async understandJob(input, { signal = null } = {}) {
     const prompt = [
       "你是中文求职岗位筛选助手。请只基于输入的完整 JD，输出 JobUnderstanding JSON，不推测 JD 之外的信息。",
-      "只输出且必须输出这五个顶层字段：industryContext、hiringTracks[{id,label,roleSummary,responsibilityEvidence}]、requirements[{label,trackIds,foundation,central,indispensable,evidence}]、eligibility[非空字符串]、riskSignals[{type,severity,evidence}]。数组无内容时输出 []，不要输出其他顶层字段。",
+      "只输出且必须输出这五个顶层字段：industryContext、hiringTracks[{id,label,roleSummary,responsibilityEvidence}]、requirements[{label,trackIds,foundation,central,indispensable,evidence}]、eligibility[{label,trackIds,strength,evidence,alternatives}]、riskSignals[{type,severity,evidence}]。数组无内容时输出 []，不要输出其他顶层字段。",
       "只有 JD 明确同时招聘相互独立的对象，例如“第一类/第二类/第三类”或岗位 A/岗位 B，才拆分 hiringTracks；不得为了规避要求而虚构分支。普通 JD 只输出一个 T1。hiringTracks 最多四个，按 T1、T2、T3、T4 连续编号；每个分支都必须有一条直接 JD 职责证据。职责很多、技术栈很多、要求像愿望清单，或同一个人承担前端、后端、沟通、文档、稳定性等多项任务，都不等于多个招聘分支，仍只输出一个 T1；只有 JD 明确允许不同候选人分别承担不同工作时才能拆分。",
       "先分开提取主体行业和主体工作。industryContext 只用一个短语概括 JD 明确写出的主体行业或业务环境；未明确时写“未明确”，不得根据公司名或常识猜测。每个分支的 roleSummary 只描述主体工作，必须写明工作对象、主要动作和交付结果，不得用“电商岗位”“金融科技岗位”等行业名称代替工作内容。行业经验、指定平台、框架和技术栈继续拆入 requirements。",
       "每个分支的 roleSummary 使用跨行业不变的最低忠实抽象：例如“ERP 维护与二次开发”写成“业务软件维护、扩展与接口集成”，把 ERP 经验留在 industryContext 和 requirements；但不得抹掉真正改变工作的动作，例如量化策略研究与回测、临床诊断或 UI 组件与视觉交付。",
@@ -245,7 +245,8 @@ class StructuredModelAdapter {
       "requirements 的复合要求必须拆开：不同工作动作、交付结果、资格、经验年限和优先/加分条件应分别成项，不得把“必须承担客户拜访，行业经验优先”或“3 年经验且必须持证”合成一项；但“普通话或粤语”这类替代条件可以保持为一项。foundation=true 仅用于直接支撑主要交付结果的要求；行业名、工具名或通用能力本身不定义岗位工作主体或 foundation。不得引入第三方推断。",
       "foundation=true 是稀缺的最低履职前提，不等于‘要求、精通、掌握’；仅支撑某个环节的工具、平台、部署、通用工程能力默认 false；工具或平台本身就是主要工作对象时，仍按主要工作定义判断，不得一概标为 false；只有缺失就无法完成所选分支主要工作对象、动作或交付结果才 true；JD 明确为不可协商前提可用于判断 indispensable 或 eligibility，但不能仅凭不可协商标为 foundation=true；要标为 foundation，该要求仍须直接决定主要工作对象、动作或交付结果；不确定时 false。",
       "每个分支的 roleSummary 用一句话概括该分支真实主线。requirements 保持一张扁平清单，只收 JD 明确写出的任职要求；trackIds 必须引用既有分支，只属于一个分支的要求只写该 ID，对整份招聘都有效的全局要求写入全部分支 ID。不得把其他分支的前端、算法、运维或领域要求并入当前分支。central=true 表示该要求直接定义岗位持续承担的主要工作，并能区分相邻岗位。基础开发、编程语言、操作系统、数据库、办公工具、通用数据清洗、基础 AI 概念、学习、沟通、责任心或通用排错等跨岗位能力不能单独标成 central=true；只有要求同时写明岗位特有的工作动作或交付结果（例如模型训练、图像处理、目标检测、Agent 交付或 RAG 工作流交付）时，才可以把整项要求标成 central=true。“优先、熟悉、了解”不妨碍一项岗位特有要求成为 central=true。indispensable 与 foundation/central 相互独立：明确的仅限、资格前提、不得上岗或不予录用等不可协商边界通常为 true；优先、加分、可选、普通职责陈述或明确非必要条件必须为 false。普通技能要求和无法可靠拆分的复杂同句按完整语义判断，不要仅凭“核心、精通、要求具备”或单个关键词决定；经验年限不得 indispensable=true。每项 label 控制在 4-24 字，evidence 必须引用 JD 原文短句并以“JD：”开头。信息不充分时 requirements 留空，不得把关键词命中写成事实。",
-      "eligibility 只保存 JD 明确的届别、在校、学历或证书硬资格，每项是一句非空字符串（如“JD：本科及以上学历”）。“可接受应届生”表示放宽候选范围，不是硬资格，不能进入 eligibility；没有硬资格时输出 []，不要输出对象或 null。",
+      "eligibility 保存JD明确的毕业时间、在校、学历、证照或其他录用资格。每项用条件对象：label为简短要求，evidence以JD：开头引用完整原文片段，trackIds为空表示全岗位共用，否则只列适用的T编号；strength为mandatory或preferred。优先条件只能preferred；不要求、不限制、可接受应届生等放宽条件不建立硬门槛。学历、日期和证照不应同时再进入能力requirements。没有资格条件输出[]。",
+      "alternatives表示JD允许的替代分支，任一分支成立即满足；每个分支格式{allOf:[条件]}，其中的条件必须同时满足。条件格式{kind,operator,value}。graduation_date用within和[起始日期,结束日期]，cohort用届别年份数组；education_level用at_least或equals与学历；student_status用equals与in_school；credential用has与证照原名；其他语义资格用semantic、meets与完整要求。只有JD明确限定教育阶段时才加educationLevels，如[本科]；同一条要求的学历与毕业日期须在同一allOf中，不能跨教育经历拼凑满足。禁止凭空创建替代方向或资格。若有jdEvidenceIndex，jdEvidenceRefs仅引用该来源编号。最多4个替代分支，每分支最多4个联合条件。",
       "Preserve logical alternatives and scope when normalizing eligibility. Do not split a combined or alternative condition into independent hard gates when that changes AND/OR semantics; a relaxation, acceptable alternative, or example is not an independent gate. Only emit separate eligibility items when each condition is independently mandatory.",
       "JD 同时堆叠多个不相关职责（例如多平台运营、拍摄、剪辑、直播混合）时，在 riskSignals 输出 {type:\"responsibility_sprawl\", severity, evidence}，severity 必须是 low 或 medium；这是责任发散的 JD 质量信号，不判断候选人是否匹配。发现收费、诈骗、安全或合规风险时，输出 severity:\"high\" 的风险信号；每个风险必须引用 JD 原文证据，不要猜测。",
       "Evaluate responsibility_sprawl within each independent hiring track. Do not combine duties across independent tracks into one responsibility_sprawl signal; a single track that itself mixes unrelated duties must still emit the existing low or medium signal.",
@@ -311,6 +312,7 @@ class StructuredModelAdapter {
     try {
       return validateModelResult("matchJob", rawResult, {
         jobUnderstanding: input?.jobUnderstanding,
+        matchEvidence: input?.matchEvidence,
         modelRecommendationMode
       });
     } catch (error) {
@@ -336,7 +338,7 @@ class StructuredModelAdapter {
     const requirementPrompt = [
       "You are a job requirement evidence extractor. Read only candidateProfile, candidateMatchCard, searchPreferences, selectedTrack, requirements, and eligibility. Output only JSON.",
       "Use candidateProfile.resumeEvidenceText, when supplied, to recover explicit original facts and limits omitted by the summary. Explicitly never used/not responsible for differs from merely unmentioned; only an explicit incompatible fact supports missing. Do not infer ability from salary expectations.",
-      "Return exactly two top-level keys: matches and eligibility. Every row must contain exactly id, state, and resumeEvidence.",
+      "Return exactly two top-level keys: matches and eligibility. Every row must contain id, state, and resumeEvidence. When evidenceCatalog is supplied, also include candidateEvidenceRefs with the IDs supporting the candidate facts. Never use JD IDs as candidate evidence. Do not invent IDs. The explanation may naturally summarize the cited facts, but must not invent degrees, dates, certificates, experience length or ownership.",
       "For matches use only supplied R IDs. Return only evidence-bearing matched, transferable, or missing rows and omit unknown rows.",
       "matched means a concrete candidate fact directly satisfies the stated requirement. transferable means the underlying capability is proven but an explicitly named domain, platform, tool, workflow, work object, action, or deliverable remains unproven. missing requires explicit incompatible candidate evidence.",
       "A narrower concrete example is matched when the requirement is broad and does not name a special context. Do not reverse that relation and do not invent a gap to justify transferable.",
@@ -381,6 +383,7 @@ class StructuredModelAdapter {
       });
       return validateModelResult("matchJob", combined, {
         jobUnderstanding: input?.jobUnderstanding,
+        matchEvidence: input?.matchEvidence,
         modelRecommendationMode: "off"
       });
     } catch (error) {

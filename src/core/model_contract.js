@@ -1,3 +1,5 @@
+const { educationMentions, educationRank, negatedEducationRank } = require("./job_eligibility");
+const { normalizeJobConditions, assessJobConditions, summarizeQualifications } = require('./job_match_conditions');
 class ModelContractError extends Error {
   constructor(kind, message) {
     super(`${kind} 模型输出不符合契约：${message}`);
@@ -30,21 +32,44 @@ function validateModelResult(kind, value, context = {}) {
   if (kind === "recommendSearchPlan") return validateSearchPlan(value);
   if (kind === "understandJob") return validateJobUnderstanding(value);
   if (kind === "matchJob") {
+    let result;
     if (Object.prototype.hasOwnProperty.call(value, "matches")
       || Object.prototype.hasOwnProperty.call(value, "eligibility")
       || Object.prototype.hasOwnProperty.call(value, "certainty")) {
       if (Object.prototype.hasOwnProperty.call(value, "certainty")
         || Object.prototype.hasOwnProperty.call(value, "uncertainties")
         || Object.prototype.hasOwnProperty.call(value, "cautions")) {
-        return validateCompactMatchEvidence(value, context);
+        result = validateCompactMatchEvidence(value, context);
+      } else {
+        result = validateSparseMatchEvidence(value, context);
       }
-      return validateSparseMatchEvidence(value, context);
+    } else {
+      result = validateMatchDecision(value, context);
     }
-    return validateMatchDecision(value, context);
+    return attachJobConditions(result, value, context);
   }
   if (kind === "draftCommunication") return validateCommunication(value);
   if (kind === "buildCandidateMatchCard") return validateMatchingCardResult(value);
   throw new ModelContractError(kind, "未知分析类型");
+}
+
+function attachJobConditions(result, raw, context) {
+  if (!context.matchEvidence) return result;
+  const conditions = normalizeJobConditions({ jobUnderstanding: context.jobUnderstanding, evidence: context.matchEvidence });
+  const candidateEntries = context.matchEvidence.entries.filter(entry => ['resume', 'profile_fact'].includes(entry.sourceKind));
+  const rows = [...(raw.eligibility || []), ...(raw.matches || [])].map(row => {
+    const quote = text(row.resumeEvidence).replace(/^简历[:：]\s*/, '').replace(/[。.]$/, '');
+    const refs = row.candidateEvidenceRefs || candidateEntries.filter(entry => quote && text(entry.quote).includes(quote)).map(entry => entry.id);
+    return { ...row, conditionId: row.id, candidateEvidenceRefs: refs };
+  });
+  const conditionResults = assessJobConditions({ conditions, reportedResults: rows, evidence: context.matchEvidence,
+    selectedTrackId: result.selectedTrackId });
+  const qualification = summarizeQualifications({ conditions, conditionResults, selectedTrackId: result.selectedTrackId });
+  return { ...result, conditionSchemaVersion: 1, conditions, conditionResults,
+    qualificationStatus: qualification.status, qualification,
+    hardBlockers: (result.hardBlockers || []).filter(blocker => blocker.kind !== 'eligibility'
+      && !conditions.some(condition => condition.category === 'qualification'
+        && condition.label === text(blocker.requirement).replace(/^JD[:：]\s*/, ''))) };
 }
 
 function validateMatchingCardResult(value) {
@@ -159,46 +184,6 @@ function matchesCohortConstraint(constraint, year) {
     || Boolean(constraint.maximum && year <= constraint.maximum);
 }
 
-const EDUCATION_RANKS = Object.freeze({
-  中专: 1,
-  高中: 1,
-  大专: 2,
-  专科: 2,
-  本科: 3,
-  学士: 3,
-  硕士: 4,
-  研究生: 4,
-  博士: 5
-});
-
-function educationMentions(value) {
-  const source = String(value || "");
-  return [...source.matchAll(/中专|高中|大专|专科|本科|学士|硕士|研究生|博士/g)]
-    .map((match) => {
-      const before = source.slice(Math.max(0, match.index - 10), match.index);
-      const after = source.slice(match.index + match[0].length, match.index + match[0].length + 12);
-      return {
-        label: match[0],
-        rank: EDUCATION_RANKS[match[0]],
-        index: match.index,
-        negated: /(?:未取得|未获得|未达到|没有|无).{0,4}$/.test(before)
-          || /^(?:学历|学位)?(?:尚未取得|未取得|未获得|未达到|没有|无)/.test(after)
-      };
-    });
-}
-
-function educationRank(value) {
-  return educationMentions(value)
-    .filter((item) => !item.negated)
-    .reduce((highest, item) => Math.max(highest, item.rank), 0);
-}
-
-function negatedEducationRank(value) {
-  return educationMentions(value)
-    .filter((item) => item.negated)
-    .reduce((highest, item) => Math.max(highest, item.rank), 0);
-}
-
 function eligibilityClauses(value) {
   return String(value || "")
     .split(/[，,；;。()（）/、]|并且|同时|而且|以及|和|且|但/)
@@ -285,8 +270,6 @@ function validateJobUnderstanding(value) {
     return validateCompactJobUnderstanding(value);
   }
   const evidenceSnippets = contractStringArray(value.evidenceSnippets, "understandJob", "evidenceSnippets", 8);
-  const eligibilityConstraints = contractStringArray(value.eligibilityConstraints, "understandJob", "eligibilityConstraints", 8)
-    .filter((item) => !isSoftOnlyEligibilityConstraint(item));
   const responsibilityEvidence = Object.prototype.hasOwnProperty.call(value, "responsibilityEvidence")
     ? responsibilityEvidenceList(value.responsibilityEvidence)
     : [];
@@ -295,6 +278,10 @@ function validateJobUnderstanding(value) {
     responsibilityEvidence
   });
   const trackIds = new Set(hiringTracks.map((track) => track.id));
+  const legacyEligibility = Object.prototype.hasOwnProperty.call(value, 'eligibilityItems') ? value.eligibilityItems
+    : contractStringArray(value.eligibilityConstraints, 'understandJob', 'eligibilityConstraints', 8);
+  const eligibilityItems = understandingEligibilityItems(legacyEligibility, trackIds);
+  const eligibilityConstraints = eligibilityItems.map(item => item.label);
   const coreRequirements = understandingCoreRequirements(value.coreRequirements)
     .map((item, index) => ({
       id: `R${index + 1}`,
@@ -317,7 +304,7 @@ function validateJobUnderstanding(value) {
     niceToHave: contractStringArray(value.niceToHave, "understandJob", "niceToHave", 16),
     senioritySignal: text(value.senioritySignal || "unknown"),
     eligibilityConstraints,
-    eligibilityItems: eligibilityConstraints.map((label, index) => ({ id: `E${index + 1}`, label })),
+    eligibilityItems,
     hiddenRisks: understandingHiddenRisks(value.hiddenRisks),
     jobQuality: normalizeJobQuality(value.jobQuality, "understandJob"),
     isFakeAI: Boolean(value.isFakeAI),
@@ -375,8 +362,8 @@ function validateCompactJobUnderstanding(value) {
         ? normalizeRequirementTrackIds(requirements[index]?.trackIds, trackIds, `requirements[${index}]`)
         : ["T1"]
     }));
-  const eligibilityConstraints = contractStringArray(eligibility, "understandJob", "eligibility", 8)
-    .filter((item) => !isSoftOnlyEligibilityConstraint(item));
+  const eligibilityItems = understandingEligibilityItems(eligibility, trackIds);
+  const eligibilityConstraints = eligibilityItems.map(item => item.label);
   const hiddenRisks = understandingHiddenRisks(riskSignals);
   const concerns = hiddenRisks.map(({ type, evidence }) => ({ type, evidence }));
   const normalized = {
@@ -393,7 +380,7 @@ function validateCompactJobUnderstanding(value) {
     niceToHave: [],
     senioritySignal: "unknown",
     eligibilityConstraints,
-    eligibilityItems: eligibilityConstraints.map((label, index) => ({ id: `E${index + 1}`, label })),
+    eligibilityItems,
     hiddenRisks,
     jobQuality: {
       level: hiddenRisks.some((risk) => risk.severity === "high") ? "risk" : (hiddenRisks.length ? "caution" : "normal"),
@@ -408,6 +395,38 @@ function validateCompactJobUnderstanding(value) {
     normalized.responsibilityEvidence = hiringTracks[0].responsibilityEvidence;
   }
   return normalized;
+}
+
+function understandingEligibilityItems(values, validTracks) {
+  if (!Array.isArray(values) || values.length > 8) throw new ModelContractError('understandJob', 'eligibility 必须是最多 8 项的数组');
+  return values.filter(item => typeof item !== 'string' || !isSoftOnlyEligibilityConstraint(item)).map((raw, index) => {
+    if (typeof raw === 'string') return { id: `E${index + 1}`, label: requiredContractString(raw, 'understandJob', 'eligibility') };
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ModelContractError('understandJob', 'eligibility 项必须是条件对象或兼容字符串');
+    const label = requiredContractString(raw.label, 'understandJob', 'eligibility.label');
+    const evidence = raw.evidence || raw.jdEvidence || `JD：${label.replace(/^JD[:：]\s*/, '')}`;
+    validateCompactEvidence(evidence, 'eligibility');
+    const trackIds = raw.trackIds || [];
+    if (!Array.isArray(trackIds) || trackIds.some(id => !validTracks.has(id))) throw new ModelContractError('understandJob', 'eligibility.trackIds 不属于招聘方向');
+    if (raw.strength && !['mandatory', 'preferred'].includes(raw.strength)) throw new ModelContractError('understandJob', 'eligibility.strength 无效');
+    const result = { id: `E${index + 1}`, label, evidence, category: 'qualification',
+      strength: raw.strength || 'mandatory', trackIds: [...new Set(trackIds)] };
+    if (raw.jdEvidenceRefs !== undefined) result.jdEvidenceRefs = contractStringArray(raw.jdEvidenceRefs, 'understandJob', 'eligibility.jdEvidenceRefs', 8);
+    if (raw.alternatives !== undefined) {
+      if (!Array.isArray(raw.alternatives) || !raw.alternatives.length || raw.alternatives.length > 4) throw new ModelContractError('understandJob', 'eligibility.alternatives 必须包含 1–4 个替代分支');
+      result.alternatives = raw.alternatives.map(branch => {
+        if (!Array.isArray(branch?.allOf) || !branch.allOf.length || branch.allOf.length > 4) throw new ModelContractError('understandJob', 'eligibility.allOf 必须包含 1–4 个联合条件');
+        return { allOf: branch.allOf.map(atom => {
+          if (!atom || typeof atom !== 'object' || Array.isArray(atom) || atom.value === undefined) throw new ModelContractError('understandJob', 'eligibility 条件缺少比较值');
+          const normalized = { kind: requiredContractString(atom.kind, 'understandJob', 'eligibility.kind'),
+            operator: requiredContractString(atom.operator, 'understandJob', 'eligibility.operator'), value: atom.value };
+          if (atom.educationLevels !== undefined) normalized.educationLevels = contractStringArray(atom.educationLevels, 'understandJob', 'eligibility.educationLevels', 8);
+          if (atom.range !== undefined) normalized.range = atom.range === true;
+          return normalized;
+        }) };
+      });
+    }
+    return result;
+  });
 }
 
 function normalizeHiringTracks(value, legacy = {}) {
@@ -888,7 +907,9 @@ function sparseEvidenceItems(value, { field, expected, states, evidenceStates })
     const resumeEvidence = optionalContractString(item.resumeEvidence, "matchJob", `${field}.resumeEvidence`);
     if (evidenceStates.includes(item.state) && !resumeEvidence) throw new ModelContractError("matchJob", `${field}.${item.state} requires resumeEvidence`);
     if (resumeEvidence) validateMatchResumeEvidence(resumeEvidence, field);
-    return { id, state: item.state, resumeEvidence };
+    return { id, state: item.state, resumeEvidence,
+      ...(item.candidateEvidenceRefs !== undefined ? { candidateEvidenceRefs: contractStringArray(item.candidateEvidenceRefs, 'matchJob', `${field}.candidateEvidenceRefs`, 8) } : {}),
+      ...(item.jdEvidenceRefs !== undefined ? { jdEvidenceRefs: contractStringArray(item.jdEvidenceRefs, 'matchJob', `${field}.jdEvidenceRefs`, 8) } : {}) };
   });
 }
 

@@ -35,6 +35,20 @@ function analysis(overrides = {}) {
   };
 }
 
+for (const [state, expected] of [['conflict', 'not_recommended'], ['unknown', 'caution'], ['satisfied', 'primary']]) {
+  const conditions = [{ id: 'E1', category: 'qualification', strength: 'mandatory', trackIds: ['T1'], label: '必须持有C1驾驶证' }];
+  const conditionResults = [{ conditionId: 'E1', category: 'qualification', state }];
+  const result = applyRuleGuard(analysis({ conditionSchemaVersion: 1, selectedTrackId: 'T1', conditions, conditionResults }), {});
+  assert.equal(result.recommendation, expected, `qualification ${state} must survive final scoring`);
+  assert.equal(decisionBucket({ analysis: result }), expected);
+  const compact = compactAnalysis({ model: { provider: 'test' }, semanticMatchingMode: 'split' }, {
+    job: { description: '负责驾驶配送，并处理客户订单。', detailStatus: 'complete' },
+    jobUnderstanding: {}, matchDecision: { conditions, conditionResults, qualificationStatus: state, conditionSchemaVersion: 1 }
+  });
+  assert.deepEqual(compact.conditionResults, conditionResults, 'compactAnalysis must preserve normalized qualification rows');
+  assert.equal(compact.qualificationStatus, state);
+}
+
 const primary = applyRuleGuard(analysis(), {});
 assert.equal(primary.recommendation, "primary",
   "最终档位必须来自代码二维表，不能被低置信度或 shadow 模型建议降级");
@@ -218,7 +232,7 @@ assert.deepEqual(compact.responsibilityMatches, [{
   resumeEvidence: "Resume: primary delivery evidence"
 }], "compact analysis must preserve responsibility evidence for the production decision path");
 
-assert.equal(PIPELINE_VERSIONS.matchJob, "match-decision-v45-effect-evidence");
-assert.equal(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect-graduation-window");
+assert.equal(PIPELINE_VERSIONS.matchJob, "match-decision-v46-conditions");
+assert.equal(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1");
 
 console.log("four_tier_pipeline_smoke ok");

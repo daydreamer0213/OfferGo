@@ -3,9 +3,9 @@ const { matchingCardRevision } = require("./matching_card");
 const { normalizeThinkingMode, normalizeReasoningEffort } = require("./model_settings");
 
 const PIPELINE_VERSIONS = Object.freeze({
-  understandJob: "job-understanding-v19",
-  matchJob: "match-decision-v45-effect-evidence",
-  decisionRules: "four-tier-weighted-v4.8-screening-v2-effect-graduation-window",
+  understandJob: "job-understanding-v20-conditions",
+  matchJob: "match-decision-v46-conditions",
+  decisionRules: "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1",
   communication: "communication-v3-candidate-speaker"
 });
 

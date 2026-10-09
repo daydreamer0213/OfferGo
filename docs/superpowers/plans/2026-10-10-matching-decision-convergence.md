@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22、CommonJS、Node 标准库、原生 SQLite、现有 Dashboard/CLI、现有模型适配器和 Playwright 检查；不新增运行依赖。
 
-**Status:** 2026-10-10 用户批准计划并授权计划内所需操作，已开启目标模式。Task 0 的 195 项完整浏览器必跑门禁通过，正在独立提交及核对 CI；Tasks 1–2 的工作区实现已定向回归，尚未提交或通过阶段完整门禁。设计依据见[统一设计](../specs/2026-10-10-matching-decision-convergence-design.md)。
+**Status:** 2026-10-10 用户批准计划并授权计划内所需操作，已开启目标模式。Task 0 的 195 项完整门禁和 ff61673 同 SHA CI 均通过；Tasks 1–2 的 D 盘冻结副本 197 项完整浏览器必跑门禁通过（退出码 0，phase1-conditions/full-gate.log），独立提交中。Tasks 3–4 的后续改动尚未通过阶段完整门禁。设计依据见[统一设计](../specs/2026-10-10-matching-decision-convergence-design.md)。
 
 **本轮授权：** 用户明确允许自主推进所有计划内操作；标签页休眠时先自行恢复，必要时可激活，无需等待手动显示。该授权不允许重放结果不确定的发送，也不改变账号节奏、目标核验或本轮不自动发布的范围。
 
@@ -134,7 +134,7 @@ createJobAnalysisRunner(configs, keywordPlan, deps); // 仍返回 analyzeJob
 **Interfaces:** 保持现有 HTTP、事件和扫描入口，修正测试环境缺失，不修改生产行为以迎合夹具。
 
 - [x] 重新确认当前完整门禁失败位置及冻结文件；定向执行 `workflow_dashboard_smoke.js`，保存原失败。
-- [ ] 在 VM 夹具提供实际脚本使用的最小 `window` 事件能力，监听和触发真实事件，不能用 catch 吞掉脚本错误。
+- [x] 在 VM 夹具提供实际脚本使用的最小 `window` 事件能力，监听和触发真实事件，不能用 catch 吞掉脚本错误。
 
 ```js
 const listeners = new Map();
@@ -147,7 +147,7 @@ window: {
 
 - [x] 运行工作流 Dashboard、today、shell、资格、采集与进度对应测试；核对双平台真实页面状态，不能开始真实发送。
 - [x] 冻结工作区指纹，执行完整浏览器必跑门禁；若仍失败，定位具体原因，不擅自放宽超时或跳过测试。
-- [ ] 通过后将四组已完成修改及夹具修复独立提交，记基线 SHA、门禁日志和同 SHA CI；当前 12 文件旧失败证据继续保留。
+- [x] 通过后将四组已完成修改及夹具修复独立提交，记基线 SHA、门禁日志和同 SHA CI；当前 12 文件旧失败证据继续保留。提交 `ff61673856d6065a4219c12aa0d1a8f2d2884012` 已推送，[同 SHA CI](https://github.com/daydreamer0213/OfferGo/actions/runs/37970408956) 成功。
 
 **完成标准：** 原未提交修改有明确通过基线，已有待办未丢失；不声称 BOSS 12 份详情和真实发送已完成。
 
@@ -161,8 +161,8 @@ window: {
 
 **Interfaces:** 产出计划“接口约定”的五个证据/条件函数；不切换正式最终决策。
 
-- [ ] 先为 Q01–Q18、E01–E07 建立含原文、资料、期望和理由的合成输入。用现有校验重放 Q01/Q10，保存当前冲突降为未知的失败证据；不能把原真实资料复制到 fixture。
-- [ ] 新模块的测试先失败，然后实现来源目录、条件分类、范围、替代逻辑和确定事实比较。
+- [x] 先为 Q01–Q18、E01–E07 建立含原文、资料、期望和理由的合成输入。用现有校验重放 Q01/Q10，保存当前冲突降为未知的失败证据；不能把原真实资料复制到 fixture。
+- [x] 新模块的测试先失败，然后实现来源目录、条件分类、范围、替代逻辑和确定事实比较。
 
 ```js
 const assert = require('node:assert/strict');
@@ -177,9 +177,9 @@ assert.equal(qualified('unknown'), 'unknown');
 assert.equal(qualified('satisfied'), 'satisfied');
 ```
 
-- [ ] 证据测试检查正反向事实、未知粒度、自然概括引用及重复顺序；模块只从输入读事实，不能读取 SQL 或补造证照/日期。
-- [ ] `normalizeJobConditions` 对当前旧 eligibility 字符串提供明确兼容；不能靠标签包含“本科”就把一条开发职责判成资格。新条件在未知类型时保留原来源和未知原因，不默默丢失。
-- [ ] 运行两个新测试、原资格测试、架构和清单一致性检查；纯基础模块未接入时说明业务缺口还在。
+- [x] 证据测试检查正反向事实、未知粒度、自然概括引用及重复顺序；模块只从输入读事实，不能读取 SQL 或补造证照/日期。
+- [x] `normalizeJobConditions` 对当前旧 eligibility 字符串提供明确兼容；不能靠标签包含“本科”就把一条开发职责判成资格。新条件在未知类型时保留原来源和未知原因，不默默丢失。
+- [x] 运行两个新测试、原资格测试、架构和清单一致性检查；纯基础模块未接入时说明业务缺口还在。
 
 **完成标准：** 所有条件比较正反例通过；能力、资格和偏好不会混成同一类；无循环依赖或新跨层例外。
 
@@ -191,7 +191,7 @@ assert.equal(qualified('satisfied'), 'satisfied');
 
 **Interfaces:** 使用 Task 1 的条件与证据函数；完整分析保存 `conditions/conditionResults/qualificationStatus`。对外 `applyRuleGuard` 调用方式不变。
 
-- [ ] 先加原生产路径的失败回归：`validateModelResult → compactAnalysis → applyRuleGuard → decisionBucket`。用 Q01、Q10、M04、M05，不只断言中间 `review/skip`。
+- [x] 先加原生产路径的失败回归：`validateModelResult → compactAnalysis → applyRuleGuard → decisionBucket`。用 Q01、Q10、M04、M05，不只断言中间 `review/skip`。
 
 ```js
 // 加入现有 four_tier_pipeline_smoke.js，analysis() 使用该文件已有帮助函数。
@@ -208,11 +208,11 @@ assert.equal(applyRuleGuard(input, {}).recommendation, 'caution');
 
 完整 runner 用例还须通过真实来源引用构造状态；上面直接决策测试不替代来源校验。
 
-- [ ] 修改内部理解契约，使资格有类别、范围、比较/替代条件和原文引用；匹配输出引用本地已知条件与证据 ID。旧入口继续受控归一化，不增加供应商专用实现。
-- [ ] 校验后的资格状态完整通过分阶段匹配、缓存与 `compactAnalysis`。原模型 state 留在 `reportedState`，正式 `state` 使用归一化结果，两者不再混为一个数组。
-- [ ] 资格冲突优先阻断；资格未知最高慎投；既有本地边界仍优先。技术失败仍为空推荐和 `needs_retry`，普通能力未知不新增一刀切限制。
-- [ ] 更新理解/匹配管线和规则版本，避免旧缓存绕过新结果；记录新增 schema，但不改 SQLite schema。
-- [ ] 跑语义、四档、适配器、Agent 相关检查，阶段结束跑完整门禁并提交。
+- [x] 修改内部理解契约，使资格有类别、范围、比较/替代条件和原文引用；匹配输出引用本地已知条件与证据 ID。旧入口继续受控归一化，不增加供应商专用实现。
+- [x] 校验后的资格状态完整通过分阶段匹配、缓存与 `compactAnalysis`。原模型 state 留在 `reportedState`，正式 `state` 使用归一化结果，两者不再混为一个数组。
+- [x] 资格冲突优先阻断；资格未知最高慎投；既有本地边界仍优先。技术失败仍为空推荐和 `needs_retry`，普通能力未知不新增一刀切限制。
+- [x] 更新理解/匹配管线和规则版本，避免旧缓存绕过新结果；记录新增 schema，但不改 SQLite schema。
+- [x] 跑语义、四档、适配器、Agent 相关检查，阶段结束跑完整门禁并提交。
 
 **完成标准：** Q01/Q10 真正到最终不推荐；M04/M05 不再被普通高分推高；已有合格对照仍可推荐，stdio 外层 v1 不变。
 

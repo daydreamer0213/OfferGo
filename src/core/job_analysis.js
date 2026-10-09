@@ -26,6 +26,8 @@ const { listWorkflowInventory } = require("./workflow_inventory");
 const { decisionState } = require("./scoring");
 const { PIPELINE_VERSIONS, buildAnalysisRevision, modelInferenceVersion } = require("./analysis_revision");
 const { deriveMatrixDecision } = require("./four_tier_decision");
+const { buildJobMatchEvidence } = require('./job_match_evidence');
+const { summarizeQualifications } = require('./job_match_conditions');
 const {
   DECISION_POLICY,
   DECISION_POLICY_HASH,
@@ -72,13 +74,15 @@ function createJobAnalysisRunner(configs, keywordPlan = [], {
     }
 
     try {
+      const matchEvidence = buildJobMatchEvidence({ candidateProfile, jobFacts: facts });
       const jobUnderstanding = await cachedModelCall({
         db,
         configs,
         logger,
         kind: "understandJob",
         pipelineVersion: PIPELINE_VERSIONS.understandJob,
-        input: { job: { ...facts, sourceContentHash: contentHash } },
+        input: { job: { ...facts, sourceContentHash: contentHash },
+          jdEvidenceIndex: matchEvidence.entries.filter(entry => entry.sourceKind === 'jd').map(({ id, sourcePath }) => ({ id, sourcePath })) },
         signal,
         run: analyzer.understandJob
       });
@@ -90,6 +94,8 @@ function createJobAnalysisRunner(configs, keywordPlan = [], {
         pipelineVersion: PIPELINE_VERSIONS.matchJob,
         input: {
           candidateProfile: candidateProfileForJobMatch(candidateProfile),
+          matchEvidence,
+          evidenceCatalog: matchEvidence.entries.map(({ id, sourceKind, sourcePath, quote, precision }) => ({ id, sourceKind, sourcePath, quote, precision })),
           candidateMatchCard: configs.matchingCard || null,
           jobUnderstanding,
           searchPreferences: searchPreferences(configs),
@@ -321,6 +327,7 @@ async function cachedModelCall({ db, configs, logger = null, kind, pipelineVersi
   // 让缓存读取、首次校验和契约修复使用同一份判定依据。
   const validationContext = kind === "matchJob" ? {
     jobUnderstanding: input?.jobUnderstanding,
+    matchEvidence: input?.matchEvidence,
     modelRecommendationMode: input?.modelRecommendationMode || DECISION_POLICY.modelRecommendationMode
   } : undefined;
   if (db) {
@@ -441,6 +448,11 @@ function compactAnalysis(configs, parts) {
     coreRequirements: (understanding.coreRequirements || []).map((item) => typeof item === "string" ? item : item.label).filter(Boolean),
     coreStack: understanding.coreStack || [],
     eligibilityConstraints: understanding.eligibilityConstraints || [],
+    conditionSchemaVersion: decision.conditionSchemaVersion,
+    conditions: decision.conditions || [],
+    conditionResults: decision.conditionResults || [],
+    qualificationStatus: decision.qualificationStatus,
+    qualification: decision.qualification,
     hiddenRisks: understanding.hiddenRisks || [],
     senioritySignal: understanding.senioritySignal || "unknown",
     requirementMatches: decision.requirementMatches || [],
@@ -575,6 +587,14 @@ function applyRuleGuard(analysis, job) {
   if (analysis.semanticStatus === "partial") {
     return needsRetry(analysis, "当前只有卡片级信息，完整 JD 补齐前不进入判定。");
   }
+  const qualification = analysis.conditionSchemaVersion === 1
+    ? summarizeQualifications({ conditions: analysis.conditions, conditionResults: analysis.conditionResults, selectedTrackId: analysis.selectedTrackId })
+    : null;
+  if (qualification?.status === 'conflict') {
+    const failed = (analysis.conditions || []).filter(condition => qualification.conflictIds.includes(condition.id));
+    return addGuard({ ...analysis, qualificationStatus: qualification.status, qualification }, 'not_recommended', 'no_fit',
+      `不符合岗位明确要求：${failed.map(condition => condition.label).join('；')}`, analysis.semanticStatus, 'qualification_conflict');
+  }
   // 三、完整语义结果中的明确硬边界优先于加权匹配结果。
   const hardBlockers = decisionHardBlockers(analysis);
   if (hardBlockers.length) {
@@ -614,6 +634,7 @@ function applyRuleGuard(analysis, job) {
   });
   let guarded = {
     ...analysis,
+    ...(qualification ? { qualificationStatus: qualification.status, qualification } : {}),
     recommendation: decisionMetrics.matrixRecommendation,
     decisionStatus: "decided",
     decisionSource: "weighted_decision_matrix",
@@ -624,6 +645,11 @@ function applyRuleGuard(analysis, job) {
   };
 
   // 五、已有产品安全信号只能向下封顶，不能反向提升。
+  if (qualification?.status === 'unknown' && guarded.recommendation !== 'not_recommended') {
+    const unresolved = (analysis.conditions || []).filter(condition => qualification.unresolvedIds.includes(condition.id));
+    guarded = addGuard(guarded, capRecommendationTier(guarded.recommendation, 'caution'), guarded.fitLevel,
+      `需要确认岗位资格：${unresolved.map(condition => condition.label).join('；')}`, guarded.semanticStatus, 'qualification_unknown');
+  }
   if (qualityTags.has("eligibility_review") && guarded.recommendation !== "not_recommended") {
     guarded = addGuard(
       guarded,

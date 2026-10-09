@@ -1315,7 +1315,7 @@ server.listen(0, "127.0.0.1", async () => {
         && understandPrompt.includes("RAG"),
       "understandJob prompt 必须要求 central 包含岗位特有动作或交付结果"
     );
-    assert(understandPrompt.includes("eligibility[非空字符串]"), "understandJob prompt 必须要求紧凑 eligibility");
+    assert(understandPrompt.includes("eligibility[{label,trackIds,strength,evidence,alternatives}]"), "understandJob prompt 必须传递资格、方向范围与替代条件");
     assert(understandPrompt.includes("riskSignals[{type,severity,evidence}]"), "understandJob prompt 必须要求紧凑 riskSignals");
     assert(understandPrompt.includes("roleSummary"), "understandJob prompt 必须要求 roleSummary");
     for (const phrase of [

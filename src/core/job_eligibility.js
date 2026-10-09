@@ -286,4 +286,44 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-module.exports = { evaluateJobEligibility, employmentTypeOf };
+const EDUCATION_RANKS = Object.freeze({
+  中专: 1,
+  高中: 1,
+  大专: 2,
+  专科: 2,
+  本科: 3,
+  学士: 3,
+  硕士: 4,
+  研究生: 4,
+  博士: 5
+});
+
+function educationMentions(value) {
+  const source = String(value || "");
+  return [...source.matchAll(/中专|高中|大专|专科|本科|学士|硕士|研究生|博士/g)]
+    .map((match) => {
+      const before = source.slice(Math.max(0, match.index - 10), match.index);
+      const after = source.slice(match.index + match[0].length, match.index + match[0].length + 12);
+      return {
+        label: match[0],
+        rank: EDUCATION_RANKS[match[0]],
+        index: match.index,
+        negated: /(?:未取得|未获得|未达到|没有|无).{0,4}$/.test(before)
+          || /^(?:学历|学位)?(?:尚未取得|未取得|未获得|未达到|没有|无)/.test(after)
+      };
+    });
+}
+
+function educationRank(value) {
+  return educationMentions(value)
+    .filter((item) => !item.negated)
+    .reduce((highest, item) => Math.max(highest, item.rank), 0);
+}
+
+function negatedEducationRank(value) {
+  return educationMentions(value)
+    .filter((item) => item.negated)
+    .reduce((highest, item) => Math.max(highest, item.rank), 0);
+}
+
+module.exports = { evaluateJobEligibility, employmentTypeOf, graduationDateWindow, requiredCohortConstraint, educationMentions, educationRank, negatedEducationRank };

@@ -1,0 +1,1617 @@
+{
+  "schemaVersion": 1,
+  "purpose": "生成模型输出前冻结的合成效果期望；不包含实际用户资料",
+  "cases": [
+    {
+      "id": "Q01",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "已知毕业时间在窗口外，不得被能力高分推回推荐。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q02",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2026-11-01"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "satisfied"
+      },
+      "reason": "窗口边界包含首日与末日。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "additionalCandidateProfiles": [
+        {
+          "education": [
+            {
+              "degree": "本科",
+              "endDate": "2027-10-31"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q03",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2026-10-31"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "窗口外一天不满足。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "additionalCandidateProfiles": [
+        {
+          "education": [
+            {
+              "degree": "本科",
+              "endDate": "2027-11-01"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q04",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2026"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "unknown",
+        "maxRecommendation": "caution",
+        "autoSelected": false
+      },
+      "reason": "仅有年份不能虚构月份。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q05",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间的应聘者优先"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "not_required"
+      },
+      "reason": "优先条件不能变成硬性淘汰。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间的应聘者优先",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间的应聘者优先",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "preferred",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q06",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          },
+          {
+            "degree": "硕士",
+            "status": "在读"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "unknown",
+        "maxRecommendation": "caution",
+        "autoSelected": false
+      },
+      "reason": "未限定教育阶段，不能把旧本科日期当全部学历日期。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q07",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "仅限在校学生"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "已毕业且没有在读记录不满足仅限在校。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "仅限在校学生",
+            "evidence": "JD：仅限在校学生",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "student_status",
+                    "operator": "equals",
+                    "value": "in_school"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q08",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "硕士及以上学历"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "本科不满足硕士资格。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "硕士及以上学历",
+            "evidence": "JD：硕士及以上学历",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "education_level",
+                    "operator": "at_least",
+                    "value": "硕士"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q09",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "satisfied"
+      },
+      "reason": "满足学历只说明资格，不增加岗位能力分。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "本科及以上学历",
+            "evidence": "JD：本科及以上学历",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "education_level",
+                    "operator": "at_least",
+                    "value": "本科"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q10",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1驾驶证"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "明确尚未取得应生效。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "必须持有C1驾驶证",
+            "evidence": "JD：必须持有C1驾驶证",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q11",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1驾驶证"
+      },
+      "candidateProfile": {
+        "credentials": []
+      },
+      "expected": {
+        "qualificationStatus": "unknown",
+        "maxRecommendation": "caution",
+        "autoSelected": false
+      },
+      "reason": "没有写不等于明确没有。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "必须持有C1驾驶证",
+            "evidence": "JD：必须持有C1驾驶证",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q12",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1或C2驾驶证"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "已取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "satisfied"
+      },
+      "reason": "JD 接受任一证照，有其中之一即可。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "必须持有C1或C2驾驶证",
+            "evidence": "JD：必须持有C1或C2驾驶证",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C2驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q13",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1或C2驾驶证"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          },
+          {
+            "name": "C2驾驶证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "所有替代方案均明确不符。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "必须持有C1或C2驾驶证",
+            "evidence": "JD：必须持有C1或C2驾驶证",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C2驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q14",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1或C2驾驶证"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "unknown",
+        "maxRecommendation": "caution",
+        "autoSelected": false
+      },
+      "reason": "另一个替代方案资料未知，不能直接全盘拒绝。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "必须持有C1或C2驾驶证",
+            "evidence": "JD：必须持有C1或C2驾驶证",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C2驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q15",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "T1必须持有C1驾驶证，T2负责客户咨询"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "not_required"
+      },
+      "reason": "T1资格不应阻断选定的T2。",
+      "verification": "qualification",
+      "selectedTrackId": "T2",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "T1必须持有C1驾驶证，T2负责客户咨询",
+            "evidence": "JD：T1必须持有C1驾驶证，T2负责客户咨询",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "credential",
+                    "operator": "has",
+                    "value": "C1驾驶证"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q16",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "方向一：驾驶配送，必须持有C1驾驶证。方向二：客户咨询，负责解答订单问题。"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          }
+        ],
+        "experience": [
+          {
+            "role": "客服",
+            "canSay": [
+              "解答订单问题并跟进售后。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "viableTrackId": "T2",
+        "recommendationMustNotBe": "not_recommended"
+      },
+      "reason": "一个方向不符应检查真正存在的替代方向。",
+      "verification": "runner_tracks"
+    },
+    {
+      "id": "Q17",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "所有方向均要求持有执业药师资格证。方向一：药品咨询。方向二：处方审核。"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "执业药师资格证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "extraTrackCalls": 0
+      },
+      "reason": "共用资格明确不符，不浪费额外方向调用。",
+      "verification": "runner_tracks"
+    },
+    {
+      "id": "Q18",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科毕业时间需在2026年11月1日至2027年10月31日之间"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          },
+          {
+            "degree": "硕士",
+            "status": "在读"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false
+      },
+      "reason": "JD明确要求本科阶段，另一个在读阶段不能冲淡冲突。",
+      "verification": "qualification",
+      "selectedTrackId": "T1",
+      "jobUnderstanding": {
+        "hiringTracks": [
+          {
+            "id": "T1"
+          },
+          {
+            "id": "T2"
+          }
+        ],
+        "eligibilityItems": [
+          {
+            "id": "E1",
+            "label": "本科毕业时间需在2026年11月1日至2027年10月31日之间",
+            "evidence": "JD：本科毕业时间需在2026年11月1日至2027年10月31日之间",
+            "trackIds": [
+              "T1"
+            ],
+            "strength": "mandatory",
+            "alternatives": [
+              {
+                "allOf": [
+                  {
+                    "kind": "graduation_date",
+                    "operator": "within",
+                    "value": [
+                      "2026-11-01",
+                      "2027-10-31"
+                    ],
+                    "educationLevels": [
+                      "本科"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "E01",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "硕士及以上学历，负责查询接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "inventedFactAccepted": false,
+        "qualificationStatus": "conflict"
+      },
+      "reason": "原资料本科，不接受模型虚构硕士。",
+      "reportedEvidence": "取得硕士学历",
+      "verification": "evidence"
+    },
+    {
+      "id": "E02",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责查询接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "invalidReferenceAccepted": false,
+        "maxRepairCalls": 1
+      },
+      "reason": "不存在的证据引用不能生效，修复必须有界。",
+      "reportedRefs": [
+        "C-does-not-exist"
+      ],
+      "verification": "repair"
+    },
+    {
+      "id": "E03",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "负责接口开发和查询性能优化。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "naturalSummaryAccepted": true
+      },
+      "reason": "自然概括可以引用真实项目，不强制逐字复述。",
+      "reportedSummary": "具备接口开发和查询优化的实践",
+      "verification": "evidence"
+    },
+    {
+      "id": "E04",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "一年以上开发经验优先，负责接口开发。"
+      },
+      "candidateProfile": {
+        "experience": [
+          {
+            "role": "开发实习生",
+            "durationMonths": 8,
+            "canSay": [
+              "开发查询接口。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "inventedYearAccepted": false,
+        "mustNotHardExcludeForYears": true
+      },
+      "reason": "八个月不能说成一年；不足年限仍按原宽松政策。",
+      "verification": "evidence"
+    },
+    {
+      "id": "E05",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责查询接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "satisfied",
+        "repeatedUserQuestion": false
+      },
+      "reason": "资料已有学历，模型漏行应本地补判或有界修复。",
+      "omitEligibilityRow": true,
+      "verification": "repair"
+    },
+    {
+      "id": "E06",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责查询接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "duplicateReferenceChangesDecision": false
+      },
+      "reason": "重复来源与行交换不应多计分或多拒绝。",
+      "verification": "evidence"
+    },
+    {
+      "id": "E07",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "不要求2027届毕业，不限毕业时间。本科及以上学历，负责查询接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "recommendationMustNotBe": "not_recommended",
+        "cohortHardBlocked": false
+      },
+      "reason": "完整原文明确取消届别限制，不能凭数字硬排除。",
+      "verification": "runner"
+    },
+    {
+      "id": "M01",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "负责查询接口开发，了解Docker优先。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "ordinaryUnknownHardBlocked": false
+      },
+      "reason": "主要工作有证据，未写普通工具仍保留机会。",
+      "verification": "decision"
+    },
+    {
+      "id": "M02",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历。负责广告预算分配、投放优化与广告归因建模。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "educationAddsCapabilityScore": false,
+        "responsibilityGapVisible": true
+      },
+      "reason": "只有学历相符不等于能完成主要工作。",
+      "verification": "decision"
+    },
+    {
+      "id": "M03",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "负责Python接口开发，使用指定云平台部署服务。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "platformExpertiseInvented": false,
+        "transferableOpportunityKept": true
+      },
+      "reason": "相邻经验应说明可迁移，不能夸成精通指定平台。",
+      "verification": "decision"
+    },
+    {
+      "id": "M04",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有执业药师资格证。善于沟通、熟悉办公软件优先。"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "执业药师资格证",
+            "details": "尚未取得"
+          }
+        ],
+        "skills": [
+          "沟通",
+          "办公软件"
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended"
+      },
+      "reason": "偏好高分不能抵消资格冲突。",
+      "verification": "decision"
+    },
+    {
+      "id": "M05",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有执业药师资格证。善于沟通、熟悉办公软件优先。"
+      },
+      "candidateProfile": {
+        "credentials": [],
+        "skills": [
+          "沟通",
+          "办公软件"
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "unknown",
+        "maxRecommendation": "caution",
+        "autoSelected": false
+      },
+      "reason": "关键资格未知不能被偏好高分推高。",
+      "verification": "decision"
+    },
+    {
+      "id": "M06",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "负责Python接口开发与SQL优化，了解Docker优先。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "ordinaryUnknownHardBlocked": false,
+        "capabilityCoveragePolicyUnchanged": true
+      },
+      "reason": "普通未知仍按原能力覆盖规则。",
+      "verification": "decision"
+    },
+    {
+      "id": "R01",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "负责Python接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "otherJobsComplete": true,
+        "failedJobIdentifiable": true
+      },
+      "reason": "单条调用失败不能卡住整队。",
+      "verification": "recovery",
+      "fault": "one_model_call_fails"
+    },
+    {
+      "id": "R02",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1驾驶证。"
+      },
+      "candidateProfile": {
+        "credentials": []
+      },
+      "expected": {
+        "maxRepairCalls": 1,
+        "validRowsPreserved": true,
+        "pauseRespected": true
+      },
+      "reason": "再次修复失败或暂停不应循环与丢结果。",
+      "verification": "recovery",
+      "fault": "repair_fails_or_pause"
+    },
+    {
+      "id": "R03",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责Python接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "persistedDecisionMismatch": false,
+        "duplicateRowsCreated": false
+      },
+      "reason": "关闭重开后推荐、资格、理由、默认选择保持一致。",
+      "verification": "storage"
+    },
+    {
+      "id": "R04",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责Python接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "oldCacheReusedAsNew": false,
+        "jdReused": true,
+        "profileRegenerated": false
+      },
+      "reason": "规则版本变更只刷新分析，不重复抓JD或画像。",
+      "verification": "cache"
+    },
+    {
+      "id": "P01",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责Python接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "cliDashboardDecisionMismatch": false
+      },
+      "reason": "相同资料与JD入口不同也应一致。",
+      "verification": "surface"
+    },
+    {
+      "id": "P02",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "本科及以上学历，负责Python接口开发。"
+      },
+      "candidateProfile": {
+        "education": [
+          {
+            "degree": "本科",
+            "endDate": "2024-06",
+            "status": "已毕业"
+          }
+        ],
+        "projects": [
+          {
+            "name": "客户查询系统",
+            "canSay": [
+              "使用 Python 编写查询接口，根据慢查询日志优化 SQL，完成接口联调。"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "stdioVersion": 1,
+        "nestedAgentStarted": false
+      },
+      "reason": "内部条件变化不改变Agent外层协议。",
+      "verification": "agent"
+    },
+    {
+      "id": "P03",
+      "jobFacts": {
+        "title": "合成验收岗位",
+        "description": "必须持有C1驾驶证，负责配送。"
+      },
+      "candidateProfile": {
+        "credentials": [
+          {
+            "name": "C1驾驶证",
+            "details": "尚未取得"
+          }
+        ]
+      },
+      "expected": {
+        "qualificationStatus": "conflict",
+        "recommendation": "not_recommended",
+        "autoSelected": false,
+        "incomingGreetingRequiresUserReply": false
+      },
+      "reason": "列表、沟通清单与消息机会判断共用最终结果。",
+      "verification": "surface"
+    }
+  ]
+}

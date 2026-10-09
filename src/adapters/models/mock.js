@@ -1,4 +1,6 @@
 const { requirementsForTrack } = require("../../core/model_contract");
+const { normalizeJobConditions } = require('../../core/job_match_conditions');
+const { buildJobMatchEvidence } = require('../../core/job_match_evidence');
 
 class MockModelAdapter {
   constructor(config = {}) {
@@ -100,6 +102,13 @@ class MockModelAdapter {
         .slice(0, 4);
     const roleSummary = clip(sentences.find((sentence) => /负责/.test(sentence)) || sentences[0] || job.title || "未明确主体工作", 60);
     const directEvidence = responsibilityEvidence.length ? responsibilityEvidence : [`JD：${clip(roleSummary, 80)}`];
+    const conditions = normalizeJobConditions({ jobUnderstanding: { coreRequirements: sentences.map((label, index) => ({
+      id: `R${index + 1}`, label, evidence: `JD：${label}`
+    })) }, evidence: buildJobMatchEvidence({ jobFacts: job }) });
+    const eligibility = conditions.filter(condition => condition.category === 'qualification').slice(0, 8).map(condition => ({
+      label: condition.label, evidence: `JD：${clip(condition.label, 116)}`, trackIds: [],
+      strength: condition.strength, alternatives: condition.alternatives
+    }));
     return {
       industryContext: "未明确",
       hiringTracks: [{
@@ -109,7 +118,7 @@ class MockModelAdapter {
         responsibilityEvidence: directEvidence
       }],
       requirements: coreRequirements.map((requirement) => ({ ...requirement, trackIds: ["T1"] })),
-      eligibility: [],
+      eligibility,
       riskSignals: [
         ...concerns.map((concern) => ({ ...concern, severity: "medium", evidence: `JD：${concern.evidence}` })),
         ...hiddenRisks.map((risk) => ({ ...risk, evidence: `JD：${risk.evidence}` }))
