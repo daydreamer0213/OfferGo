@@ -61,6 +61,9 @@ function getWorkflowProgressSnapshot(db, {
   const controlling = ["pause_requested", "stop_requested"].includes(String(workflow.control_state || "none"));
   const status = String(workflow.status || "");
   const phaseKey = phaseKeyFor(workflow);
+  const remainingWorkStatus = ["paused", "interrupted"].includes(status)
+    ? ({ acquisition: "scanning", analysis: "analyzing", communication: "communicating", review: "review_required", preparing: "created" }[phaseKey] || status)
+    : status;
   const scanSnapshot = parseJson(workflow.scan_filter_snapshot_json, {});
 
   const tasks = readWorkflowTaskRows(db, id);
@@ -192,7 +195,7 @@ function getWorkflowProgressSnapshot(db, {
       },
       communication,
       tracks,
-      remainingWorkLabel: workflowRemainingWorkLabel(workflow.site === 'zhaopin' && ['paused', 'interrupted'].includes(status) ? workflow.resume_phase || status : status, {
+      remainingWorkLabel: workflowRemainingWorkLabel(remainingWorkStatus, {
         scanTargets,
         details,
         analysis: counts,

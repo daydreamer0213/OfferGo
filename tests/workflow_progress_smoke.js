@@ -38,6 +38,7 @@ try {
   testCollectedDetailCountsComeFromObservations();
   testStageSpecificProgressBreakdown();
   testPausedZhaopinScanCompletionRemainder();
+  testPausedAcquisitionRemainderAcrossPlatforms();
   testTruthfulFourTrackReadModel();
   testFailedTaskResolutionUsesLatestPlanObservation();
   testCommunicationProgressSeparatesAmbiguity();
@@ -343,6 +344,31 @@ function testPausedZhaopinScanCompletionRemainder() {
   assert.strictEqual(completed.progress.scanTargets.pending, 0);
   assert.strictEqual(completed.progress.tracks.scan.value, 3);
   assert.match(completed.progress.remainingWorkLabel, /0 个搜索目标/);
+}
+
+function testPausedAcquisitionRemainderAcrossPlatforms() {
+  for (const site of ["boss", "zhaopin"]) {
+    const scenario = seedWorkflow(db, {
+      analyses: [{}, {}, {}],
+      descriptions: ["A".repeat(200), "", ""],
+      localDay: "2026-10-09",
+      modelConfigRevision: "mrev-paused-acquisition",
+      keepCreated: true
+    });
+    db.prepare("UPDATE job_observations SET quality_tags_json = '[\"detail_unverified\"]' WHERE batch_id = ? AND COALESCE(description, '') = ''")
+      .run(scenario.batchId);
+    for (const status of ["paused", "interrupted"]) {
+      for (const resumePhase of ["scanning", null]) {
+        db.prepare("UPDATE workflow_runs SET site = ?, status = ?, resume_phase = ?, scan_batch_id = ?, scan_run_id = ? WHERE id = ?")
+          .run(site, status, resumePhase, scenario.batchId, scenario.scanRunId, scenario.workflowId);
+        const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
+        assert.strictEqual(snapshot.progress.phaseKey, "acquisition");
+        assert.strictEqual(snapshot.progress.details.pending, 2);
+        assert.match(snapshot.progress.remainingWorkLabel, /2 个岗位详情待读取/,
+          `${site} ${status} ${resumePhase} must retain acquisition work`);
+      }
+    }
+  }
 }
 
 function testTruthfulFourTrackReadModel() {

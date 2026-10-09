@@ -5,13 +5,17 @@
   const actionButton = document.querySelector("[data-runtime-recover]");
   if (!region || !title || !message || !actionButton) return;
 
-  const site = region.dataset.site || 'boss';
-  const siteLabel = site === 'zhaopin' ? '智联' : 'BOSS';
+  const defaultSite = region.dataset.site || 'boss';
+  const selectedSite = () => document.querySelector('[data-platform-selector]')?.value || defaultSite;
   let requestInFlight = false;
+  let selectionRevision = 0;
+  let queuedRefresh = false;
   let pollTimer = null;
   let actionEndpoint = "";
+  let actionSite = defaultSite;
 
-  function runtimeView(payload = {}) {
+  function runtimeView(payload = {}, site = defaultSite) {
+    const siteLabel = site === 'zhaopin' ? '智联' : 'BOSS';
     const browser = payload.browser;
     const workspace = payload.workspace || { status: "unchecked" };
     if (!browser) {
@@ -71,12 +75,16 @@
     };
   }
 
-  function render(payload) {
-    const view = runtimeView(payload);
+  function render(payload, site = defaultSite) {
+    applyView(runtimeView(payload, site), site);
+  }
+
+  function applyView(view, site) {
     region.dataset.state = view.state;
     title.textContent = view.title;
     message.textContent = view.message;
     actionEndpoint = view.endpoint;
+    actionSite = site;
     actionButton.textContent = view.button;
     actionButton.hidden = !view.button;
   }
@@ -86,22 +94,37 @@
     pollTimer = setTimeout(poll, 5000);
   }
 
-  async function request(url, options = {}) {
+  async function request(url, options = {}, site = selectedSite()) {
     if (requestInFlight || document.hidden) return;
     requestInFlight = true;
+    const revision = selectionRevision;
     actionButton.disabled = true;
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers: { accept: "application/json", ...(options.headers || {}) }
-      });
-      const payload = await response.json();
-      if (!response.ok) throw Object.assign(
-        new Error(String(payload?.error || "请求没有完成。")),
-        { payload }
-      );
-      render(payload);
+      const targets = url ? [site] : site === 'both' ? ['boss', 'zhaopin'] : [site];
+      const views = [];
+      for (const target of targets) {
+        const response = await fetch(url || '/api/runtime-status?site=' + encodeURIComponent(target), {
+          ...options,
+          headers: { accept: "application/json", ...(options.headers || {}) }
+        });
+        const payload = await response.json();
+        if (!response.ok) throw Object.assign(
+          new Error(String(payload?.error || "请求没有完成。")),
+          { payload }
+        );
+        if (revision !== selectionRevision) return;
+        views.push({ site: target, ...runtimeView(payload, target) });
+      }
+      if (url && selectedSite() === 'both') {
+        queuedRefresh = true;
+      } else if (views.length === 2 && views.every(view => view.state === 'ready')) {
+        applyView({ ...views[0], title: '专用 Edge 和 BOSS、智联已就绪' }, 'boss');
+      } else {
+        const view = views.find(view => view.state !== 'ready') || views[0];
+        applyView(view, view.site);
+      }
     } catch (error) {
+      if (revision !== selectionRevision) return;
       render({
         browser: {
           status: "needs_attention",
@@ -109,17 +132,20 @@
           message: String(error?.payload?.error || error?.message || "暂时无法读取本地运行状态，请稍后重试。")
         },
         workspace: { status: "unchecked" }
-      });
+      }, site === 'both' ? 'boss' : site);
     } finally {
       requestInFlight = false;
       actionButton.disabled = false;
-      schedulePoll();
+      if (queuedRefresh) {
+        queuedRefresh = false;
+        void poll();
+      } else schedulePoll();
     }
   }
 
   function poll() {
     pollTimer = null;
-    return request("/api/runtime-status?site=" + encodeURIComponent(site));
+    return request(null);
   }
 
   actionButton.addEventListener("click", async () => {
@@ -129,8 +155,8 @@
     await request(actionEndpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ site })
-    });
+      body: JSON.stringify({ site: actionSite })
+    }, actionSite);
   });
 
   document.addEventListener("visibilitychange", () => {
@@ -142,6 +168,15 @@
     if (pollTimer !== null) clearTimeout(pollTimer);
     pollTimer = null;
     void poll();
+  });
+
+  window.addEventListener('offergo:conditions', () => {
+    selectionRevision += 1;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+    applyView({ state: 'waiting', title: '正在检查所选平台…', message: '正在确认浏览器和工作区状态。', button: '', endpoint: '' }, defaultSite);
+    if (requestInFlight) queuedRefresh = true;
+    else void poll();
   });
 
   void poll();

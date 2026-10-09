@@ -1199,7 +1199,7 @@ class BossSiteAdapter {
                 targetDiscovered = Number(total || 0);
                 if (typeof options.onProgressCheckpoint !== "function") return;
                 const jobs = addedCards.map((card) => {
-                  const job = normalizeBossJob({ ...card, keyword, source: "boss", searchCity: city.city || "" });
+                  const job = cardWithReusableDetail(card, keyword, city.city, options.getReusableDetail);
                   job.detailRequired = typeof options.shouldReadDetail !== "function"
                     || options.shouldReadDetail(job) !== false;
                   return job;
@@ -1238,17 +1238,7 @@ class BossSiteAdapter {
               nativeFilterLane: laneId
             });
             const entries = cards.map((card, index) => {
-              const cardJob = normalizeBossJob({ ...card, keyword, source: "boss", searchCity: city.city || "" });
-              const cachedDetail = typeof options.getReusableDetail === "function" ? options.getReusableDetail(cardJob) : null;
-              const reusable = reusableDetailMatches(cardJob, cachedDetail) ? cachedDetail : null;
-              const job = reusable?.description ? normalizeBossJob({
-                ...reusable,
-                ...cardJob,
-                description: reusable.description,
-                bossActiveText: cardJob.bossActiveText || reusable.bossActiveText || "",
-                detailRead: true
-              }) : cardJob;
-              if (reusable?.description) job.detailReused = true;
+              const job = cardWithReusableDetail(card, keyword, city.city, options.getReusableDetail);
               return {
                 job,
                 keyword,
@@ -2825,6 +2815,21 @@ function assertBossSearchTarget(actualUrl, expectedUrl) {
   if (!expectedUrl || !actualUrl) return;
   if (canonicalizeBossTargetUrl(actualUrl).url === canonicalizeBossTargetUrl(expectedUrl).url) return;
   throw bossError("BOSS_SEARCH_SCOPE_CHANGED", "当前 BOSS 搜索条件与本轮目标不同，已停止以避免混合岗位。");
+}
+
+function cardWithReusableDetail(card, keyword, city, getReusableDetail) {
+  const job = normalizeBossJob({ ...card, keyword, source: "boss", searchCity: city || "" });
+  const cached = typeof getReusableDetail === "function" ? getReusableDetail(job) : null;
+  if (!reusableDetailMatches(job, cached)) return job;
+  const merged = normalizeBossJob({
+    ...cached,
+    ...job,
+    description: cached.description,
+    bossActiveText: job.bossActiveText || cached.bossActiveText || "",
+    detailRead: true
+  });
+  merged.detailReused = true;
+  return merged;
 }
 
 function reusableDetailMatches(job, cached) {

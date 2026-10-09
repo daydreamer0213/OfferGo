@@ -2271,9 +2271,14 @@ async function priorityDetailBudgetSmoke() {
 async function reusableDetailSmoke() {
   const browser = { async activeTabId() { return activeBoss.id; }, async navigate() {} };
   const reads = [];
+  const collectionCheckpoints = [];
   const adapter = new BossSiteAdapter({ browser, sleepFn: async () => {}, randomFn: () => 0 });
   adapter.assertSearchPage = async () => ({ isSearchPage: true });
-  adapter.collectCards = async () => [card("cached"), card("fresh")];
+  adapter.collectCards = async (_tabId, _maxCards, _signal, _bindings, onCards) => {
+    const cards = [card("cached"), card("fresh")];
+    await onCards?.({ cards, total: cards.length });
+    return cards;
+  };
   adapter.readVisiblePaneDetail = async (_tabId, job) => {
     reads.push(job.sourceId);
     return { description: `实时职位描述 ${job.title} Python RAG `.repeat(12), bossActiveText: "今日活跃" };
@@ -2284,6 +2289,9 @@ async function reusableDetailSmoke() {
     cityScopes: [{ city: "广州", cityCode: "101280100" }],
     maxCards: 20,
     maxDetailTotal: 2,
+    onProgressCheckpoint: async (event) => {
+      if (event.activity === "searching" && event.jobs.length) collectionCheckpoints.push(...event.jobs);
+    },
     getReusableDetail: (job) => job.sourceId === "boss:cached" ? {
       sourceId: job.sourceId,
       description: "缓存职位描述 Python RAG ".repeat(12),
@@ -2291,8 +2299,14 @@ async function reusableDetailSmoke() {
     } : null
   });
   assert.deepStrictEqual(reads, ["boss:fresh"]);
+  assert.strictEqual(jobs.filter((job) => job.detailReused).length, 1, 'reused detail metrics must distinguish cached and browser reads');
   assert.strictEqual(jobs.find((job) => job.sourceId === "boss:cached").detailRead, true);
   assert.strictEqual(jobs.filter((job) => job.detailRead).length, 2);
+  const cachedCheckpoint = collectionCheckpoints.find((job) => job.sourceId === "boss:cached");
+  assert.strictEqual(cachedCheckpoint.description, jobs.find((job) => job.sourceId === "boss:cached").description,
+    "collection checkpoint must not erase reusable detail before detail iteration finishes");
+  assert.strictEqual(cachedCheckpoint.detailRead, true);
+  assert.strictEqual(cachedCheckpoint.detailReused, true);
 }
 
 async function changedCardFactsRejectCacheSmoke() {

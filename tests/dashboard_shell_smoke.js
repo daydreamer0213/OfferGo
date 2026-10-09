@@ -317,6 +317,8 @@ async function assertRuntimeClient(source, site = "boss") {
     }
   };
   const documentHandlers = {};
+  const windowHandlers = {};
+  elements['[data-platform-selector]'] = { value: site };
   const pending = [];
   const fetchCalls = [];
   const timers = new Map();
@@ -328,6 +330,7 @@ async function assertRuntimeClient(source, site = "boss") {
   };
   const context = {
     document,
+    window: { addEventListener(type, handler) { windowHandlers[type] = handler; } },
     fetch(url, options = {}) {
       fetchCalls.push({ url, options });
       return new Promise((resolve) => pending.push(resolve));
@@ -389,6 +392,36 @@ async function assertRuntimeClient(source, site = "boss") {
   await settlePromises();
   assert.strictEqual(elements["[data-runtime-recover]"].hidden, false);
   assert.match(elements["[data-runtime-title]"].textContent, site === "zhaopin" ? /登录智联/ : /登录BOSS/);
+  assert.equal(typeof windowHandlers['offergo:conditions'], 'function');
+  elements['[data-platform-selector]'].value = 'both';
+  windowHandlers['offergo:conditions']();
+  assert.equal(fetchCalls.at(-1).url, '/api/runtime-status?site=boss');
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  assert.equal(fetchCalls.at(-1).url, '/api/runtime-status?site=zhaopin');
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'login_required' } }; } });
+  await settlePromises();
+  assert.match(elements['[data-runtime-title]'].textContent, /登录智联/);
+  assert.doesNotMatch(elements['[data-runtime-title]'].textContent, /已就绪/);
+  const reconcilePromise = elements['[data-runtime-recover]'].click();
+  assert.equal(fetchCalls.at(-1).options.body, JSON.stringify({ site: 'zhaopin' }));
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await reconcilePromise;
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  assert.match(elements['[data-runtime-title]'].textContent, /BOSS.*智联.*已就绪/);
+  documentHandlers.visibilitychange();
+  elements['[data-platform-selector]'].value = site;
+  windowHandlers['offergo:conditions']();
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  assert.equal(fetchCalls.at(-1).url, pollUrl, 'switching during a request queues the current platform check');
+  assert.equal(elements['[data-runtime-title]'].textContent, '正在检查所选平台…', 'old platform results must not overwrite the current selection');
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  assert.match(elements['[data-runtime-title]'].textContent, site === 'zhaopin' ? /和智联已就绪/ : /和BOSS已就绪/);
   assert(fetchCalls.every((call) => String(call.url).startsWith("/api/runtime")), "runtime client must call only local runtime endpoints");
 }
 

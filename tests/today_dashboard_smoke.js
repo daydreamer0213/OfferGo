@@ -298,6 +298,35 @@ async function assertPriorityPanelStaysCompactAtDesktopWidth() {
     assert.strictEqual(await page.locator('input[name="confirmEarlyScan"]').inputValue(), "1");
     await page.locator("[data-early-scan-cancel]").click();
     assert.strictEqual(await page.locator("[data-early-scan-dialog]").isVisible(), false);
+
+    html = renderTodayPage({
+      page: { todayPath: '/plan', planId: 1, site: 'zhaopin', enabledPlatforms: ['boss', 'zhaopin'] },
+      heading: { title: '今日任务' },
+      primary: { type: 'form', status: '可以开始新一轮' },
+      runtime: { browserMode: 'portable', cdpPort: 9222, site: 'zhaopin' },
+      platformContext: { filterSummary: {} },
+      profile: {}, metrics: {}
+    });
+    const selectedReadinessCalls = [];
+    let bossReady = false;
+    await page.route('**/api/browser-readiness?*', async route => {
+      const selected = new URL(route.request().url()).searchParams.get('site');
+      selectedReadinessCalls.push(selected);
+      const ready = selected !== 'boss' || bossReady;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ready, status: ready ? 'ready' : 'login_required', message: ready ? '已就绪' : '请登录BOSS'
+      }) });
+    });
+    await page.goto('http://roleflow.test/plan');
+    await page.waitForFunction(() => document.querySelector('[data-browser-readiness-button]')?.disabled === false);
+    await page.locator('[data-platform-selector]').selectOption('both');
+    await page.waitForFunction(() => document.getElementById('browser-readiness-status')?.textContent.includes('请登录BOSS'));
+    assert.equal(await page.locator('[data-browser-readiness-button]').isDisabled(), true,
+      'both selection must not use only the original Zhaopin ready state');
+    assert(selectedReadinessCalls.includes('boss') && selectedReadinessCalls.includes('zhaopin'));
+    bossReady = true;
+    await page.waitForFunction(() => document.querySelector('[data-browser-readiness-button]')?.disabled === false);
+    assert.match(await page.locator('#browser-readiness-status').textContent(), /BOSS.*智联/);
     await page.close();
   } finally {
     releaseLateReadiness();

@@ -32,15 +32,24 @@ function evaluateJobEligibility(job = {}, {
   const candidate = candidateEducationFacts(candidateProfile);
   const cohort = requiredCohortConstraint(job.description);
   if (cohort) {
+    const overlappingDates = cohort.dateWindow
+      ? candidate.graduationWindows.filter(window => window.maximum >= cohort.dateWindow.minimum
+        && window.minimum <= cohort.dateWindow.maximum)
+      : [];
+    const dateConfirmed = overlappingDates.some(window => window.minimum >= cohort.dateWindow.minimum
+      && window.maximum <= cohort.dateWindow.maximum);
+    const knownMatch = cohort.dateWindow ? dateConfirmed
+      : candidate.graduationYears.some(year => matchesCohort(cohort, year));
     jobEvidence.push(cohort.evidence);
-    if (!candidate.graduationYears.length) {
+    if ((!knownMatch && candidate.unresolvedGraduation) || !candidate.graduationYears.length || (cohort.dateWindow
+      && (!candidate.graduationWindows.length || (overlappingDates.length && !dateConfirmed)))) {
       if (status !== "blocked") {
         status = "review";
         reasonCode = "eligibility_review";
         qualityTags.push("eligibility_review");
         risks.push("岗位有明确届别要求，候选人毕业年份待确认");
       }
-    } else if (!candidate.graduationYears.some((year) => matchesCohort(cohort, year))) {
+    } else if (cohort.dateWindow ? !overlappingDates.length : !candidate.graduationYears.some((year) => matchesCohort(cohort, year))) {
       status = "blocked";
       if (!reasonCode) reasonCode = "cohort_mismatch";
       qualityTags.push("cohort_mismatch");
@@ -146,7 +155,17 @@ function internshipDescriptionEvidence(description) {
 
 function requiredCohortConstraint(description) {
   for (const clause of semanticClauses(description)) {
-    if (!/届/.test(clause) || isSoftQualification(clause)) continue;
+    if (!/届|毕业(?:时间|日期)/.test(clause) || isSoftQualification(clause)) continue;
+    if (/毕业(?:时间|日期).{0,8}(?:不要求|不限制|无要求|没有限制)|不(?:要求|限制|限定).{0,8}毕业(?:时间|日期)/.test(clause)) continue;
+    const dateRange = clause.match(/毕业(?:时间|日期).{0,12}?((?:19|20)\d{2}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)\s*(?:[-—–~～]|至|到)\s*((?:19|20)\d{2}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)/);
+    if (dateRange) {
+      const from = graduationDateWindow(dateRange[1]);
+      const to = graduationDateWindow(dateRange[2]);
+      if (from && to && from.minimum <= to.maximum && to.year - from.year <= 10) {
+        return { dateWindow: { minimum: from.minimum, maximum: to.maximum },
+          dateLabel: `${dateRange[1]} 至 ${dateRange[2]}毕业`, evidence: clause };
+      }
+    }
     const range = clause.match(/((?:20)?\d{2})\s*[-至到~～]\s*((?:20)?\d{2})\s*届/);
     if (range) {
       const minimum = normalizedYear(range[1]);
@@ -181,18 +200,40 @@ function requiredStudentClause(description) {
 function candidateEducationFacts(candidateProfile) {
   const education = Array.isArray(candidateProfile?.education) ? candidateProfile.education : [];
   const graduationYears = [];
+  const graduationWindows = [];
   let graduated = false;
   let inSchool = false;
+  let unresolvedGraduation = false;
   for (const item of education) {
     if (!item || typeof item !== "object") continue;
     const end = normalized(item.endDate || item.end || item.graduationYear);
     const year = Number(end.match(/(?:19|20)\d{2}/)?.[0] || 0);
     if (validYear(year)) graduationYears.push(year);
+    const window = graduationDateWindow(end);
+    if (window) graduationWindows.push(window);
     const status = normalized(item.status || item.graduationStatus);
     if (/已毕业|已经毕业|毕业完成|completed|graduated/i.test(status)) graduated = true;
-    if (/在读|在校|就读中|预计毕业|studying|enrolled/i.test(status)) inSchool = true;
+    if (/在读|在校|就读中|预计毕业|studying|enrolled/i.test(status)) {
+      inSchool = true;
+      if (!window) unresolvedGraduation = true;
+    }
   }
-  return { graduationYears: unique(graduationYears).sort(), graduated, inSchool };
+  return { graduationYears: unique(graduationYears).sort(), graduationWindows, graduated, inSchool, unresolvedGraduation };
+}
+
+function graduationDateWindow(value) {
+  const match = normalized(value).match(/^((?:19|20)\d{2})(?:\s*(?:年|[-/.])\s*(\d{1,2})(?:\s*(?:月|[-/.])\s*(\d{1,2}))?)?/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2] || 0);
+  const day = Number(match[3] || 0);
+  if (!validYear(year) || month > 12 || (match[2] && month < 1)) return null;
+  const lastDay = month ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 31;
+  if (day > lastDay || (match[3] && day < 1)) return null;
+  return { year,
+    minimum: year * 10000 + (month || 1) * 100 + (day || 1),
+    maximum: year * 10000 + (month || 12) * 100 + (day || lastDay)
+  };
 }
 
 function matchesCohort(constraint, year) {
@@ -201,6 +242,7 @@ function matchesCohort(constraint, year) {
 }
 
 function cohortLabel(constraint) {
+  if (constraint.dateWindow) return constraint.dateLabel;
   if (constraint.years.length) return `${constraint.years.join("/")} 届`;
   return `${constraint.minimum}-${constraint.maximum} 届`;
 }

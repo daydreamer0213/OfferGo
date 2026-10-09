@@ -3256,6 +3256,8 @@ function extractBrowserReadinessScript(page) {
 }
 
 async function assertBrowserReadinessGate({ readinessScript, status = "login_required", baseDisabled = false, responseOk = true, fetchError = null, expectedDisabled }) {
+  const windowListeners = new Map();
+  let readinessRequests = 0;
   let intervalCallback = null;
   let intervalMs = null;
   let formSubmitCalls = 0;
@@ -3270,15 +3272,17 @@ async function assertBrowserReadinessGate({ readinessScript, status = "login_req
   };
   const statusNode = { textContent: "", dataset: {} };
   const context = vm.createContext({
+    window: { addEventListener(name, callback) { windowListeners.set(name, callback); } },
     document: {
       getElementById(id) { return id === "browser-readiness-status" ? statusNode : null; },
       querySelector(selector) { return selector === "[data-browser-readiness-button]" ? button : null; }
     },
     fetch() {
+      readinessRequests += 1;
       if (fetchError) return Promise.reject(fetchError);
       return Promise.resolve({
         ok: responseOk,
-        json: async () => ({ status, message: `fixture ${status}` })
+        json: async () => ({ status, ready: status === "ready", message: `fixture ${status}` })
       });
     },
     setInterval(callback, interval) {
@@ -3293,6 +3297,13 @@ async function assertBrowserReadinessGate({ readinessScript, status = "login_req
   await new Promise((resolve) => setImmediate(resolve));
   assert.strictEqual(typeof intervalCallback, "function");
   assert.strictEqual(intervalMs, 5000);
+  assert.strictEqual(button.disabled, expectedDisabled);
+  assert.strictEqual(readinessRequests, 1);
+  assert.strictEqual(typeof windowListeners.get("offergo:conditions"), "function");
+  windowListeners.get("offergo:conditions")();
+  assert.strictEqual(readinessRequests, 2, "changed conditions must trigger a fresh readiness check");
+  assert.strictEqual(button.disabled, true, "changed conditions must disable starting until the new check completes");
+  await flushPromises();
   assert.strictEqual(button.disabled, expectedDisabled);
   assert.strictEqual(formSubmitCalls, 0);
 }
@@ -3415,6 +3426,7 @@ async function assertSerializedSlowBrowserReadinessGate(readinessScript) {
   };
   const statusNode = { textContent: "", dataset: {} };
   const context = vm.createContext({
+    window: { addEventListener() {} },
     document: {
       getElementById(id) { return id === "browser-readiness-status" ? statusNode : null; },
       querySelector(selector) { return selector === "[data-browser-readiness-button]" ? button : null; }
@@ -3466,7 +3478,7 @@ async function assertSerializedSlowBrowserReadinessGate(readinessScript) {
 function readinessResponse(status) {
   return {
     ok: true,
-    json: async () => ({ status, message: `fixture ${status}` })
+    json: async () => ({ status, ready: status === "ready", message: `fixture ${status}` })
   };
 }
 

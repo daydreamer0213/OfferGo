@@ -61,6 +61,30 @@ const exclusiveCohortMismatch = evaluate({
 assert.strictEqual(exclusiveCohortMismatch.status, "blocked");
 assert.strictEqual(exclusiveCohortMismatch.reasonCode, "cohort_mismatch");
 
+const graduationWindow = '毕业时间需在 2026 年 11 月 1 日 - 2027 年 10 月 31 日 之间。熟悉 Python 和 RAG。';
+for (const [endDate, expected] of [
+  ['2024-06', 'blocked'], ['2026-10-31', 'blocked'], ['2026-11-01', 'eligible'],
+  ['2027-06', 'eligible'], ['2027-10-31', 'eligible'], ['2027-11-01', 'blocked'],
+  ['2026', 'review'], ['2027', 'review'], ['', 'review']
+]) {
+  const result = evaluate({ description: graduationWindow }, { education: [{ endDate }] });
+  assert.equal(result.status, expected, `explicit graduation window: ${endDate}`);
+  if (expected === 'blocked') assert(result.qualityTags.includes('cohort_mismatch'));
+}
+assert.equal(evaluate({ description: '毕业时间为2026年11月至2027年10月。' }).status, 'blocked');
+assert.equal(evaluate({ description: '毕业时间为2026年11月至2027年10月的候选人优先。' }).status, 'eligible');
+assert.equal(evaluate({ description: graduationWindow }, { education: [
+  { endDate: '2024-06' }, { endDate: '2027-06' }
+] }).status, 'eligible', 'a qualifying later degree remains eligible');
+assert.equal(evaluate({ description: '毕业时间需在2026年13月1日至2027年10月31日之间。' }).status, 'eligible',
+  'invalid date text cannot establish an exclusion');
+assert.equal(evaluate({ description: graduationWindow }, { education: [{ endDate: '2027-13' }] }).status, 'review');
+assert.equal(evaluate({ description: '毕业时间不要求在2026年11月至2027年10月之间。' }).status, 'eligible');
+assert.equal(evaluate({ description: '不要求毕业时间在2026年11月至2027年10月之间。' }).status, 'eligible');
+assert.equal(evaluate({ description: graduationWindow }, { education: [
+  { endDate: '2024-06', status: '已毕业' }, { status: '在读' }
+] }).status, 'review', 'an ongoing later degree with an unknown graduation date cannot be excluded');
+
 const oneAcceptedEducation = evaluate({
   description: "任职要求：26/27届毕业生，熟悉 Python。"
 }, {

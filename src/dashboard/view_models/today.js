@@ -137,8 +137,6 @@ function buildTodayViewModel(input = {}) {
   if (vm.page.site === 'zhaopin') {
     vm.page.todayPath += '&site=zhaopin';
     vm.heading.title = '今日任务';
-    vm.heading.lede = '先确认智联的搜索范围，再开始找岗。';
-    vm.heading.meta[0] += ' · 智联';
     vm.form.acquisition.mode = 'inherited';
     vm.form.acquisition.inheritedPreview.summary = input.platformContext
       ? zhaopinSearchDisplaySummary(input.platformContext.filterSummary)

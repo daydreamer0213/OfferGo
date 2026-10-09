@@ -183,21 +183,32 @@ function renderClientScripts(runState, includeBrowserReadiness, runtime = {}) {
       let readinessGeneration = 0;
       let latestReadinessStatus = 'unknown';
       let statusOwner = 'readiness';
-      function readinessUrl() { return '/api/browser-readiness?site=${escapeAttr(runtime.site || 'boss')}'; }
+      function selectedPlatform() { return document.querySelector('[data-platform-selector]')?.value || ${JSON.stringify(runtime.site || 'boss')}; }
       async function refreshReadiness({queueIfBusy=false}={}) {
         if (pollingStopped) return;
         if (readinessInFlight) {
           if (queueIfBusy) queuedRefresh = true;
           return;
         }
-        const requestUrl = readinessUrl();
+        const selected = selectedPlatform();
         const generation = readinessGeneration;
         readinessInFlight = true;
         button.disabled = true;
         try {
-          const response = await fetch(requestUrl, {cache:'no-store'});
-          if (!response.ok) throw new Error('readiness request failed');
-          const state = await response.json();
+          const platforms = selected === 'both' ? ['boss','zhaopin'] : [selected];
+          const results = [];
+          for (const platform of platforms) {
+            const response = await fetch('/api/browser-readiness?site='+encodeURIComponent(platform), {cache:'no-store'});
+            if (!response.ok) throw new Error('readiness request failed');
+            results.push({ platform, ...await response.json() });
+            if (generation !== readinessGeneration || pollingStopped) return;
+          }
+          const unavailable = results.find(value=>!value.ready||value.status!=='ready');
+          const state = selected === 'both'
+            ? unavailable
+              ? { ...unavailable, message:(unavailable.platform==='boss'?'BOSS':'智联')+'：'+(unavailable.message||'暂未就绪') }
+              : { ready:true, status:'ready', message:'BOSS 和智联已就绪，可以开始找岗。' }
+            : results[0];
           if (generation !== readinessGeneration || pollingStopped) return;
           latestReadinessStatus = state.status || 'unknown';
           if (statusOwner === 'readiness') {
@@ -223,6 +234,13 @@ function renderClientScripts(runState, includeBrowserReadiness, runtime = {}) {
       }
       refreshReadiness();
       let readinessInterval = setInterval(refreshReadiness, 5000);
+      window.addEventListener('offergo:conditions', () => {
+        if (pollingStopped) return;
+        readinessGeneration += 1;
+        button.disabled = true;
+        if (statusOwner === 'readiness') statusNode.textContent = '正在检查所选平台…';
+        void refreshReadiness({queueIfBusy:true});
+      });
       button.form?.addEventListener?.('submit', async (event) => {
         event.preventDefault();
         if (pollingStopped) return;
