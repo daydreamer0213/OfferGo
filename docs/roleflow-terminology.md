@@ -1,12 +1,14 @@
 ﻿---
 name: roleflow-terminology
-description: RoleFlow 当前统一中英文术语
+description: OfferGo 当前统一中英文术语
 metadata:
   node_type: memory
   type: project
   originSessionId: 355f3b01-a14c-47cd-82a6-e7f1cf6dfe0c
-  modified: 2026-08-01T00:00:00.000Z
+  modified: 2026-10-09T00:00:00.000Z
 ---
+
+核对基线：OfferGo v1.4.1，策略 `four-tier-weighted-v4.8`。文件名中的 RoleFlow 是保留的历史路径。
 
 ## 四档建议
 
@@ -22,7 +24,7 @@ metadata:
 
 ## 岗位要求分类
 
-- **核心要求**：`foundation || central || indispensable` 任一字段为 true。
+- **核心要求**：排除明确软条件后，`foundation || central || indispensable` 任一字段为 true。
 - **支持要求**：不是核心、也不是明确可选项，但仍会影响岗位胜任度的要求。
 - **软条件**：JD 明确写成优先、加分、非必须或可选的条件，不计入普通非核心缺口数量。
 - **硬性要求**（indispensable）：岗位明确不可缺少的要求。这个字段可以参与核心计分，
@@ -43,7 +45,7 @@ metadata:
 - **直接对上**（matched）：候选人有直接证据，计 1 分。
 - **可显著推导**（transferable）：底层能力可紧密迁移，计 0.5 分。
 - **对不上**（missing）：有足够信息确认缺口，计 0 分。
-- **未知**（unknown）：现有信息无法确认，计 0 分，同时降低证据覆盖率。
+- **未知**（unknown）：现有信息无法确认，不进入已判断均分的分母，单独降低证据覆盖率。
 
 核心集合占 70%，支持集合占 30%。符合度分为 `fit`、`mostly_fit`、`partial_fit`、
 `no_fit`，最终档位查询 `docs/roleflow-decision-matrix.md` 中冻结二维表。
@@ -53,7 +55,7 @@ metadata:
 - **双侧证据**：总体结论至少包含可核对 JD 事实和候选人事实；不要求每个正向条目重复同一事实。
 - **技术待重试**（needs_retry）：模型失败、缓存过期、等待分析、只有局部 JD、需要刷新、方向无法进入
   二维表或总体任一侧证据为空。技术状态不等于慎投。
-- **模型 shadow 建议**：模型的整体语义建议，只用于对照，不控制最终档位。
+- **模型 shadow 建议**：legacy 兼容路径的整体建议，不全面控制最终档位；现有职责发散保护可以在限定条件下封顶。默认 split 模式不要求模型给最终四档。
 
 ## 偏差术语
 

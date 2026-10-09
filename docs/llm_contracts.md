@@ -1,185 +1,65 @@
-# LLM 分析契约
+# OfferGo 模型任务与契约
+
+核对日期：2026-10-09，功能基线为 v1.4.1（`19dd6b1`）。本文说明当前任务和校验职责；精确字段以源码契约及适配器为准，旧版 JSON 示例不能直接当作当前请求模板。
 
 ## 调用分工
 
-模型只有五类逻辑调用：
+| 使用场景 | 模型任务 | 得到什么；何时调用 |
+|---|---|---|
+| 首次理解简历 | `analyzeResume` | 从脱敏文本整理画像，不在这一步评价简历或追问无关资料 |
+| 匹配偏好卡 | `buildCandidateMatchCard` | 从画像准备可编辑草稿，确认后才成为匹配依据 |
+| 初始搜索方案 | `recommendSearchPlan` | 推荐有简历依据的岗位名称和经验范围；初次薪资筛选留空，城市没有明确来源时留空 |
+| 岗位理解 | `understandJob` | 只看完整 JD，提取行业、招聘分支、职责、要求、资格与风险 |
+| 岗位匹配 | `matchJob` | 逻辑匹配入口；默认 split 模式分别执行 `matchResponsibilities`、`matchRequirements`，本地组合证据并计算最终四档 |
+| 旧人工沟通工具、定制招呼语 | `draftCommunication` | 按需准备文字，不在扫描阶段批量生成 |
+| 消息与回复、跟进 | `draftMessageGroup` | 理解 HR 本轮全部信息，引用适用资料，准备草稿或缺失事实问题 |
+| 用户修改回答后的学习 | `extractReplyEditFacts` | 从用户实际改动中提取有原文依据的事实或经历，不把未改模型草稿当作用户事实 |
+| 简历优化 | `generateResumeOptimization` | 返回可核对的修改项，由本地代码应用为完整可编辑稿 |
+| 面试逐题推进 | `generateMockInterviewStep` | 点评刚答题目，再追问、换主题或结束 |
+| 面试复盘、重答点评 | `reviewMockInterview`、`reviewMockInterviewRetry` | 根据真实题目和回答给出复盘；可提出经历候选，需用户确认后才共享 |
 
-1. `analyzeResume`：简历文本 -> `CandidateProfile`。
-2. `recommendSearchPlan`：画像 -> 初始 `SearchPlan`；城市不从空信息猜测。
-3. `understandJob`：岗位来源内容 -> `JobUnderstanding`，不接收候选人匹配结论。
-4. `matchJob`：画像、简历版本、岗位理解和完整 JD -> `MatchDecision`。
-5. `draftCommunication`：用户主动点击后 -> `CommunicationDraft`。
+普通用户使用其已配置模型；Agent 运行时由外层 Agent 响应同一进程的 stdio 请求。接口相同不代表实际调用次数固定：复用、缓存、契约修复和失败重试会改变次数。首次处理通常涉及画像、卡片、方案三类任务；默认未缓存岗位通常涉及理解、职责匹配、要求匹配三项任务。兼容 legacy 匹配保留单项 `matchJob` 调用。
 
-扫描链路只调用 3 和 4。它不会重复解析简历，也不会批量调用 5。
+## 画像、匹配卡和搜索方案
 
-## CandidateProfile
+画像只保存简历或用户已提供的事实。不得猜测离职原因、GAP、到岗时间、项目规模或量化结果；上传原文件和真实简历版本由本地存储创建，模型的 `resumeVersions` 不代替它们。
 
-```json
-{
-  "candidate": {
-    "name": "候选人",
-    "city": "",
-    "targetTitles": ["AI应用开发"],
-    "expectedSalary": "10-20K",
-    "adjustableSalary": []
-  },
-  "education": [],
-  "experiences": [],
-  "skills": [{ "name": "Python", "level": "resume", "evidence": [] }],
-  "projects": [],
-  "credentials": [],
-  "strengths": [],
-  "resumeVersions": []
-}
-```
+匹配卡归纳目标方向、强证据、可迁移能力及限制。构建失败时首次使用流程可从已保存画像准备本地草稿，仍须检查和确认；不能将回退草稿当作模型成功。
 
-画像不得包含模型猜测的 GAP、离职原因、到岗时间或短期项目口径。解析阶段不返回简历点评和非筛选必要追问。
-`resumeVersions` 在画像解析结果中固定为空；真实简历版本由用户上传的文件创建并保留原文件、解析结果和版本元数据。
+生成搜索词以岗位名称为单位，优先使用用户目标，再从经历提出有依据的相近岗位；技能、工具、项目名称和工作动作不独立作为搜索词。模型初始薪资为 `{minK:0,maxK:0}`，用户自行填写；已有保存的薪资条件不因此被清空。校验和规范化由 `src/core/model_contract.js`、`src/core/profile_schema.js`、`src/core/search_keyword_quality.js` 与 onboarding 用例负责。
 
-## SearchPlan
+## 岗位理解与匹配
 
-```json
-{
-  "directions": ["AI应用开发"],
-  "keywords": [
-    { "word": "RAG工程师", "priority": "A", "reason": "与项目证据直接对应" }
-  ],
-  "cities": [],
-  "salary": { "minK": 10, "maxK": 20 },
-  "experience": ["经验不限", "1-3年", "3-5年（可冲）"],
-  "jobTypes": ["全职"],
-  "allowExperienceStretch": true
-}
-```
+当前紧凑 JobUnderstanding 顶层包括 `industryContext`、`hiringTracks`、`requirements`、`eligibility` 和 `riskSignals`。招聘分支必须来自 JD 明确的独立招聘对象；一人承担多项职责不等于多个分支。职责及要求证据引用 JD 原句，不能用公司常识补出行业或工作内容。
 
-关键词优先级只允许 A/B/C。模型推荐只是草稿，用户保存后的方案才可扫描。城市为空时 UI 必须要求用户选择。
+匹配只对选中分支和真正的全局要求进行。默认 split 模式分别提取职责、要求及资格的候选人证据；省略的未知项由本地组合逻辑恢复，不把“没写”理解为“明确不会”。`matched/transferable` 要有简历依据，`missing` 要有明确不兼容事实；不同命名的工具或场景不能单独证明职责缺失。
 
-## JobUnderstanding
+最终四档是 `primary/apply/caution/not_recommended`，由当前本地策略产生；模型不计算最终分数。技术未完成使用 `recommendation=null`，不能冒充有效推荐。生产使用二维表及受限职责调整；连续积分影子实验没有取代它。精确字段和计算见 `src/core/model_contract.js`、`src/core/split_semantic_matching.js`、`src/core/job_analysis.js`、`src/core/four_tier_decision.js`、`src/core/decision_policy.js`。
 
-```json
-{
-  "jobId": "boss:job-id",
-  "realRoleType": "ai_application",
-  "businessScenario": "企业知识库与智能客服",
-  "coreRequirements": ["RAG 应用开发"],
-  "coreStack": ["Python", "FastAPI"],
-  "niceToHave": ["LangGraph"],
-  "senioritySignal": "junior_mid",
-  "eligibilityConstraints": [],
-  "hiddenRisks": [
-    { "type": "work_schedule_unknown", "severity": "low", "evidence": "JD 未说明工作制" }
-  ],
-  "isFakeAI": false,
-  "isTrainingOrSales": false,
-  "evidenceSnippets": ["负责企业知识库 RAG 链路开发"]
-}
-```
+## 消息组回复
 
-要求：
+输入包括当前完整简历 `currentResume`、画像、岗位、按顺序排列的本轮消息、当前有效事实、适用范围内的历史回答、已确认经历、平台、当前时间及独立的平台请求动作。当前简历优先于旧画像摘要，最新有效事实优先于旧口径。
 
-- 必须基于岗位完整内容识别真实角色，不因标题或搜索词直接判定。
-- `coreStack` 是岗位实现主栈；若 JD 明确以 C++/Golang/Java 为主，必须如实输出。
-- 风险必须带严重度和 JD 证据。
-- 卡片信息不完整时可以输出初步理解，但后续状态只能是 partial/review。
+输出包括意图、摘要、必要/已用事实键、逐项回应与覆盖情况、`missingFact`、最多两条完整备选草稿及进展；实际引用历史回答或经历时返回相应 ID。精确形状由 `src/core/message_reply_contract.js` 校验。
 
-## MatchDecision
+- 回答 HR 本轮真正的问题，用相关个人行动、方法、交付与结果组织文字。正常在职、薪资、到岗等问题有资料就回答，不能用隐私理由拒答。
+- 已提出具体面试时段时核对可用时间；问“什么时候方便”时提供已有有效时段，没有就向用户询问。不能只回答“有空”，也不能用到岗日期代替面试时间。
+- 简历邀请由独立平台动作承接，草稿只回答其余文字问题；不声称已发送，不承诺稍后发送，也不无故改走邮箱。
+- 明确拒绝不生成回复。公司介绍、面试系统等词语不自动等于邀约。
+- 关键事实确实缺失或过期时逐项向用户询问；`missingFact` 和可发送草稿不同时存在。已确认且对象一致的 GAP、离职或短期经历解释可以复用，无须每次重复确认。
+- 用户改写回答默认作用于原岗位的同类问题；明确设为跨岗后才跨岗参考。有效普通能力或经历可以通过确认资料复用，公司专属承诺不能泛化。
+- 内部资料保留真实分工；普通对外回答突出本人工作，不强制添加“团队成果”“不是我做的”等旁注。HR 直接问独立负责或归因时，再按事实回答。
 
-```json
-{
-  "recommendation": "apply",
-  "fitLevel": "A",
-  "confidence": 0.86,
-  "fitReasons": ["KnowledgeFlow 的 LangGraph 并行工作流对应岗位 Agent 编排要求"],
-  "missingPoints": [],
-  "blockingGaps": [],
-  "riskQuestions": ["团队是否双休"],
-  "recommendedResumeVersion": "ai_rag_agent",
-  "primaryProjects": ["KnowledgeFlow"],
-  "greetingAngle": "围绕 LangGraph 与质量闭环切入",
-  "evidence": {
-    "jd": ["使用 LangGraph 构建多 Agent 工作流"],
-    "resume": ["使用 StateGraph、Send 并行 fan-out"]
-  },
-  "hrPrep": {}
-}
-```
+`draftCommunication` 是旧人工工具与定制招呼语的契约，不等于消息同步主入口。消息草稿、用户采用和学习记录会保存在本地 SQLite；临时模型输入不写诊断日志，不表示草稿不持久化。生成或采用草稿都不自动授权平台发送。
 
-契约守卫：
+## 简历与面试输出
 
-- `recommendation` 只允许 `apply/caution/review/skip`。
-- `confidence` 必须为 0–1 数字。
-- `apply` 只能是 A/B，且必须有具体理由、JD 证据和简历证据。
-- `caution` 同样必须有双证据。
-- 明确核心技术栈、资格、届别等阻断缺口放入 `blockingGaps`，并强制 `skip`。
-- 中高风险、经验可冲或实施售前职责偏移不能保持 `apply`。
-- 置信度低于守卫阈值进入人工复核。
+简历通用模式不依赖 JD，专项模式只绑定选中的一份完整岗位。修改项使用唯一原文锚点、合法操作和已有证据 ID；原稿已清楚时允许零修改。应用后保留教育、时间线、公司、联系方式和项目身份，不能添加“相关经历”破坏学历结构，不能用能力标签替代具体做法。启用再次核对当前资料，保留原版本；启用不更新平台附件。契约在 `src/core/resume_optimization.js`。
 
-## CommunicationDraft
+面试包括通用能力与岗位适配两个入口，冻结本轮背景。每题须有真实简历依据，答题后给反馈，再自然追问或换主题；不把到岗、薪资、面试时间等 HR 登记作为主要能力题。点评按原题实际要求，不把可选案例当漏答，不为凑缺点要求多余分工说明或强制量化。复盘和重答保留原记录，示范答案不成为用户经历。契约在 `src/core/mock_interview.js`。
 
-```json
-{
-  "kind": "greeting",
-  "jobId": "boss:job-id",
-  "messages": ["您好，我在 KnowledgeFlow 中……"],
-  "missingFact": null,
-  "evidence": {
-    "jd": ["岗位具体要求"],
-    "resume": ["候选人具体项目证据"]
-  },
-  "tone": "自然、稳健、不夸大"
-}
-```
+## 失败、缓存与日志
 
-`kind` 只允许 `greeting/hr_reply/follow_up`，文案最多 2 条。招呼语和跟进必须有 JD 与简历双证据。
+结构化结果须通过各领域校验。一般契约失败允许有界修复；截断、JSON 模式不兼容、网络重试和输出扩容有各自条件与上限，不能把“一次修复”理解为整个任务永远只有一次额外 HTTP 请求。仍失败时保留已完成阶段和明确状态，不能用假数据冒充完成。
 
-缺少敏感事实时返回：
-
-```json
-{
-  "kind": "hr_reply",
-  "messages": [],
-  "missingFact": {
-    "key": "gap",
-    "question": "这段 GAP 期间你实际在做什么？"
-  },
-  "evidence": { "jd": [], "resume": [] },
-  "tone": "自然、稳健、不夸大"
-}
-```
-
-`missingFact` 与 `messages` 不能同时存在。用户回答以 `user_provided` 保存后才重新生成。
-
-## 失败、修复和缓存
-
-- 所有调用必须返回 JSON 对象并通过本地契约校验。
-- 结构不合格时允许一次明确的契约修复调用；仍失败则记录错误并进入待语义分析。
-- 缓存键包含调用种类、提供商、模型、契约版本和标准化输入哈希。
-- 缓存命中后仍重新执行当前契约校验；旧契约结果不能直接复用。
-- 岗位内容、画像、简历版本或分析版本变化时缓存自然失效。
-
-## 模型适配器与隐私
-
-真实适配器使用 OpenAI-compatible `/chat/completions`，支持 JSON mode；不支持时自动回退普通 JSON 提示。仅对短暂 5xx/网络错误做有限重试，不对鉴权、余额和模型名错误盲目重试。
-
-每个逻辑调用记录：kind、provider、model、缓存命中、延迟、尝试次数、HTTP 状态和 token 用量。日志不得包含 system prompt、输入、输出、简历、JD 或 Key。
-
-
-## draftMessageGroup（消息组回复草稿）
-
-独立于 `draftCommunication`，不修改既有匹配契约。
-
-输入：`profile`、`job`、`messages[{messageKey,text}]`、`facts[{key,value,subjectKey,updatedAt}]`、`requestedSubjectKeys`、相关的 `answerMemories` 与已确认的 `candidateEvidence`。
-
-输出 JSON：`messageCategory`、`messageSummary`、`requiredFactKeys`、`usedFactKeys`、`responseItems[{id,kind,required}]`、`coverage[{responseItemId,covered}]`、`missingFact`、`messages`（最多 2 条）、`progressUpdate`；可选 `usedEvidenceIds` 和 `responseStrategy{concern,focus}`。
-
-规则：
-
-- 有序消息视为同一轮 HR 问题，必须全部覆盖。
-- 只使用传入的已确认事实；缺失或过期事实时不输出草稿。
-- 不声称已经发送或投递简历；已确认的可用时间可以进入供用户审核的草稿，不等于替用户确认平台面试操作。
-- 面试邀约保留模型根据已知安排和用户资料生成的自然草稿；没有可用时间事实时询问安排，不猜测。salary/sensitive 只表示主题，不能作为普通求职问题的禁答理由。身份未确认仍不生成回复。
-- 同一次调用理解 HR 关注点并选择相关经历。用户缺少的事实逐项补充；保存已回答的信息，再生成草稿或询问下一项。
-- GAP、离职原因、短期项目解释必须有匹配 subjectKey 的稳定作用域事实。
-- `requestedSubjectKeys` 只包含当前消息正文能够明确定位的稳定事实作用域；不匹配的稳定事实会在模型调用前移除。作用域为空或无法确认时，不允许模型使用稳定事实生成草稿。
-- 提供商的 `nextAction` 不持久化，统一替换为安全提示。
-- 模型调用过程中的消息文本会在内存中及时清空，不写入诊断日志。通过校验并供用户审核的回复草稿会写入本地 SQLite 的 `message_reply_drafts`，以便重启后继续编辑、确认或关闭；不能把“模型调用临时文本清空”理解为草稿不持久化。
+缓存包含模型身份、分析版本和标准化输入；命中后仍按当前规则校验。相关简历、岗位、方案、资料或契约变化会按各流程使旧结果失效。日志只记录任务种类、模型、耗时、错误码、重试及 token 等诊断元数据，不保存输入、输出、JD、简历或 Key。当前传输与提示实现位于 `src/adapters/models/structured.js` 和 `src/adapters/models/openai_transport.js`。

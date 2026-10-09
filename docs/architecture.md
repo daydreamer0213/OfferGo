@@ -1,6 +1,6 @@
 # OfferGo 当前架构
 
-核对日期：2026-10-02。本文描述架构边界收口后的源码；后续改动应同步更新相关段落。2026-09-16 的[早期架构审查](superpowers/reports/2026-09-16-architecture-review.md)保留当时的判断和数字，不代表当前状态。
+核对日期：2026-10-09，功能基线为 v1.4.1（`19dd6b1`）。本文描述当前源码；后续改动应同步更新相关段落。2026-09-16 的[早期架构审查](superpowers/reports/2026-09-16-architecture-review.md)保留当时的判断和数字，不代表当前状态。
 
 ## 先看整体
 
@@ -45,9 +45,9 @@ flowchart LR
 
 ## 已有的护栏
 
-`architecture-boundaries.json` 和 `scripts/check-architecture-boundaries.js` 检查静态 CommonJS 引用、文件循环、新的跨层调用、已消失却未删除的例外，以及 Dashboard/application 中的直接 SQL。本次收口后的检查结果为 **620 条内部引用、无文件循环**。这是一道快速护栏，不代表它能证明所有运行时行为正确；功能仍需要离线回归测试。
+`architecture-boundaries.json` 和 `scripts/check-architecture-boundaries.js` 检查静态 CommonJS 引用、文件循环、新的跨层调用、已消失却未删除的例外，以及 Dashboard/application 中的直接 SQL。2026-10-09 的检查结果为 **655 条内部引用、无文件循环**。这是一道快速护栏，不代表它能证明所有运行时行为正确；功能仍需要离线回归测试。
 
-当前测试清单在 `tests/test_manifest.js` 注册 **183 项**，分成 fast 37、integration 141、package 5；完整门禁使用 `npm test`，发布门禁使用 `npm run test:release`。这个数字属于本次核对时的清单，不应套用到后续提交。
+当前测试清单在 `tests/test_manifest.js` 注册 **195 项**，分成 fast 40、integration 150、package 5；完整门禁使用 `npm test`，发布门禁使用 `npm run test:release`。严格门禁需要独立的测试浏览器依赖；CI 与发布流程均已准备，并实际执行页面检查。这个数字属于本次核对时的清单，不应套用到后续提交。
 
 ### 43 条跨层例外如何理解
 
@@ -65,6 +65,8 @@ flowchart LR
 合计 43 条。保留必要兼容与运行组装，比为了“零例外”制造额外转发层更稳妥。
 
 ## 本轮已处理与后续判断
+
+消息回复、面试和简历优化通过各自 application 用例读取当前简历、有效事实、适用范围内的历史回答与用户确认的经历。共用的是明确的资料接口，不是让三个模块互相调用；面试会话冻结当轮背景，后续新任务才读取新确认的资料。生成内容、用户采用、事实提取和平台发送各有状态，某个学习步骤失败不能抹掉已保存回答或伪装成发送失败。
 
 1. 消息发现的草稿质量编排现由 `src/application/message_discovery/run.js` 注入；`src/core/message_discovery.js` 不再反向引用 application。BOSS 和智联共用的草稿行为保持不变。
 2. CLI 的 `reassess-batch` 现调用 `src/application/analysis/reassess_batch.js` 完成方案校验和分析编排；CLI 保留参数、模型运行环境、日志与输出。其他旧命令仍按实际职责逐项判断，不做全量迁移。

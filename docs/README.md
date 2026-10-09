@@ -18,6 +18,22 @@
 - [`../README.md`](../README.md)：项目定位、安装方式、主要能力和快速开始。
 - [`releases/v1.4.1.md`](releases/v1.4.1.md)：主题按钮重叠修复；公开状态以 GitHub Release 为准。
 - [`releases/v1.4.0.md`](releases/v1.4.0.md)：OfferGo 名称、双平台找岗、消息、简历和面试改进的正式版本说明。
+- [`product_spec.md`](product_spec.md)：产品边界、用户流程和功能规格。
+- [`architecture.md`](architecture.md)：当前分层、普通用户与 Agent 共用流程、已建立的护栏和仍需逐项处理的依赖。
+- [`lifecycle.md`](lifecycle.md)：扫描、工作流、分析、沟通和消息发送的状态负责人、恢复结果与事务边界。
+- [`daily_workflow.md`](daily_workflow.md)：每日扫描、模型分析、清单确认和批量沟通逻辑。
+- [`onboarding_workflow.md`](onboarding_workflow.md)：模型配置、简历解析、画像与筛选方案首次使用流程。
+- [`agent-operation.md`](agent-operation.md)：Agent 不打开前端、不填写 Key，直接通过 CLI 和 stdio 协议运行项目。
+- [`llm_contracts.md`](llm_contracts.md)：画像、岗位理解、分开匹配、消息学习、简历优化和面试任务的当前模型契约。
+- [`resume_and_feedback_workflow.md`](resume_and_feedback_workflow.md)：简历版本、消息回复学习、确认经历及平台简历动作。
+- [`frontend-ux-principles.md`](frontend-ux-principles.md)：按用户当前任务取舍信息、自然展示与体验验收的依据；不是所有页面都已达标的证明。
+- [`roleflow-decision-matrix.md`](roleflow-decision-matrix.md)、[`roleflow-terminology.md`](roleflow-terminology.md)：当前四档判断、职责和要求门槛，历史变化单列。
+- [`superpowers/reports/2026-10-09-documentation-reconciliation.md`](superpowers/reports/2026-10-09-documentation-reconciliation.md)：本次全仓文档核对范围、修正项及验证记录。
+- [`operations.md`](operations.md)：日志、错误码、恢复和排错方法。
+- [`release_boundary.md`](release_boundary.md)：安装包、隐私数据和外部操作边界。
+
+## 历史记录
+
 - [`releases/v1.3.2.md`](releases/v1.3.2.md)：旧名称 RoleFlow v1.3.2 的历史版本说明。
 - [`superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md`](superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md)：v1.3.2 精确版本发布、目录问题诊断和两轮人工验收环境准备回执。
 - [`releases/v1.3.1.md`](releases/v1.3.1.md)：已发布 v1.3.1 的历史版本说明。
@@ -27,17 +43,6 @@
 - [`releases/v1.2.1.md`](releases/v1.2.1.md)：已发布 v1.2.1 的历史版本说明；不代表当前正式版。
 - [`releases/v1.2.0.md`](releases/v1.2.0.md)：已发布 v1.2.0 的历史版本说明；不代表当前 source candidate。
 - [`releases/v1.0.0.md`](releases/v1.0.0.md)：已发布 v1.0.0 的历史版本说明；不代表当前 source candidate。
-- [`product_spec.md`](product_spec.md)：产品边界、用户流程和功能规格。
-- [`architecture.md`](architecture.md)：当前分层、普通用户与 Agent 共用流程、已建立的护栏和仍需逐项处理的依赖。
-- [`lifecycle.md`](lifecycle.md)：扫描、工作流、分析、沟通和消息发送的状态负责人、恢复结果与事务边界。
-- [`daily_workflow.md`](daily_workflow.md)：每日扫描、模型分析、清单确认和批量沟通逻辑。
-- [`onboarding_workflow.md`](onboarding_workflow.md)：模型配置、简历解析、画像与筛选方案首次使用流程。
-- [`agent-operation.md`](agent-operation.md)：Agent 不打开前端、不填写 Key，直接通过 CLI 和 stdio 协议运行项目。
-- [`llm_contracts.md`](llm_contracts.md)：简历、岗位理解、匹配和沟通草稿的模型契约。
-- [`operations.md`](operations.md)：日志、错误码、恢复和排错方法。
-- [`release_boundary.md`](release_boundary.md)：安装包、隐私数据和外部操作边界。
-
-## 历史记录
 
 - [`superpowers/reports/2026-10-08-deep-effect-acceptance.md`](superpowers/reports/2026-10-08-deep-effect-acceptance.md)：全模块独立效果标准、真实合成资料输出、修复与未验证范围；不代表真实招聘平台验收或新安装版发布。
 
@@ -52,6 +57,7 @@
 - `communication_live_acceptance.md`
 - [`PROJECT_HANDOFF_2026-09-10.md`](PROJECT_HANDOFF_2026-09-10.md)：9 月 10 日交接原文，保留当时分支和验收状态。
 - [`NEXT_PHASE_2026-09-10.md`](NEXT_PHASE_2026-09-10.md)：9 月 10 日主控索引原文，不代表当前待办。
+- `prototypes/roleflow-dashboard/`：早期页面原型，保留设计过程，不代表当前 OfferGo 页面。
 - `superpowers/plans/`
 - `superpowers/specs/`
 - `superpowers/reports/`

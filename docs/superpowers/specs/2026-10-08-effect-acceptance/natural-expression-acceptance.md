@@ -1,5 +1,7 @@
 # 自然能力表达：实施与效果验收
 
+> **完成状态补记（2026-10-09）。** 自然表达实现冻结于 `9d6a26b`，195 项离线检查与同 SHA CI 成功；15 项真实模型样本及 Edge 合成资料走查的范围见下文。后续正式发布 [v1.4.1](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1) 的冻结提交为 `19dd6b1`，当前桌面验收入口已切换至该版本。下文保留实施各阶段原始记录，其中旧桌面版本与待执行表述只反映当时状态。没有新增真实 HR 发送验收。
+
 2026-10-09。基线 `1df75ea`；最终提交、离线门禁和 CI 结果在生成后记录于 `D:/DevData/OfferGo-validation/2026-10-09/natural-expression/completion.json`。
 
 ## 实际改动

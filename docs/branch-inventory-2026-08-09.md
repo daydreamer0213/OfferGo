@@ -1,5 +1,7 @@
 # Branch inventory — 2026-08-09
 
+> **历史记录。** 本文保留标题所示阶段的代码、问题与验证结果，不代表当前版本仍存在这些问题或仍采用这些测试数量。当前版本状态见仓库的 `docs/PROJECT_HANDOFF.md`，当前运行机制见 `docs/architecture.md` 与 `docs/lifecycle.md`；这些维护文档不一定随安装包提供。
+
 ## 结论
 
 - 盘点时共有 52 个本地分支、33 个 worktree。

@@ -12,7 +12,7 @@
 ## Agent 的执行顺序
 
 1. 把仓库和临时数据放到 `D:`，例如仓库 `D:\DevData\OfferGo`、数据 `D:\DevData\OfferGo-user-data`。
-2. 运行 `npm ci` 和 `npm test`。离线检查通过后再使用真实资料。
+2. 源码仓库使用 Node.js 22.23.1，运行 `npm ci` 和 `npm test`；需要页面检查时按仓库贡献指南准备独立 Playwright 依赖。正式便携包已经带运行时与生产依赖，不需要重新安装依赖，也未带开发测试。运行前检查所需环境，不启动嵌套 Agent。
 3. 每次开始使用时都可以用绝对路径运行准备命令：
 
    ```powershell

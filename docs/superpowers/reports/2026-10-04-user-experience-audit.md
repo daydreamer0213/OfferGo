@@ -158,13 +158,15 @@
 
 全部浏览器结果、模拟数据库、页面文本、截图和复现脚本：
 
-[D 盘验收证据目录](D:/DevData/OfferGo-validation/2026-10-04/ux-journey)。
+D 盘验收证据目录：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey`。
 
-- [页面走查结果](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/ux-results.json)：18 个计划页面状态，17 个完成截图及记录；另有一次面试截图超时。
-- [编辑与切页结果](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/interaction-results.json)。
-- [地点、窄窗口与颜色核对](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/detail-results.json)。
-- [启用版本到版本管理的路径](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/version-path-results.json)。
-- [训练中深色截图](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/verified-interview-dark.png)。
-- [完成复盘深色截图](D:/DevData/OfferGo-validation/2026-10-04/ux-journey/13-interview-dark.png)。
+- 页面走查结果：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/ux-results.json`：18 个计划页面状态，17 个完成截图及记录；另有一次面试截图超时。
+- 编辑与切页结果：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/interaction-results.json`。
+- 地点、窄窗口与颜色核对：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/detail-results.json`。
+- 启用版本到版本管理的路径：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/version-path-results.json`。
+- 训练中深色截图：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/verified-interview-dark.png`。
+- 完成复盘深色截图：`D:/DevData/OfferGo-validation/2026-10-04/ux-journey/13-interview-dark.png`。
 
 本轮源代码未修改，未运行完整产品门禁，也未提交或推送。下一部分为上述已核实问题的实施与复验，不把本报告当作发布验收。
+
+> 以上 D 盘路径为当时本机保存的历史证据位置，不是仓库附件；若本机已清理或迁移，应从归档恢复，不能据路径存在与否推断当前版本是否通过验收。

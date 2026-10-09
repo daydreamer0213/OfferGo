@@ -46,4 +46,6 @@
 
 全部验证使用 D 盘匿名数据库与隔离浏览器，没有修改真实用户数据，也没有发送招聘平台消息。本轮完成的是代码修复与验证，未更新桌面安装包。
 
-完整证据目录：[本轮验证记录](D:/DevData/OfferGo-validation/2026-10-04/three-module-review-closure)。其中包含 `final-whole-review.md`、`content-acceptance-review.md`、页面结果与截图、`full-release-gate.log` 及冻结版本元数据。
+完整证据目录：本轮验证记录：`D:/DevData/OfferGo-validation/2026-10-04/three-module-review-closure`。其中包含 `final-whole-review.md`、`content-acceptance-review.md`、页面结果与截图、`full-release-gate.log` 及冻结版本元数据。
+
+> 以上 D 盘路径为当时本机保存的历史证据位置，不是仓库附件；若本机已清理或迁移，应从归档恢复，不能据路径存在与否推断当前版本是否通过验收。
