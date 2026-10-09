@@ -1,10 +1,10 @@
 # OfferGo
 
-[![Release: v1.3.2](https://img.shields.io/badge/release-v1.3.2-2563eb)](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2)
+[![Release: v1.4.0](https://img.shields.io/badge/release-v1.4.0-2563eb)](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0)
 [![CI](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml/badge.svg)](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-0f766e)](LICENSE)
 
-OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。当前仓库源码负责解析简历、生成候选人画像和搜索方案、只读发现 BOSS 与智联岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单。公开 v1.3.2 安装包的能力以本页下方发布状态和[版本说明](docs/releases/v1.3.2.md)为准。
+OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。它负责解析简历、生成候选人画像和搜索方案、只读发现 BOSS 与智联岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单，也支持消息回复、简历优化和面试训练。本版变化见 [v1.4.0 版本说明](docs/releases/v1.4.0.md)。
 
 OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动，同一套采集、分析、去重和排序流程可以用于不同求职方向。
 
@@ -14,11 +14,11 @@ OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动
 
 ## 发布状态
 
-目前公开的 `v1.3.2` 安装器仍使用旧名称 RoleFlow 和猴子图标。本仓库已更名为 OfferGo，新的小狗图标会随下一次安装包发布。已有用户资料仍保存在 `%LOCALAPPDATA%\RoleFlow`，升级会沿用这个目录。
+v1.4.0 使用 OfferGo 名称和小狗图标。已有用户资料仍保存在 `%LOCALAPPDATA%\RoleFlow`，升级会沿用这个目录。
 
-普通用户目前以 [v1.3.2 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2) 的公开安装器为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
+普通用户以 [v1.4.0 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0) 的公开安装器为准，发布状态与文件以该页为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
 
-v1.3.2 默认使用“RoleFlow 专用 Edge（推荐）”。本版修复后台焦点模拟的连接生命周期与异常清理，补齐点击和请求状态的脱敏诊断，沟通未确认时不再断言平台没有响应。此前首次页面准备、安装目录选择、结束本轮、兼职/空薪资、消息学习、跟进、岗位归档/导出与简历优化能力保留。
+v1.4.0 默认使用“OfferGo 专用 Edge（推荐）”。本版包含双平台找岗、搜索条件同步、统一消息处理、共享已确认资料，以及简历优化和面试训练的效果改进；启动窗口显示准备进度，日常从应用图标进入。
 
 ## 核心能力
 
@@ -30,7 +30,7 @@ v1.3.2 默认使用“RoleFlow 专用 Edge（推荐）”。本版修复后台�
 - 按 48 小时和周末顺延规则分析 30/50/70 档求职反馈；策略改变后开启新轮，不混用修改前后的投递数据。
 - 整理整份简历，也可针对选中的岗位调整；面试训练支持通用能力和单岗位练习，用户确认过的真实经历可用于后续回复与简历优化。
 - 沟通前必须由用户确认清单；登录失效、页面漂移或结果不明确时停止操作。
-- v1.3.2 发布线注册 144 项离线检查，含两个本地标签页的实际 Edge 焦点生命周期回归；标签发布会在精确版本提交上重新执行全部检查。测试不访问真实 BOSS，也不会创建假的 `msedge.exe`。
+- v1.4.0 发布线注册 195 项离线检查，要求实际本地浏览器检查；标签发布在精确版本提交上执行完整门禁。测试不访问真实 BOSS，也不会创建假的 `msedge.exe`。
 
 OfferGo 每天最多由用户手动启动三轮任务，前两轮是主要工作轮次，第三轮只在候选库存明显不足时追加。每轮都要经过清单确认才会串行点击沟通；不会后台定时运行，也不会绕过用户确认直接执行。
 
@@ -38,26 +38,26 @@ OfferGo 每天最多由用户手动启动三轮任务，前两轮是主要工作
 
 Windows 普通用户：
 
-> **请前往 [v1.3.2 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.3.2)，下载 `RoleFlow-Setup-1.3.2.exe`。**
+> **请前往 [v1.4.0 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0)，下载 `OfferGo-Setup-1.4.0.exe`。**
 >
-> 同页的 `RoleFlow-Setup-1.3.2.exe.sha256` 用于核对文件完整性；GitHub 自动生成的 Source code 压缩包不是安装程序。
+> 同页的 `OfferGo-Setup-1.4.0.exe.sha256` 用于核对文件完整性；GitHub 自动生成的 Source code 压缩包不是安装程序。
 
 安装后的日常路径如下：
 
-1. 运行安装器，选择程序安装目录；完成后从桌面或开始菜单的猴子图标启动 RoleFlow。默认会准备“RoleFlow 专用 Edge（推荐）”，不需要 Edge Control。只有使用便携包时，才先运行 `Install.bat`，再双击 `Start.bat`。
-   程序目录建议使用固定名称，例如 `D:\Apps\RoleFlow`，不用加版本号；升级会沿用上次选择的目录。旧目录名含 `v1.2.0` 不代表里面仍是旧版本，也不会随升级自动改名。换程序目录不会清空下述用户资料。
-2. 第一次在“RoleFlow 专用 Edge（推荐）”中登录 BOSS。登录资料保存在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，覆盖升级或更换安装目录后仍会复用；不要把这个目录放进发布包或提交到 Git。
-3. 在同一个“RoleFlow 专用 Edge（推荐）”窗口保留一个 `BOSS-SEARCH` 搜索页和一个 `BOSS-COMMUNICATION` 沟通页。启动助手可在就绪检查后引导一次前台；此后的扫描、JD 读取、分析、消息发现和沟通都保持后台。
-4. 在“模型设置”选择 DeepSeek、通义千问、OpenAI 或自定义兼容接口，填写 Key，并执行“测试连接并保存”。
+1. 运行安装器，选择程序安装目录；完成后从桌面或开始菜单的小狗图标启动 OfferGo。默认会准备“OfferGo 专用 Edge（推荐）”，不需要 Edge Control。只有使用便携包时，才先运行 `Install.bat`，再双击 `Start.bat`。
+   程序目录建议使用固定名称，例如 `D:\Apps\OfferGo`，不用加版本号；升级会沿用上次选择的目录。旧目录名含 `v1.2.0` 不代表里面仍是旧版本，也不会随升级自动改名。换程序目录不会清空下述用户资料。
+2. 在“招聘平台”选择 BOSS、智联或两个平台，第一次在“OfferGo 专用 Edge（推荐）”中登录所选平台。登录资料保存在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，覆盖升级或更换安装目录后仍会复用；不要把这个目录放进发布包或提交到 Git。
+3. 工作区按平台选择准备搜索页和消息页；使用 BOSS 时，在同一窗口保留一个 `BOSS-SEARCH` 搜索页和一个 `BOSS-COMMUNICATION` 沟通页。启动助手可在就绪检查后引导一次前台；此后的扫描、JD 读取、分析、消息发现和沟通都保持后台。
+4. 在“模型与设置”选择 DeepSeek、通义千问、OpenAI 或自定义兼容接口，填写 Key，并执行“测试连接并保存”。
 5. 上传 TXT、MD、DOCX、PDF 简历，检查候选人画像和搜索方案，手工选择求职城市并保存方案。
-6. RoleFlow 会只读检查登录、风控、窗口归属和页面身份；失败时停止并给出处理建议，不会自动切换浏览器。消息发现优先复用本地完整 JD；只有新会话缺少完整可信 JD 时，才允许串行打开一个同窗口、`active: false` 的后台临时详情页，检查并保存后立即关闭。
+6. OfferGo 会只读检查登录、风控、窗口归属和页面身份；失败时停止并给出处理建议，不会自动切换浏览器。消息发现优先复用本地完整 JD；只有新会话缺少完整可信 JD 时，才允许串行打开一个同窗口、`active: false` 的后台临时详情页，检查并保存后立即关闭。
 7. 只有明确要复用日常 Edge 时，才使用高级模式。下列命令仅适用于源码或便携包，普通安装版继续使用推荐的专用 Edge：
 
    ```text
    Start.bat -BrowserMode edge
    ```
 
-   “使用当前 Edge（高级，需要浏览器连接组件）”要求现有 Edge Control 扩展与桥接健康；公开 v1.3.2 的“RoleFlow 专用 Edge（推荐）”失败时绝不会自动回退到该模式。
+   “使用当前 Edge（高级，需要浏览器连接组件）”要求现有 Edge Control 扩展与桥接健康；“OfferGo 专用 Edge（推荐）”失败时绝不会自动回退到该模式。
 8. 登录成功不会自动扫描；扫描完成后仍需用户确认清单并明确点击“开始沟通”。回复消息则由用户修改或确认草稿后点击“确认发送”；程序不会在未经当前目标授权的情况下沟通、发送或投递，也不会放宽首次校准和批次确认要求。
 
 模型不可用时，历史岗位和投递记录仍可查看；简历解析和语义匹配会明确显示为待处理，不会伪装成模型结论。
@@ -226,7 +226,7 @@ node tests/job_match_benchmark.js --live
 - `docs/remediation_plan.md`：历史整改计划，不代表当前待办。
 - `docs/llm_contracts.md`：模型输入输出契约。
 - `docs/operations.md`：日志、错误码和排错流程。
-- `docs/release_boundary.md`：当前源码后续打包与隐私边界；已公开 v1.3.2 以版本说明为准。
+- `docs/release_boundary.md`：v1.4.0 安装包、用户资料与外部操作边界。
 - `docs/two-run-workflow-validation.md`：历史双轮方案，仅作为旧版验收记录。
 
 ## 主要目录

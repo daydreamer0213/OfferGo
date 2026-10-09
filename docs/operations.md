@@ -35,7 +35,7 @@
 
 ## 浏览器登录资料
 
-- 当前源码默认入口是“OfferGo 专用 Edge（推荐）”；公开 v1.3.2 安装版仍显示“RoleFlow 专用 Edge（推荐）”。两者默认都不需要 Edge Control。登录资料固定在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，覆盖升级或更换程序安装目录后继续复用。
+- v1.4.0 默认入口是“OfferGo 专用 Edge（推荐）”，不需要 Edge Control。登录资料固定在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`，覆盖升级或更换程序安装目录后继续复用。
 - 标准安装版的 `data\jobs.sqlite`、简历、模型设置、日志和报告位于 `%LOCALAPPDATA%\RoleFlow\Data`，与程序目录分离。便携版或显式 `--data-root` 运行分别使用自己的数据目录，不能把换目录当成资料自动合并。
 - “使用当前 Edge（高级，需要浏览器连接组件）”是显式高级模式；源码或便携版可运行 `Start.bat -BrowserMode edge`，并要求已有 Edge Control 扩展与桥接健康。推荐的专用 Edge 失败时绝不自动回退。
 

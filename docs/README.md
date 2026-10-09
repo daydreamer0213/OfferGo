@@ -16,7 +16,8 @@
 - [`offergo-project-map.md`](offergo-project-map.md)：从用户全程、两种入口、找岗、消息、恢复和数据去向理解当前源码；初次了解项目建议先看这一页。
 - [`offergo-product-module-flows.md`](offergo-product-module-flows.md)：各页面和消息分支的详细流程图，供查看某一模块时使用。
 - [`../README.md`](../README.md)：项目定位、安装方式、主要能力和快速开始。
-- [`releases/v1.3.2.md`](releases/v1.3.2.md)：本次 v1.3.2 发布的用户变化、验证边界和下载文件说明；公开状态以 GitHub Release 为准。
+- [`releases/v1.4.0.md`](releases/v1.4.0.md)：OfferGo v1.4.0 的用户变化、验证边界和下载文件说明；公开状态以 GitHub Release 为准。
+- [`releases/v1.3.2.md`](releases/v1.3.2.md)：旧名称 RoleFlow v1.3.2 的历史版本说明。
 - [`superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md`](superpowers/reports/2026-09-04-v1.3.2-release-acceptance.md)：v1.3.2 精确版本发布、目录问题诊断和两轮人工验收环境准备回执。
 - [`releases/v1.3.1.md`](releases/v1.3.1.md)：已发布 v1.3.1 的历史版本说明。
 - [`superpowers/reports/2026-09-04-v1.3.1-release-acceptance.md`](superpowers/reports/2026-09-04-v1.3.1-release-acceptance.md)：v1.3.1 磁盘清理、精确版本发布和新用户模拟验收回执，不代表 v1.3.2 验收结果。

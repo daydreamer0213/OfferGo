@@ -45,6 +45,8 @@ foreach ($name in @("sample_jobs.json", "sample_resume.txt")) {
 foreach ($name in @("README.md", "LICENSE", "NOTICE", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "package.json", "package-lock.json", "run.ps1", "Install.bat", "Start.bat", "BuildRelease.bat", "ScanPortable.bat", "StartPortableEdge.bat", ".gitignore")) {
   Copy-Item -LiteralPath (Join-Path $ProjectRoot $name) -Destination (Join-Path $StageDir $name) -Force
 }
+# A portable user's guide must not link to unstaged maintainer documents.
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\portable-user-guide.md") -Destination (Join-Path $StageDir "README.md") -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $StageDir "assets") | Out-Null
 foreach ($name in @("OfferGo.ico", "OfferGo-icon.png")) {
   Copy-Item -LiteralPath (Join-Path $ProjectRoot "assets\$name") -Destination (Join-Path $StageDir "assets\$name") -Force
@@ -72,6 +74,8 @@ foreach ($name in @(
   Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\$name") -Destination (Join-Path $StageDocsDir $name) -Force
 }
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\releases") -Destination (Join-Path $StageDocsDir "releases") -Recurse -Force
+& $Node (Join-Path $ProjectRoot "tests\helpers\package_document_closure.js") $StageDir
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($IncludePortableNode) {
   $portableNode = Join-Path $RuntimeDir "node"

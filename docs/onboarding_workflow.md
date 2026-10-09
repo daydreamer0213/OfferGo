@@ -28,7 +28,7 @@
 
 ## 第一次启动浏览器
 
-1. 当前源码构建的安装版点击桌面或开始菜单图标；源码或便携版才双击 `Start.bat`。当前仓库源码默认启动“OfferGo 专用 Edge（推荐）”，公开 v1.3.2 安装版仍显示“RoleFlow 专用 Edge（推荐）”。默认路径不需要 Edge Control。
+1. v1.4.0 安装版点击桌面或开始菜单的小狗图标；源码或便携版才双击 `Start.bat`。默认启动“OfferGo 专用 Edge（推荐）”，不需要 Edge Control。
 2. 在“招聘平台”选择要使用的 BOSS、智联或两者，并在专用 Edge 登录所选平台。工作区会准备所需的搜索页和消息页；BOSS 固定基线是同一窗口中的 `BOSS-SEARCH` 与 `BOSS-COMMUNICATION`。页面未就绪时按工作区提示恢复。
 3. 浏览器登录资料保存在 `%LOCALAPPDATA%\RoleFlow\BrowserProfile`。标准安装版的数据库、简历、模型设置、日志和报告另存于 `%LOCALAPPDATA%\RoleFlow\Data`，均独立于程序目录；便携版或显式指定数据目录的运行方式按其启动参数保存。
 4. 启动助手可在就绪检查后引导一次前台；完成启动后，扫描、JD 读取、分析、消息发现和沟通都在后台运行。
