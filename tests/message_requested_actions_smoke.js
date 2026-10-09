@@ -51,6 +51,24 @@ const externalChannel = deriveRequestedActions({
 assert.deepStrictEqual(externalChannel.requestedActions, [], "an explicit external channel must not become an in-platform send action");
 assert.deepStrictEqual(externalChannel.replyMessages, [{ messageKey: "m5", text: "请把简历发到 hr@example.com" }]);
 
+const recruitingInvitation = "你好，公司最近在积极寻找新伙伴，如果你感兴趣，可以发送简历聊聊看～";
+const invitationOnly = deriveRequestedActions({
+  platform: "zhaopin", messages: [{ messageKey: "live-invitation", text: recruitingInvitation }],
+  manualActions: [{ kind: "resume_request" }]
+});
+assert.deepStrictEqual(invitationOnly.replyMessages, [],
+  "recruiting preamble around a resume invitation must not generate a new interest-check reply");
+assert.deepStrictEqual(deriveRequestedActions({ platform: "boss",
+  messages: [{ messageKey: "live-boss", text: "08:50你好！方便发简历？" }]
+}).replyMessages, [], "the BOSS display timestamp must not turn a greeting into a separate HR question");
+for (const question of ["期望薪资多少？", "明天下午三点有空面试吗？", "知识库项目是你独立做的吗？"]) {
+  const mixedInvitation = deriveRequestedActions({ platform: "zhaopin",
+    messages: [{ messageKey: "live-mixed", text: `${recruitingInvitation}。${question}` }],
+    manualActions: [{ kind: "resume_request" }] });
+  assert.deepStrictEqual(mixedInvitation.replyMessages, [{ messageKey: "live-mixed", text: question }],
+    "a real question accompanying a resume invitation must be preserved");
+}
+
 const historicalRequest = findPendingResumeRequest({
   platform: "boss",
   events: [

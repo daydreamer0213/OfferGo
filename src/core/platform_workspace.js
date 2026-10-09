@@ -120,6 +120,15 @@ async function ensureRoleTab({ browser, tabs, openerTab, previousTabId, site, ro
   const existing = chooseTab(candidates);
   if (existing) return requireWindowIdentity(existing);
 
+  if (typeof browser.restoreDormantTabs === "function") {
+    await browser.restoreDormantTabs({ windowIds: [openerTab.windowId],
+      matchesUrl: url => matchesRole({ url }, site, role, { allowRuntimePath: role === "search" }) });
+    const restoredTabs = await browser.listTabs();
+    const restored = chooseTab(restoredTabs.filter(tab => tab.windowId === openerTab.windowId
+      && matchesRole(tab, site, role, { allowRuntimePath: role === "search" })));
+    if (restored) return requireWindowIdentity(restored);
+  }
+
   const definition = PLATFORM_WORKSPACE_DEFINITIONS[site];
   const url = role === "search" ? definition.searchUrl : definition.messageUrl;
   const tabId = await browser.createTab(openerTab.id, url);

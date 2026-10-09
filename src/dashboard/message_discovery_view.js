@@ -69,7 +69,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
     "BOSS_MESSAGE_TARGET_MISMATCH", "BOSS_MESSAGE_DETAIL_TARGET_MISMATCH"
   ]);
   const pageReasonCodes = [status.reasonCode, ...(status.platformRuns || [])
-    .filter(entry => ["needs_user_action", "stopped"].includes(entry.status)).map(entry => entry.reasonCode)]
+    .filter(entry => ["needs_user_action", "stopped", "not_connected"].includes(entry.status)).map(entry => entry.reasonCode)]
     .filter(code => code && !itemReasonCodes.has(code));
   const reason = [...new Set(pageReasonCodes)].map(messageDiscoveryReasonText).join(" ");
   const showPageReason = status.status !== "running" && Boolean(reason);
@@ -668,6 +668,8 @@ function messageDiscoveryRecoveryMessages() {
   const browserUnavailable = "无法连接 Edge 或读取消息页。请确认 Edge 和本地浏览器控制可用后重试。";
   const verifyIdentity = "无法确认本地岗位与会话是否一致。请在人工粘贴流程中核对后处理。";
   return {
+    BOSS_MESSAGE_TAB_UNAVAILABLE: "BOSS 消息页暂未连接，本轮尚未完成。重新同步会尝试后台恢复；已读取的消息仍保留。",
+    ZHAOPIN_MESSAGE_TAB_UNAVAILABLE: "智联消息页暂未连接，本轮尚未完成。重新同步会尝试后台恢复；已读取的消息仍保留。",
     ZHAOPIN_MESSAGE_CONTENT_PENDING: "这条会话的消息还没有加载完成，已保留待重试。稍后可重新开始只读发现。",
     ZHAOPIN_MESSAGE_CONTENT_UNSUPPORTED: "这条消息包含暂时无法读取的内容，已保留并会在后续同步中继续识别。",
     ZHAOPIN_MESSAGE_STRUCTURE_CHANGED: "智联消息页面暂时无法可靠读取，已保留待重试。",

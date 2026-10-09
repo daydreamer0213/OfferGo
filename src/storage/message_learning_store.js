@@ -49,6 +49,20 @@ function getMessageReplyDraft(db, { profileId, draftId } = {}) {
   return row ? mapDraft(row) : null;
 }
 
+function replaceUneditedMessageReplyDraft(db, { profileId, draftId, text, now = nowIso() } = {}) {
+  const value = draftText(text);
+  const profile = positiveInteger(profileId, "profileId");
+  const id = positiveInteger(draftId, "draftId");
+  return Number(db.prepare(`UPDATE message_reply_drafts
+    SET original_text = ?, current_text = ?, revision = revision + 1, updated_at = ?
+    WHERE id = ? AND profile_id = ? AND revision = 0 AND closed_at IS NULL
+      AND current_text = original_text AND current_text <> ?
+      AND NOT EXISTS (SELECT 1 FROM candidate_answer_memories WHERE draft_id = message_reply_drafts.id)
+      AND NOT EXISTS (SELECT 1 FROM message_reply_send_items WHERE draft_id = message_reply_drafts.id
+        AND status IN ('pending', 'selecting', 'verified', 'filled', 'click_dispatched', 'ambiguous', 'succeeded'))`)
+    .run(value, value, isoText(now, "now"), id, profile, value).changes);
+}
+
 function listOpenMessageReplyDrafts(db, { profileId, cardId = null, limit = 100 } = {}) {
   const profile = positiveInteger(profileId, "profileId");
   const card = optionalPositiveInteger(cardId, "cardId");
@@ -874,6 +888,7 @@ function storeTransaction(db, work) {
 
 module.exports = {
   recordMessageReplyDrafts,
+  replaceUneditedMessageReplyDraft,
   getMessageReplyDraft,
   listOpenMessageReplyDrafts,
   messageReplyDraftExists,

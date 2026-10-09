@@ -40,6 +40,24 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   assert.strictEqual(noSelectionResult.status, "platform_selection_required");
   assert.deepStrictEqual(noSelection.state.createCalls, []);
 
+  const sleeping = browserFixture([dashboard]);
+  const sleepingTabs = [
+    { id: "original-search", url: "https://www.zhipin.com/web/geek/jobs?city=101280100&query=AI", windowId: 7, active: false },
+    { id: "original-chat", url: "https://www.zhipin.com/web/geek/chat", windowId: 7, active: false }
+  ];
+  sleeping.restoreDormantTabs = async ({ windowIds, matchesUrl }) => {
+    assert.deepStrictEqual(windowIds, [7]);
+    const recovered = sleepingTabs.filter(tab => matchesUrl(tab.url));
+    sleeping.state.tabs.push(...recovered);
+    return recovered.map(tab => tab.id);
+  };
+  const sleepingResult = await preparePlatformWorkspaceTabs({ browser: sleeping,
+    dashboardUrl: dashboard.url, enabledPlatforms: ["boss"] });
+  assert.equal(sleepingResult.bossTabId, "original-search");
+  assert.equal(sleepingResult.communicationTabId, "original-chat");
+  assert.deepStrictEqual(sleeping.state.createCalls, [], "workspace recovery must reuse dormant tabs rather than duplicate them");
+  assert.deepStrictEqual(sleeping.state.frontCalls, []);
+
   const both = browserFixture([
     dashboard,
     { id: "boss-search-a", url: "https://www.zhipin.com/web/geek/jobs?query=AI", windowId: 7, active: false },

@@ -20,7 +20,7 @@ function deriveRequestedActions({ platform, messages = [], manualActions = [] } 
       }
     }
     const actionableRemaining = requestedActions.some((item) => item.kind === "resume_request")
-      ? remaining.filter((clause) => !isGreetingOnly(clause))
+      ? remaining.filter((clause) => !isGreetingOnly(clause) && !isRecruitingInvitationPreamble(clause))
       : remaining;
     const replyText = actionableRemaining.join("").trim();
     if (replyText) replyMessages.push({ messageKey, text: replyText });
@@ -99,7 +99,13 @@ function isInPlatformResumeRequest(clause) {
 }
 
 function isGreetingOnly(clause) {
-  return /^(?:您好|你好|嗨|hi|hello)[，,。！？!?；;\s]*$/i.test(String(clause || ""));
+  return /^(?:\d{1,2}:\d{2}\s*)?(?:您好|你好|嗨|hi|hello)[，,。！？!?；;\s]*$/i.test(String(clause || ""));
+}
+
+function isRecruitingInvitationPreamble(clause) {
+  const text = String(clause || "").replace(/\s+/g, "").replace(/[，,。！？!?；;～~]+$/g, "");
+  return /^(?:如果|若|假如)(?:你|您)(?:对(?:这个|该)?(?:岗位|职位))?(?:感兴趣|有兴趣)(?:的话)?$/.test(text)
+    || /^(?:我们|公司|我们公司)(?:最近|目前|现在)?(?:正在|在)?(?:积极)?(?:寻找|招聘|招募)(?:新伙伴|伙伴|人才|同事|新同事)$/.test(text);
 }
 
 function isResumeReceiptAcknowledgement(value) {

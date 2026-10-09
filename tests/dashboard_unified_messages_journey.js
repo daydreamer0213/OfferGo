@@ -55,6 +55,8 @@ async function main() {
       assertRuntimeAvailable:()=>{nativeBossGuards++;},createReader:({platform})=>({async scanConversationRows(){nativeStates.push(nativeController.status(profileId).platformRuns);assert(nativeController.status(profileId).platformRuns.every(entry=>['not_connected','running','completed','stopped','needs_user_action'].includes(entry.status)));nativeScans++;nativeOrder.push(platform);nativeActive++;nativeMax=Math.max(nativeMax,nativeActive);await new Promise(resolve=>setTimeout(resolve,1));nativeActive--;return {platform,rows:[]};}}),createAnalyzer:()=>async()=>({}),createDetailSafety:()=>({}),createDetailReader:()=>({}),createJobContextResolver:()=>async()=>({})});
     controllers.push(nativeController);nativeController.start(profileId);const nativeResult=await settle(nativeController,profileId);assert.equal(nativeScans,1,'shared production pipeline reaches the ZL reader');assert.equal(nativeBossGuards,0);
     assert.equal(nativeResult.results.length,3,'a sync with no new replies must retain every durable pending action');
+    assert.equal(nativeResult.status, 'needs_user_action', 'a missing enabled BOSS page cannot become overall success');
+    assert.equal(nativeResult.reasonCode, 'BOSS_MESSAGE_TAB_UNAVAILABLE');
     assertUnknownZhaopinReceipts({ platformRuns: nativeStates[0] });
     const nativeZl = nativeResult.platformRuns.find(entry => entry.platform === 'zhaopin');
     assert.equal(nativeZl.counters.currentRead, null, 'public platformRuns must preserve unknown ZL read receipts');
@@ -204,6 +206,7 @@ async function main() {
     const cleared=createMessageDiscoveryController({db});assert.equal(cleared.pageState(profileId).results.length,0);assert.equal(storage.listMessageInboundContexts(db,{profileId}).length,0);assert.equal(cleared.pageState(profileId).unresolved,3,'dismiss preserves every unprocessed pending message');await cleared.close();
     await page.getByRole('link',{name:'消息与回复',exact:true}).click();assert.equal(await page.getByText('合成待处理原文',{exact:true}).count(),0);assert.equal(await page.getByText('历史待核对岗位',{exact:true}).count(),0);
     db.prepare("DELETE FROM message_discovery_unresolved_items WHERE profile_id=? AND platform='zhaopin'").run(profileId);await page.reload();assert.equal(await page.locator('.message-list-item[data-platform="zhaopin"]').count(),0);assert.equal(await page.locator('.message-list-item[data-platform="boss"]').count(),0);
+    storage.saveWorkspacePlatformPreference(db, ['zhaopin']); // This success scenario supplies only the Zhaopin reader.
     await page.getByRole('button',{name:'同步最新消息',exact:true}).click();
     let completedStatus;for(let attempt=0;attempt<100;attempt++){completedStatus=await (await fetch(base+'/api/message-discovery-status?profileId='+profileId)).json();if(completedStatus.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,5));}
     assert.equal(completedStatus.status,'completed');assert.equal(completedStatus.unresolved,0);assert.equal(completedStatus.reasonCode,'');assert(completedStatus.startedAt);

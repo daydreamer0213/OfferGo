@@ -66,6 +66,47 @@ class CdpBrowserAdapter {
     };
   }
 
+  async restoreDormantTabs({ windowIds = [], matchesUrl } = {}) {
+    if (!windowIds.length || typeof matchesUrl !== "function") return [];
+    const version = await this.requestJson("/json/version");
+    const connection = await openCdpConnection(version.webSocketDebuggerUrl, this.timeoutMs, "Target.getTargets");
+    const attachedPages = new Map();
+    connection.onEvent = (event) => {
+      if (event.method === "Target.attachedToTarget" && event.params?.targetInfo?.type === "page") {
+        attachedPages.set(event.sessionId, event.params);
+      }
+    };
+    const restored = [];
+    try {
+      const targets = (await connection.command("Target.getTargets", { filter: [{ type: "tab" }] })).targetInfos || [];
+      for (const target of targets) {
+        if (target.type !== "tab" || target.url || target.embedderData?.tabActive === true) continue;
+        const identity = await connection.command("Browser.getWindowForTarget", { targetId: target.targetId });
+        if (!windowIds.includes(identity.windowId)) continue;
+        const attached = await connection.command("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+        try {
+          await connection.command("Target.setAutoAttach", {
+            autoAttach: true, waitForDebuggerOnStart: false, flatten: true
+          }, attached.sessionId);
+          // Edge retains the URL on the dormant page target, even though /json/list omits it.
+          // Inspect that identity before reloading the original tab; never create or activate one.
+          for (let attempt = 0; attempt < 20 && !attachedPages.has(attached.sessionId); attempt += 1) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          const page = attachedPages.get(attached.sessionId);
+          if (!page || !matchesUrl(page.targetInfo.url)) continue;
+          await connection.command("Page.reload", { ignoreCache: false }, page.sessionId);
+          restored.push(page.targetInfo.targetId);
+        } finally {
+          await connection.command("Target.detachFromTarget", { sessionId: attached.sessionId });
+        }
+      }
+      return restored;
+    } finally {
+      connection.close();
+    }
+  }
+
   async browserCommand(method, params = {}) {
     const version = await this.requestJson("/json/version");
     if (!version?.webSocketDebuggerUrl) {
@@ -463,7 +504,7 @@ class CdpConnection {
     });
   }
 
-  command(method, params) {
+  command(method, params, sessionId) {
     if (!this.opened || this.closed || !this.socket) {
       return Promise.reject(browserError("BROWSER_DISCONNECTED", `${method} websocket is not available.`));
     }
@@ -485,7 +526,7 @@ class CdpConnection {
         }
       });
       try {
-        this.socket.send(JSON.stringify({ id, method, params }));
+        this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
       } catch (error) {
         this.fail(browserError("BROWSER_DISCONNECTED", `${method} could not be sent because the browser disconnected.`, error));
       }
@@ -501,7 +542,10 @@ class CdpConnection {
       return;
     }
     const pending = this.pending.get(data.id);
-    if (!pending) return;
+    if (!pending) {
+      this.onEvent?.(data);
+      return;
+    }
     this.pending.delete(data.id);
     if (data.error) {
       pending.reject(browserError("BROWSER_COMMAND_FAILED", `${pending.method} failed: ${JSON.stringify(data.error)}`));

@@ -142,7 +142,10 @@ async function main() {
     browserFactory({ browserMode, cdpPort }) {
       browserCreations += 1;
       discoveryBrowserAuthority = { browserMode, cdpPort };
-      const browser = { kind: "fake-browser", cleanupCalls: 0, listTabs: async () => [{ id: 10, windowId: 1, url: "https://www.zhipin.com/web/geek/chat" }] };
+      const browser = { kind: "fake-browser", cleanupCalls: 0, listTabs: async () => [
+        { id: 10, windowId: 1, url: "https://www.zhipin.com/web/geek/chat" },
+        { id: 11, windowId: 1, url: "https://i.zhaopin.com/im" }
+      ] };
       browsers.push(browser);
       return browser;
     },
@@ -169,6 +172,7 @@ async function main() {
         return async () => ({});
       },
       async runDiscovery(context) {
+        if (context.platform === "zhaopin") return { status: "completed", queued: 0, processed: 0, unresolved: 0, results: [] };
         const scenario = scenarios.shift();
         assert(scenario, "an injected discovery scenario is required");
         return scenario(context);
@@ -1178,6 +1182,8 @@ async function main() {
   await leaseConstraintSmoke(db, root, dbPath, logger, fixture.profileId);
   assertNoPrivateData(logs);
   await transientMessageRetrySmoke();
+  await dormantAndMissingMessagePlatformSmoke();
+  resumeInvitationDraftRepairSmoke();
   modelUnavailablePresentationSmoke();
   completedResultPresentationSmoke();
   console.log("dashboard_message_discovery_smoke ok");
@@ -1616,6 +1622,86 @@ async function transientMessageRetrySmoke() {
   await waitFor(() => riskController.status(fixture.profileId).status !== "running");
   assert.strictEqual(riskAttempts, 1, "a platform safety stop must block even a pending transient retry");
   await riskController.close();
+}
+
+async function dormantAndMissingMessagePlatformSmoke() {
+  for (const restored of [false, true]) {
+    clearSiteRuntimeState(db, "zhaopin");
+    const fixture = createFixture();
+    let recoveryCalls = 0;
+    let bossRestored = false;
+    const scanned = [];
+    const browser = {
+      listTabs: async () => [
+        { id: "dashboard", windowId: 42, url: "http://127.0.0.1:8787/messages" },
+        { id: "zhaopin", windowId: 42, url: "https://i.zhaopin.com/im" },
+        ...(bossRestored ? [{ id: "boss", windowId: 42, url: "https://www.zhipin.com/web/geek/chat" }] : [])
+      ],
+      restoreDormantTabs: async ({ windowIds, matchesUrl }) => {
+        recoveryCalls += 1;
+        assert.deepStrictEqual(windowIds, [42]);
+        assert.equal(matchesUrl("https://www.zhipin.com/web/geek/chat"), true);
+        assert.equal(matchesUrl("https://www.zhipin.com/web/geek/jobs"), false);
+        assert.equal(matchesUrl("https://i.zhaopin.com/im"), false, "connected platforms must not reload twice");
+        bossRestored = restored;
+        return restored ? ["boss"] : [];
+      }
+    };
+    const controller = createMessageDiscoveryController({
+      db, logger, modelReady: () => true, getEnabledPlatforms: () => ["boss", "zhaopin"],
+      createBrowser: async () => browser, cleanupBrowser: async () => {},
+      createReader: () => ({}), createDetailSafety: () => ({ beforeOpen: async () => {}, afterIssuedAttempt: async () => {} }),
+      createDetailReader: () => ({}), createJobContextResolver: () => async () => ({}),
+      createAnalyzer: () => ({}), analyzeMessageJob: null, assertRuntimeAvailable: () => {},
+      acquireLease: () => {}, renewLease: () => {}, releaseLease: () => {},
+      runDiscovery: async ({ platform }) => {
+        scanned.push(platform);
+        return { status: "completed", queued: 0, processed: 0, unresolved: 0, results: [] };
+      }, setInterval: () => 0, clearInterval: () => {}
+    });
+    controller.start(fixture.profileId);
+    await waitFor(() => controller.status(fixture.profileId).status !== "running");
+    const status = controller.status(fixture.profileId);
+    assert.equal(recoveryCalls, 1, "missing message tabs should trigger one background restoration");
+    assert.deepStrictEqual(scanned, restored ? ["boss", "zhaopin"] : ["zhaopin"]);
+    assert.equal(status.status, restored ? "completed" : "needs_user_action");
+    assert.equal(status.reasonCode, restored ? "" : "BOSS_MESSAGE_TAB_UNAVAILABLE");
+    await controller.close();
+  }
+}
+
+function resumeInvitationDraftRepairSmoke() {
+  const { reconcileResumeInvitationDrafts } = require("../src/application/message_discovery/run");
+  const { getMessageReplyDraft, saveMessageReplyDraftEdit } = require("../src/storage/message_learning_store");
+  for (const variant of ["generated", "edited", "question", "ordinary", "copied", "frozen"]) {
+    const fixture = createFixture(`invitation-repair-${variant}`);
+    const group = `sha256:${require("node:crypto").createHash("sha256").update(variant).digest("hex")}`;
+    const draft = recordMessageReplyDrafts(db, { profileId: fixture.profileId, cardId: fixture.card.id,
+      jobId: fixture.jobId, messageGroupKey: group, messageIntent: "interest_check", messageCategory: "other",
+      messages: ["感兴趣的，方便介绍一下这个岗位主要做什么方向吗？"] })[0];
+    if (variant === "edited") saveMessageReplyDraftEdit(db, { profileId: fixture.profileId, draftId: draft.id,
+      expectedRevision: 0, text: "我想先确认团队的工作方向。" });
+    saveMessageInboundContext(db, { profileId: fixture.profileId, cardId: fixture.card.id, messageGroupKey: group,
+      platform: "boss", conversationKey: `sha256:${"b".repeat(64)}`, sourceJobId: `boss:${variant}`,
+      lastMessageId: "123456789012345", messageIntent: "interest_check", messageCategory: "other",
+      manualActions: variant === "ordinary" ? [] : [{ kind: "resume_request" }],
+      inboundMessages: [{ kind: "text", text: variant === "ordinary" ? "对岗位有兴趣吗？"
+        : `你好，公司最近在积极寻找新伙伴，如果你感兴趣，可以发送简历聊聊看～${variant === "question" ? "。期望薪资多少？" : ""}` }] });
+    if (variant === "copied") require("../src/storage/message_learning_store").completeMessageReplyDraft(db, {
+      profileId: fixture.profileId, draftId: draft.id, finalText: draft.currentText, completionKind: "copied" });
+    if (variant === "frozen") require("../src/storage/message_reply_send_store").createMessageReplySendBatch(db, {
+      profileId: fixture.profileId, items: [{ draftId: draft.id, revision: 0 }] });
+    reconcileResumeInvitationDrafts(db, { profileId: fixture.profileId, platform: "boss" });
+    const actual = getMessageReplyDraft(db, { profileId: fixture.profileId, draftId: draft.id });
+    assert.equal(actual.currentText, variant === "generated" ? "好的，我把简历发您，您先看看。"
+      : variant === "edited" ? "我想先确认团队的工作方向。" : draft.currentText);
+    if (variant === "generated") {
+      assert.equal(actual.originalText, actual.currentText, "system correction must not be mistaken for user knowledge");
+      assert.equal(actual.revision, 1, "a frozen old revision must become invalid");
+      reconcileResumeInvitationDrafts(db, { profileId: fixture.profileId, platform: "boss" });
+      assert.equal(getMessageReplyDraft(db, { profileId: fixture.profileId, draftId: draft.id }).revision, 1);
+    }
+  }
 }
 
 async function dashboardSignalShutdownSmoke() {

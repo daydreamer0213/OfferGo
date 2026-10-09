@@ -231,25 +231,32 @@ function createMessageDiscoveryController(deps = {}) {
       }
       browser = await createBrowser();
       if (abortController.signal.aborted) throw abortController.signal.reason;
-      const tabs = await browser.listTabs();
+      let tabs = await browser.listTabs();
+      const workspaceWindowIds = new Set(tabs.filter(isDashboardMessageWorkspaceTab).map((tab) => tab.windowId));
+      const missingPlatforms = enabledPlatforms.filter(platform => !tabs.some(tab =>
+        workspaceWindowIds.has(tab.windowId) && matchesMessagePlatformUrl(tab.url, platform)));
+      if (missingPlatforms.length && workspaceWindowIds.size && typeof browser.restoreDormantTabs === "function") {
+        try {
+          await browser.restoreDormantTabs({
+            windowIds: [...workspaceWindowIds],
+            matchesUrl: url => missingPlatforms.some(platform => matchesMessagePlatformUrl(url, platform))
+          });
+        } catch (error) {
+          logger.warn("message_discovery_tab_restore_failed", { errorCode: safeCode(error?.code) });
+        }
+        tabs = await browser.listTabs();
+      }
       const bossSessionState = enabledPlatforms.includes("boss") && typeof browser.evalValue === "function"
         ? await inspectBossSessionState(browser, tabs)
         : { hasRiskPage: false };
-      const workspaceWindowIds = new Set(tabs.filter(isDashboardMessageWorkspaceTab).map((tab) => tab.windowId));
       run.platformRuns = enabledPlatforms.map((platform) => {
-        const matches = tabs.filter((tab) => {
-          try {
-            const url = new URL(tab.url);
-            return platform === "boss"
-              ? url.hostname === "www.zhipin.com" && url.pathname === "/web/geek/chat"
-              : isZhaopinMessageUrl(tab.url);
-          } catch { return false; }
-        });
+        const matches = tabs.filter(tab => matchesMessagePlatformUrl(tab.url, platform));
         const inWorkspace = matches.filter((tab) => workspaceWindowIds.has(tab.windowId));
         const selected = stableMessageTab(inWorkspace.length ? inWorkspace : matches);
         const riskControl = platform === "boss" && bossSessionState.hasRiskPage;
         return { platform, status: riskControl ? "needs_user_action" : selected ? "pending" : "not_connected",
-          reasonCode: riskControl ? "BOSS_RISK_CONTROL" : "",
+          reasonCode: riskControl ? "BOSS_RISK_CONTROL" : selected ? ""
+            : `${platform === "boss" ? "BOSS" : "ZHAOPIN"}_MESSAGE_TAB_UNAVAILABLE`,
           bindingTabId: selected?.id ?? null, counters: safeCounters(null, platform) };
       });
       clearResolvedMessageDiscoveryRuntimeBlock(db, {
@@ -357,7 +364,8 @@ function createMessageDiscoveryController(deps = {}) {
       const analysisIssue = analysisAvailable
         ? await repairDurableJobAnalyses(run, profileId, modelConfig, abortController.signal)
         : null;
-      const issue = run.platformRuns.find(entry => entry.status === "needs_user_action" || entry.status === "stopped");
+      const issue = run.platformRuns.find(entry => ["needs_user_action", "stopped"].includes(entry.status))
+        || run.platformRuns.find(entry => entry.status === "not_connected");
       const stopped = abortController.signal.aborted || run.platformRuns.some(entry => entry.status === "stopped");
       const status = stopped
         ? "stopped"
@@ -1474,7 +1482,7 @@ function presentFreshness(platform, run, sync, now) {
   }
 
   if (run?.status === "not_connected") {
-    return { platform, label: "尚未连接", detail: `请保持 ${platformLabel} 消息页打开`, state: "needs_user_action" };
+    return { platform, label: "尚未连接", detail: "重新同步会尝试后台恢复消息页", state: "needs_user_action" };
   }
   if (run?.reasonCode) {
     const state = /LOGIN_REQUIRED|RISK_CONTROL|TAB_|PAGE_LOST|BROWSER/.test(run.reasonCode) ? "needs_user_action" : "partial";
@@ -1588,6 +1596,15 @@ function isDashboardMessageWorkspaceTab(tab) {
   } catch {
     return false;
   }
+}
+
+function matchesMessagePlatformUrl(value, platform) {
+  try {
+    const url = new URL(String(value || ""));
+    return platform === "boss"
+      ? url.protocol === "https:" && url.hostname === "www.zhipin.com" && url.pathname === "/web/geek/chat"
+      : isZhaopinMessageUrl(value);
+  } catch { return false; }
 }
 
 function boundedMessageDraftModelConfig(modelConfig) {

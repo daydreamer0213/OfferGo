@@ -195,6 +195,28 @@ async function main() {
       "cdp-hidden-first": "hidden",
       "cdp-created-tab": "hidden"
     };
+    websocket.dormantTargets = [
+      { targetId: "sleeping-chat", type: "tab", url: "", pageUrl: "https://www.zhipin.com/web/geek/chat" },
+      { targetId: "sleeping-other", type: "tab", url: "", pageUrl: "https://example.test/private" },
+      { targetId: "foreign-chat", type: "tab", url: "", pageUrl: "https://www.zhipin.com/web/geek/chat", windowId: 99 }
+    ];
+    const restored = await cdp.restoreDormantTabs({ windowIds: [42],
+      matchesUrl: url => url === "https://www.zhipin.com/web/geek/chat" });
+    assert.deepStrictEqual(restored, ["page-sleeping-chat"]);
+    assert.deepStrictEqual(websocket.messages.filter(m => m.method === "Page.reload").map(m => m.sessionId),
+      ["page-session-sleeping-chat"], "only an identified message page in the workspace may be reloaded");
+    assert.equal(websocket.messages.some(m => m.method === "Target.attachToTarget" && m.params.targetId === "foreign-chat"), false);
+    assert.equal(countMethod(websocket.messages, "Target.createTarget"), 0);
+    assert.equal(countMethod(websocket.messages, "Page.bringToFront"), 0);
+    assert.equal(countMethod(websocket.messages, "Target.detachFromTarget"), 2);
+    assert(websocket.instances.every(socket => socket.closed), "restoration connections must close");
+    websocket.dormantReloadFailure = true;
+    await rejectsWithCode(() => cdp.restoreDormantTabs({ windowIds: [42], matchesUrl: () => true }), "BROWSER_COMMAND_FAILED");
+    assert.equal(websocket.messages.at(-1).method, "Target.detachFromTarget", "failed reload must detach");
+    assert(websocket.instances.every(socket => socket.closed));
+    websocket.dormantTargets = [];
+    websocket.dormantReloadFailure = false;
+    websocket.messages.length = 0;
     const transport = await cdp.inspectTransport();
     assert.deepStrictEqual(transport, { browser: "Edge/140", pageCount: 1 });
     assert.strictEqual(countMethod(websocket.messages, "Browser.getVersion"), 1);
@@ -906,7 +928,18 @@ function installFakeWebSocket() {
         const dispatchCount = control.messages.filter((item) => item.method === "Input.dispatchMouseEvent").length;
         let result = {};
         let error = null;
-        if (payload.method === "Network.getResponseBody") {
+        if (payload.method === "Target.getTargets") {
+          result = { targetInfos: control.dormantTargets || [] };
+        } else if (payload.method === "Target.attachToTarget") {
+          result = { sessionId: `tab-session-${payload.params.targetId}` };
+        } else if (payload.method === "Target.setAutoAttach") {
+          const target = (control.dormantTargets || []).find(t => payload.sessionId === `tab-session-${t.targetId}`);
+          if (target) this.emit("message", { data: JSON.stringify({ method: "Target.attachedToTarget",
+            sessionId: payload.sessionId, params: { sessionId: `page-session-${target.targetId}`,
+              targetInfo: { targetId: `page-${target.targetId}`, type: "page", url: target.pageUrl } } }) });
+        } else if (payload.method === "Page.reload" && control.dormantReloadFailure) {
+          error = { message: "dormant reload failed" };
+        } else if (payload.method === "Network.getResponseBody") {
           if (control.bodyErrors.has(payload.params.requestId)) error = { message: "fixture body read failed" };
           else result = control.responseBodies[payload.params.requestId] || { body: "", base64Encoded: false };
         } else if (payload.method === "Runtime.evaluate"
@@ -921,7 +954,9 @@ function installFakeWebSocket() {
               : control.visibilityByTarget[targetId];
           result = stateValue === undefined ? {} : { result: { value: stateValue } };
         } else if (payload.method === "Browser.getWindowForTarget") {
-          if (control.mode === "window-identity-missing"
+          const dormant = (control.dormantTargets || []).find(t => t.targetId === payload.params.targetId);
+          if (dormant) result = { windowId: dormant.windowId || 42, bounds: { windowState: control.windowState } };
+          else if (control.mode === "window-identity-missing"
             || (control.mode === "created-window-identity-missing"
               && payload.params.targetId === "cdp-created-tab")) result = {};
           else if (control.mode === "windowless-edge-internal-target"
