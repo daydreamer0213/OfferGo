@@ -757,7 +757,7 @@
     {
       "id": "old-interview-report",
       "method": "reviewMockInterview",
-      "expected": "Strengths emphasize diagnosis, method and coordination; no extra reward for disclaimer, outlines solve actual gap.",
+      "expected": "Strengths emphasize diagnosis, method and coordination; no extra reward for disclaimer. Outlines ask neutral recall questions for unknown interface identity, business impact and SQL changes; no invented waiting, index implementation, conflict or test-design ownership. Learned material retains the verified user quote.",
       "input": {
         "context": {
           "sessionKind": "resume_general",

@@ -16,6 +16,18 @@ test('report highlights retain model text and the valid question reference inste
     {turns:[{turnNumber:1}]}),/题号/);
 });
 
+test('learned interview material retains the verified answer instead of a stronger model summary', () => {
+  const answer = '联调时检查空结果、非法日期、正常导出这几种情况，发现日期边界有问题后修正。';
+  const result = validateInterviewReport({ conclusion: '联调过程清楚。', strengths: [], improvements: [],
+    followUpRisks: [], retryRecommendations: [], answerStructures: [], evidenceCandidates: [
+      { turnNumber: 1, subject: '接口联调', sourceQuote: answer, text: '设计了全部边界测试用例并独立负责完整系统。' },
+      { turnNumber: 1, subject: '无依据的资料', sourceQuote: '我设计了全部用例。', text: '我设计了全部用例。' }
+    ] }, { turns: [{ turnNumber: 1, answerText: answer }] });
+  assert.equal(result.evidenceCandidates.length, 1);
+  assert.equal(result.evidenceCandidates[0].text, answer);
+  assert.equal(result.evidenceCandidates[0].sourceQuote, answer);
+});
+
 function setup(alwaysMissing = false) {
   const db = storage.openDb(':memory:');
   const owner = storage.saveProfileAnalysis(db, {

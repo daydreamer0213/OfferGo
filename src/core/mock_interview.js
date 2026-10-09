@@ -274,8 +274,9 @@ function validateInterviewReport(raw, context = {}) {
       const subject = String(item?.subject || '').trim();
       const text = String(item?.text || '').trim();
       if (!turn || !sourceQuote || !String(turn.answerText || turn.answer || '').includes(sourceQuote)
-        || !subject || subject.length > 160 || !text || text.length > 8000) return [];
-      return [{ turnNumber: Number(item.turnNumber), subject, text, sourceQuote }];
+        || !subject || subject.length > 160 || !text || text.length > 8000 || sourceQuote.length > 8000) return [];
+      // Confirmed learning material uses the verified answer, not model embellishment.
+      return [{ turnNumber: Number(item.turnNumber), subject, text: sourceQuote, sourceQuote }];
     }) } : {}),
     conclusion: cleanText(raw.conclusion, 3_000, "复盘结论"),
     strengths: reportHighlights(raw.strengths, validTurns, "最强项"),

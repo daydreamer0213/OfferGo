@@ -225,13 +225,16 @@ server.listen(0, "127.0.0.1", async () => {
     assert.deepStrictEqual(await interviewAdapter.generateMockInterviewStep(interviewInput), { kind: "generateMockInterviewStep" });
     assert.deepStrictEqual(await interviewAdapter.reviewMockInterview(interviewInput), { kind: "reviewMockInterview" });
     assert.deepStrictEqual(await interviewAdapter.reviewMockInterviewRetry({ turn: { turnNumber: 1 } }), { kind: "reviewMockInterviewRetry" });
-    assert.strictEqual(interviewPrompts.generateMockInterviewStep.input, interviewInput);
+    assert.deepStrictEqual(interviewPrompts.generateMockInterviewStep.input, interviewInput);
     for (const phrase of ["上一题题号", "resumeEvidenceIds", "resume_general", "公司研究", "plannedQuestions", "录用概率", "只输出 JSON"]) {
       assert(interviewPrompts.generateMockInterviewStep.prompt.includes(phrase), `interview step prompt must include ${phrase}`);
     }
-    for (const phrase of ["具体题号", "offerProbability", "不能成为候选人事实"]) {
-      assert(interviewPrompts.reviewMockInterview.prompt.includes(phrase), `interview report prompt must include ${phrase}`);
-    }
+    assert.deepStrictEqual(interviewPrompts.reviewMockInterview.input.context, {
+      sessionKind: interviewInput.context.sessionKind,
+      job: interviewInput.context.job,
+      resume: interviewInput.context.resume
+    });
+    assert.deepStrictEqual(interviewPrompts.reviewMockInterview.input.settings, interviewInput.settings);
     assert(interviewPrompts.reviewMockInterviewRetry.prompt.includes("originalAnswer"));
     assert(interviewPrompts.reviewMockInterviewRetry.prompt.includes("retryAnswer"));
 
