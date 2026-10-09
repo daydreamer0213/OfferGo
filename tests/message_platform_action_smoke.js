@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 const { openDb } = require("../src/core/storage");
 const { upsertMessageEvents } = require("../src/storage/message_timeline_store");
 const { upsertMessageInboxItem, getMessageInboxItem } = require("../src/storage/message_inbox_store");
@@ -22,6 +23,7 @@ const { createZhaopinMessageActionSender } = require("../src/adapters/sites/zhao
   const conversationKey = `sha256:${"a".repeat(64)}`;
   const messageKey = `sha256:${"b".repeat(64)}`;
   try {
+    await backgroundActionRegression();
     const profileId = Number(db.prepare(`INSERT INTO candidate_profiles(
       display_name, profile_json, created_at, updated_at
     ) VALUES ('Action candidate', '{}', ?, ?)`).run(now, now).lastInsertRowid);
@@ -83,6 +85,10 @@ const { createZhaopinMessageActionSender } = require("../src/adapters/sites/zhao
     const browser = {
       async evalValue(_tabId, expression) {
         if (expression.includes("zhaopin_action_prepare")) return { state: "ready", point: { x: 12, y: 24 }, sourceMessageId: "9001" };
+        if (expression.includes("zhaopin_action_dispatch")) {
+          clicked += 1; dispatched = true;
+          return { state: "dispatched", sourceMessageId: "9001" };
+        }
         if (expression.includes("zhaopin_action_verify")) return dispatched
           ? { state: "succeeded", sourceMessageId: "9001" }
           : { state: "still_actionable", sourceMessageId: "9001" };
@@ -282,3 +288,62 @@ const { createZhaopinMessageActionSender } = require("../src/adapters/sites/zhao
     fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+
+async function backgroundActionRegression() {
+  const conversationKey = `sha256:${"a".repeat(64)}`;
+  const messageKey = `sha256:${"b".repeat(64)}`;
+  const item = { platform: "zhaopin", conversationKey, messageKey,
+    actionKind: "resume_request_accept", evidence: { sourceMessageId: "9001", cardType: "11" } };
+  for (const scenario of ["busy", "background", "declined", "decline_success", "changed_card", "disabled", "duplicate_card", "lost_response"]) {
+    let clicks = 0;
+    let responseLost = false;
+    let processed = null;
+    const scenarioItem = { ...item, actionKind: scenario === "decline_success" ? "resume_request_decline" : item.actionKind };
+    const cardMessage = { idServer: "9001", cardType: "11" };
+    const button = { disabled: false, getAttribute: () => null,
+      getBoundingClientRect: () => ({ left: 500, top: 100, width: 140, height: 32 }),
+      click() {
+        clicks++; button.disabled = true;
+        if (scenario !== "busy") {
+          const agreed = !["declined", "decline_success"].includes(scenario);
+          processed = { textContent: agreed ? "已同意" : "已拒绝", classList: { contains: name => name === "im-msg-11__processed--agree" && agreed } };
+        }
+      } };
+    const card = { __vue__: { $props: { msg: cardMessage } }, querySelectorAll: selector => {
+      if (selector === ".im-msg-11__processed") return processed ? [processed] : [];
+      return processed ? [] : [button];
+    } };
+    const main = { __vue__: { $options: { name: "MainPanelThreeColumns" }, activeTimeline: [cardMessage] } };
+    const document = { querySelector: () => main, querySelectorAll: () => [card], elementFromPoint: () => null };
+    const context = { document, innerWidth: 0, innerHeight: 0,
+      getComputedStyle: () => ({ display: "block", visibility: "visible" }) };
+    const selected = { conversationKey, messages: [{ messageId: "9001", messageKey,
+      direction: "friend", contentKind: "resume_request", metadata: { cardType: "11" } }] };
+    const reader = { async scanConversationRows() { return { tabId: 7, rows: [{ identityVerified: true, conversationKey }] }; },
+      async openQueuedConversation() { return selected; }, async readSelectedConversation() { return selected; },
+      async assertActiveBindings() {} };
+    const browser = { async evalValue(_tabId, expression) {
+      const result = vm.runInNewContext(expression, context);
+      if (scenario === "lost_response" && clicks && !responseLost) {
+        responseLost = true; throw new Error("transport lost after click");
+      }
+      return result;
+    }, async clickAt() { /* A physical hit test cannot reach a zero-size background viewport. */ } };
+    const sender = createZhaopinMessageActionSender({ browser, reader, sleepFn: async () => {} });
+    const token = await sender.prepareAction(await sender.inspectTarget(scenarioItem));
+    if (scenario === "changed_card") cardMessage.idServer = "9002";
+    if (scenario === "disabled") button.disabled = true;
+    if (scenario === "duplicate_card") document.querySelectorAll = () => [card, card];
+    if (["background", "busy", "declined", "decline_success"].includes(scenario)) {
+      await sender.dispatchAction(token);
+      assert.equal(clicks, 1, "background invitation must reach the exact platform button once");
+      const expectedState = scenario === "busy" ? "ambiguous" : scenario === "declined" ? "platform_rejected" : "succeeded";
+      assert.equal((await sender.verifyActionResult(token)).state, expectedState, "busy buttons are not completion; verify the exact processed invitation outcome");
+    } else {
+      await assert.rejects(() => sender.dispatchAction(token));
+      assert.equal(clicks, scenario === "lost_response" ? 1 : 0, "changed or unavailable targets cannot be clicked");
+    }
+    await assert.rejects(() => sender.dispatchAction(token), error => error.code === "ZHAOPIN_MESSAGE_ACTION_ALREADY_DISPATCHED");
+    assert.equal(clicks, ["background", "busy", "declined", "decline_success", "lost_response"].includes(scenario) ? 1 : 0, "uncertain actions must not be replayed");
+  }
+}

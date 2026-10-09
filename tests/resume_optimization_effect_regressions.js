@@ -173,3 +173,16 @@ test('removing a trailing clause leaves a complete sentence rather than a dangli
   const middle = '完成接口校验，未做页面开发，参与接口联调。';
   assert.equal(renderOptimizedResume(middle, [{ ...suggestion, originalText: '未做页面开发，' }]), '完成接口校验，参与接口联调。');
 });
+
+test('removing a complete side note without its terminator does not leave duplicate sentence endings', () => {
+  const source = '制作分步骤操作说明，并根据卡住的步骤修改说明。没有统计续费率或转化率变化，不负责定价与销售谈判。\n技能\nExcel透视表。';
+  const suggestion = { id: 'S1', operation: 'remove', originalText: '没有统计续费率或转化率变化，不负责定价与销售谈判', proposedText: '', decision: 'accepted' };
+  assert.equal(renderOptimizedResume(source, [suggestion]), '制作分步骤操作说明，并根据卡住的步骤修改说明。\n技能\nExcel透视表。');
+  assert.equal(renderOptimizedResume('完成记录。未做统计。后续复查。', [{ ...suggestion, originalText: '未做统计' }]), '完成记录。后续复查。');
+  assert.equal(renderOptimizedResume('完成记录。后续复查。', []), '完成记录。后续复查。');
+  const following = { id: 'S2', operation: 'replace', originalText: '。后续复查。', proposedText: '进行后续复查。', decision: 'accepted' };
+  const remove = { ...suggestion, originalText: '未做统计' };
+  for (const operations of [[remove, following], [following, remove]]) {
+    assert.equal(renderOptimizedResume('完成记录。未做统计。后续复查。', operations), '完成记录。进行后续复查。');
+  }
+});

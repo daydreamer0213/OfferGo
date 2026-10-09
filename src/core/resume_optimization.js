@@ -243,9 +243,15 @@ function renderOptimizedResume(sourceText, suggestions) {
       && (range.end === result.length || result[range.end] === "\n")
       && /[，,；;]/.test(result[range.start - 1] || "")
       ? suggestion.originalText.match(/[。.!！?？]$/)?.[0] : null;
-    operations.push({ ...targetRange, replacement, removedTailTerminator });
+    const duplicateTerminator = suggestion.operation === "remove" && suggestion.decision === "accepted"
+      && result[range.start - 1] === "。" && result[range.end] === "。";
+    operations.push({ ...targetRange, replacement, removedTailTerminator, duplicateTerminator });
   }
 
+  for (const operation of operations) {
+    if (operation.duplicateTerminator && !operations.some(other => other !== operation
+      && other.start <= operation.end && other.end > operation.end)) operation.end += 1;
+  }
   for (const operation of operations) {
     if (!operation.removedTailTerminator) continue;
     const adjacent = operations.find(other => other !== operation && other.end === operation.start
