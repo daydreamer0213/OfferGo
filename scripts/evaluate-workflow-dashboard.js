@@ -168,7 +168,7 @@ function assertStrictPrimary(result) {
   if (result.audit.horizontalOverflow) failures.push("horizontal overflow");
   if (!result.interaction.passed) failures.push(`interaction=${result.interaction.kind}`);
   for (const [kind, entries] of Object.entries(result.errors)) if (entries.length) failures.push(`${kind} errors=${entries.length}`);
-  if (failures.length) throw new Error(`Workflow evaluator gate failed for ${result.state} ${result.viewport.width}x${result.viewport.height}: ${failures.join(", ")}`);
+  if (failures.length) throw new Error(`Workflow evaluator gate failed for ${result.state} ${result.viewport.width}x${result.viewport.height}: ${failures.join(", ")}; errors=${JSON.stringify(result.errors)}`);
 }
 
 function parse(args) {

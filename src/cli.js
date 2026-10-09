@@ -17,6 +17,7 @@ const { createJobAnalysisRunner, runWorkflowAnalysisPhase } = require("./core/jo
 const { completedWorkflowAnalysisCount } = require("./core/workflow_analysis_tasks");
 const { analyzeResumeToPlan } = require("./core/profile_onboarding");
 const { processOnboardingRun } = require("./application/onboarding/run");
+const { withBossSearchMaintenance } = require("./application/workspace/search_maintenance");
 const { reassessBatch: reassessBatchUseCase } = require("./application/analysis/reassess_batch");
 const {
   agentOnboardCommand,
@@ -2802,7 +2803,8 @@ function startDashboard(db, args) {
           browser: workspaceBrowser,
           dashboardUrl,
           enabledPlatforms: preference?.platforms || [],
-          previousWorkspace: latestWorkspace
+          previousWorkspace: latestWorkspace,
+          withBossSearchMaintenance: operation => withBossSearchMaintenance(db, operation)
         });
         return latestWorkspace;
       });

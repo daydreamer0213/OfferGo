@@ -1,4 +1,5 @@
 const { sameBrowserTabId } = require("./browser_tab_identity");
+const { canonicalizeBossSearchTemplate } = require("./inherited_search_scope");
 
 const PLATFORM_WORKSPACE_DEFINITIONS = Object.freeze({
   boss: Object.freeze({
@@ -19,6 +20,7 @@ async function preparePlatformWorkspaceTabs({
   dashboardUrl,
   enabledPlatforms = [],
   previousWorkspace = null,
+  withBossSearchMaintenance = null,
   settleDelay = waitForPlatformWorkspaceSettlement
 } = {}) {
   if (!browser || typeof browser.listTabs !== "function" || typeof browser.createTab !== "function") {
@@ -49,6 +51,12 @@ async function preparePlatformWorkspaceTabs({
   const createdTabIds = new Set();
   for (const site of enabled) {
     const previous = previousWorkspace?.platforms?.[site] || null;
+    const searches = tabs.filter(tab => tab.windowId === dashboardTab.windowId && matchesRole(tab, site, "search"));
+    if (site === "boss" && searches.length > 1 && typeof withBossSearchMaintenance === "function") {
+      await withBossSearchMaintenance(signal => consolidateBossSearchTabs({ browser, tabs, searches,
+        preferredTabId: previous?.searchTabId, signal, settleDelay }));
+      tabs = await browser.listTabs();
+    }
     const searchTab = await ensureRoleTab({
       browser,
       tabs,
@@ -94,6 +102,44 @@ async function preparePlatformWorkspaceTabs({
       ? "login_required"
       : "not_ready";
   return workspaceResult({ dashboardTab, enabled, platforms, status });
+}
+
+async function consolidateBossSearchTabs({ browser, tabs, searches, preferredTabId, signal, settleDelay }) {
+  if (searches.some(tab => tab.active === true) || typeof browser.closeTab !== "function") return;
+  const ranked = searches.map(tab => {
+    const params = new URL(canonicalizeBossSearchTemplate(tab.url).url).searchParams;
+    const count = [...new Set(params.keys())].filter(name => params.getAll(name)
+      .some(value => value.trim() && value !== "0" && !(name === "city" && value === "100010000"))).length;
+    return { tab, count };
+  }).sort((left, right) => right.count - left.count
+    || Number(sameBrowserTabId(right.tab.id, preferredTabId)) - Number(sameBrowserTabId(left.tab.id, preferredTabId))
+    || `${typeof left.tab.id}:${left.tab.id}`.localeCompare(`${typeof right.tab.id}:${right.tab.id}`));
+  const keeper = ranked[0].tab;
+  const visibleIds = list => list.filter(tab => tab.active === true)
+    .map(tab => `${typeof tab.id}:${tab.id}`).sort().join("|");
+  const assertUnchanged = (current, target = null) => {
+    signal?.throwIfAborted();
+    if (visibleIds(current) !== visibleIds(tabs)
+      || [keeper, ...(target ? [target] : [])].some(expected => {
+        const observed = findById(current, expected.id);
+        return !observed || observed.active === true || observed.windowId !== expected.windowId || observed.url !== expected.url;
+      })) throw workspaceError("BOSS_SEARCH_SCOPE_CHANGED", "BOSS 搜索页条件或前台状态已变化，已停止整理；原任务仍然保留。");
+  };
+  // Use the same background identity checks as search preparation; never retry an uncertain close.
+  for (const { tab } of ranked.slice(1)) {
+    assertUnchanged(await browser.listTabs(), tab);
+    await browser.closeTab(tab.id);
+    const deadline = Date.now() + 4000;
+    while (true) {
+      const current = await browser.listTabs();
+      assertUnchanged(current);
+      const remaining = findById(current, tab.id);
+      if (!remaining) break;
+      assertUnchanged(current, tab);
+      if (Date.now() >= deadline) throw workspaceError("BOSS_SEARCH_TAB_CLOSE_UNCONFIRMED", "BOSS 重复搜索页关闭结果未能确认，已停止整理；不会重复操作。");
+      await settleDelay(250);
+    }
+  }
 }
 
 async function resolveDashboardTab({ browser, tabs, dashboardUrl, previousWorkspace }) {

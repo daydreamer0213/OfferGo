@@ -1,5 +1,7 @@
 const assert = require("node:assert");
 const { preparePlatformWorkspaceTabs } = require("../src/core/platform_workspace");
+const { withBossSearchMaintenance } = require("../src/application/workspace/search_maintenance");
+const storage = require("../src/core/storage");
 
 function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   const state = {
@@ -25,7 +27,10 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
       return tab.id;
     },
     async bringToFront(tabId) { state.frontCalls.push(tabId); },
-    async closeTab(tabId) { state.closeCalls.push(tabId); }
+    async closeTab(tabId) {
+      state.closeCalls.push(tabId);
+      state.tabs = state.tabs.filter(tab => tab.id !== tabId);
+    }
   };
 }
 
@@ -107,6 +112,47 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   assert.deepStrictEqual(both.state.frontCalls, []);
   assert.deepStrictEqual(both.state.closeCalls, []);
 
+  const plainSearch = { id: 2, windowId: 7, active: false, url: "https://www.zhipin.com/web/geek/jobs?query=AI" };
+  const filteredSearch = { id: 3, windowId: 7, active: false, url: "https://www.zhipin.com/web/geek/jobs?city=101280100&multiSubway=76:1490&query=Python" };
+  const chat = { id: 4, windowId: 7, active: false, url: "https://www.zhipin.com/web/geek/chat" };
+  const prepareDuplicates = (browser, options = {}) => preparePlatformWorkspaceTabs({
+    browser, dashboardUrl: dashboard.url, enabledPlatforms: ["boss"],
+    withBossSearchMaintenance: operation => operation(), ...options
+  });
+  const duplicates = browserFixture([dashboard, plainSearch, filteredSearch, chat]);
+  const duplicateResult = await prepareDuplicates(duplicates);
+  assert.equal(duplicateResult.bossTabId, filteredSearch.id, "keep actual user filters even when the default search sorts first");
+  assert.deepStrictEqual(duplicates.state.closeCalls, [plainSearch.id]);
+  assert.equal(duplicates.state.tabs.find(tab => tab.id === filteredSearch.id).url, filteredSearch.url);
+  assert.deepStrictEqual(duplicates.state.frontCalls, []);
+  assert.deepStrictEqual(duplicates.state.createCalls, []);
+
+  const equivalent = browserFixture([dashboard, { ...plainSearch, url: filteredSearch.url.replace("Python", "AI") }, filteredSearch, chat,
+    { ...plainSearch, id: 8, windowId: 9 },
+    { id: 9, windowId: 7, active: false, url: "https://www.zhipin.com/job_detail/keep.html" }]);
+  const previousWorkspace = { dashboardTabId: dashboard.id, platforms: { boss: { searchTabId: 3, messageTabId: 4 } } };
+  assert.equal((await prepareDuplicates(equivalent, { previousWorkspace })).bossTabId, 3, "equivalent scopes retain the current binding");
+  assert.deepStrictEqual(equivalent.state.closeCalls, [2], "other windows, details and messages must remain");
+
+  const occupied = browserFixture([dashboard, plainSearch, filteredSearch, chat]);
+  await prepareDuplicates(occupied, { withBossSearchMaintenance: async () => null });
+  assert.deepStrictEqual(occupied.state.closeCalls, [], "busy tasks must retain their pages");
+  const foreground = browserFixture([{ ...dashboard, active: false }, { ...plainSearch, active: true }, filteredSearch, chat]);
+  await prepareDuplicates(foreground);
+  assert.deepStrictEqual(foreground.state.closeCalls, [], "never close the user's current search page");
+
+  const changing = browserFixture([dashboard, plainSearch, filteredSearch, chat]);
+  await assert.rejects(() => prepareDuplicates(changing, { withBossSearchMaintenance: async operation => {
+    changing.state.tabs.find(tab => tab.id === 3).url += "&salary=405";
+    return operation();
+  } }), error => error.code === "BOSS_SEARCH_SCOPE_CHANGED");
+  assert.deepStrictEqual(changing.state.closeCalls, [], "conditions changing during preparation must stop before any close");
+
+  const closingFailure = browserFixture([dashboard, plainSearch, filteredSearch, chat]);
+  closingFailure.closeTab = async id => { closingFailure.state.closeCalls.push(id); throw new Error("close outcome unknown"); };
+  await assert.rejects(() => prepareDuplicates(closingFailure), /close outcome unknown/);
+  assert.deepStrictEqual(closingFailure.state.closeCalls, [2], "an uncertain close must not be retried");
+
   const bossOnly = browserFixture([dashboard], [
     { id: "new-boss-search", windowId: 7, active: false },
     { id: "new-boss-chat", windowId: 7, active: false }
@@ -185,6 +231,42 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
     openerTabId: "dashboard",
     url: "https://www.zhipin.com/web/geek/jobs"
   }], "a bound tab that changed roles must be replaced without touching extra tabs");
+
+  const db = storage.openDb(":memory:");
+  try {
+    let maintenanceCalls = 0;
+    const operation = async signal => {
+      assert.equal(signal.aborted, false);
+      assert.equal(storage.getSiteScanLease(db, "boss").command, "workspace_search");
+      maintenanceCalls += 1;
+    };
+    await withBossSearchMaintenance(db, operation);
+    assert.equal(maintenanceCalls, 1);
+    assert.equal(storage.getSiteScanLease(db, "boss"), null, "workspace maintenance must release its lease");
+    storage.acquireSiteScanLease(db, { site: "boss", owner: "existing-scan" });
+    await withBossSearchMaintenance(db, operation);
+    assert.equal(maintenanceCalls, 1, "an existing scan must not be interrupted");
+    assert.equal(storage.getSiteScanLease(db, "boss").owner, "existing-scan");
+    storage.releaseSiteScanLease(db, { site: "boss", owner: "existing-scan" });
+
+    const saved = storage.saveProfileAnalysis(db, { profile: { candidate: { name: "workspace fixture" }, education: [],
+      experiences: [], skills: [], projects: [], credentials: [], strengths: [] },
+    document: { originalFileName: "fixture.txt", format: "text", contentHash: "workspace", text: "fixture", diagnostics: {} },
+    searchPlan: { name: "workspace fixture", keywords: [], cities: [] } });
+    const run = storage.createWorkflowRun(db, { id: "workspace-paused", profileId: saved.profileId, planId: saved.planId,
+      localDay: "2099-01-01", sequence: 1 });
+    storage.transitionWorkflowRun(db, { id: run.id, status: "scanning" });
+    storage.transitionWorkflowRun(db, { id: run.id, status: "paused" });
+    await withBossSearchMaintenance(db, operation);
+    assert.equal(maintenanceCalls, 1, "paused workflows still own their bound pages");
+    storage.transitionWorkflowRun(db, { id: run.id, status: "scanning" });
+    storage.transitionWorkflowRun(db, { id: run.id, status: "analyzing" });
+    storage.transitionWorkflowRun(db, { id: run.id, status: "review_required" });
+    await withBossSearchMaintenance(db, operation);
+    assert.equal(maintenanceCalls, 2, "completed finding awaiting local review must not block workspace maintenance");
+    await assert.rejects(() => withBossSearchMaintenance(db, async () => { throw new Error("maintenance failed"); }), /maintenance failed/);
+    assert.equal(storage.getSiteScanLease(db, "boss"), null, "failed maintenance must also release its lease");
+  } finally { db.close(); }
 
   console.log("platform_workspace_smoke ok");
 })().catch((error) => {
