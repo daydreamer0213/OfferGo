@@ -1,10 +1,10 @@
 # OfferGo
 
-[![Release: v1.4.0](https://img.shields.io/badge/release-v1.4.0-2563eb)](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0)
+[![Release: v1.4.1](https://img.shields.io/badge/release-v1.4.1-2563eb)](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1)
 [![CI](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml/badge.svg)](https://github.com/daydreamer0213/OfferGo/actions/workflows/ci.yml)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-0f766e)](LICENSE)
 
-OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。它负责解析简历、生成候选人画像和搜索方案、只读发现 BOSS 与智联岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单，也支持消息回复、简历优化和面试训练。本版变化见 [v1.4.0 版本说明](docs/releases/v1.4.0.md)。
+OfferGo 是一个本地运行的、简历驱动的岗位筛选与沟通工作台。它负责解析简历、生成候选人画像和搜索方案、只读发现 BOSS 与智联岗位、用大模型理解完整 JD，并把结果整理为用户确认的沟通清单，也支持消息回复、简历优化和面试训练。本版变化见 [v1.4.1 版本说明](docs/releases/v1.4.1.md)。
 
 OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动，同一套采集、分析、去重和排序流程可以用于不同求职方向。
 
@@ -14,11 +14,11 @@ OfferGo 的筛选规则由搜索关键词、城市、薪资和经验范围驱动
 
 ## 发布状态
 
-v1.4.0 使用 OfferGo 名称和小狗图标。已有用户资料仍保存在 `%LOCALAPPDATA%\RoleFlow`，升级会沿用这个目录。
+v1.4.1 使用 OfferGo 名称和小狗图标。已有用户资料仍保存在 `%LOCALAPPDATA%\RoleFlow`，升级会沿用这个目录。
 
-普通用户以 [v1.4.0 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0) 的公开安装器为准，发布状态与文件以该页为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
+普通用户以 [v1.4.1 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1) 的公开安装器为准，发布状态与文件以该页为准。安装器尚未代码签名，Windows 可能显示信誉或 SmartScreen 提示。
 
-v1.4.0 默认使用“OfferGo 专用 Edge（推荐）”。本版包含双平台找岗、搜索条件同步、统一消息处理、共享已确认资料，以及简历优化和面试训练的效果改进；启动窗口显示准备进度，日常从应用图标进入。
+v1.4.1 修复较矮窗口中主题按钮与左侧导航重叠的问题，保留 v1.4.0 的双平台找岗、搜索条件同步、统一消息处理、共享资料、简历优化和面试训练。默认使用“OfferGo 专用 Edge（推荐）”，启动窗口显示准备进度，日常从应用图标进入。
 
 ## 核心能力
 
@@ -30,7 +30,7 @@ v1.4.0 默认使用“OfferGo 专用 Edge（推荐）”。本版包含双平台
 - 按 48 小时和周末顺延规则分析 30/50/70 档求职反馈；策略改变后开启新轮，不混用修改前后的投递数据。
 - 整理整份简历，也可针对选中的岗位调整；面试训练支持通用能力和单岗位练习，用户确认过的真实经历可用于后续回复与简历优化。
 - 沟通前必须由用户确认清单；登录失效、页面漂移或结果不明确时停止操作。
-- v1.4.0 发布线注册 195 项离线检查，要求实际本地浏览器检查；标签发布在精确版本提交上执行完整门禁。测试不访问真实 BOSS，也不会创建假的 `msedge.exe`。
+- v1.4.1 发布线注册 195 项离线检查，要求实际本地浏览器检查；标签发布在精确版本提交上执行完整门禁。测试不访问真实 BOSS，也不会创建假的 `msedge.exe`。
 
 OfferGo 每天最多由用户手动启动三轮任务，前两轮是主要工作轮次，第三轮只在候选库存明显不足时追加。每轮都要经过清单确认才会串行点击沟通；不会后台定时运行，也不会绕过用户确认直接执行。
 
@@ -38,9 +38,9 @@ OfferGo 每天最多由用户手动启动三轮任务，前两轮是主要工作
 
 Windows 普通用户：
 
-> **请前往 [v1.4.0 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0)，下载 `OfferGo-Setup-1.4.0.exe`。**
+> **请前往 [v1.4.1 下载页](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1)，下载 `OfferGo-Setup-1.4.1.exe`。**
 >
-> 同页的 `OfferGo-Setup-1.4.0.exe.sha256` 用于核对文件完整性；GitHub 自动生成的 Source code 压缩包不是安装程序。
+> 同页的 `OfferGo-Setup-1.4.1.exe.sha256` 用于核对文件完整性；GitHub 自动生成的 Source code 压缩包不是安装程序。
 
 安装后的日常路径如下：
 
@@ -226,7 +226,7 @@ node tests/job_match_benchmark.js --live
 - `docs/remediation_plan.md`：历史整改计划，不代表当前待办。
 - `docs/llm_contracts.md`：模型输入输出契约。
 - `docs/operations.md`：日志、错误码和排错流程。
-- `docs/release_boundary.md`：v1.4.0 安装包、用户资料与外部操作边界。
+- `docs/release_boundary.md`：v1.4.1 安装包、用户资料与外部操作边界。
 - `docs/two-run-workflow-validation.md`：历史双轮方案，仅作为旧版验收记录。
 
 ## 主要目录

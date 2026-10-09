@@ -1,6 +1,6 @@
 # 每日筛选与沟通工作流
 
-本文描述 OfferGo v1.4.0 的主使用路径。参数权威来源是 `src/core/product_policy.js`，状态规划逻辑位于 `src/core/workflow_run.js`。本版变化和验证范围见[发布说明](releases/v1.4.0.md)。
+本文描述 OfferGo v1.4.1 的主使用路径。参数权威来源是 `src/core/product_policy.js`，状态规划逻辑位于 `src/core/workflow_run.js`。本版变化和验证范围见[发布说明](releases/v1.4.1.md)。
 
 ## 一轮任务
 

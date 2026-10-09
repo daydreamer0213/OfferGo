@@ -18,7 +18,7 @@
 .theme-toggle { align-self:stretch; margin-top:12px; padding:8px 10px; min-height:40px; color:var(--rf-ink-soft); background:transparent; border:1px solid var(--rf-rule); text-align:left; font-size:12px; font-weight:600; }
 .theme-toggle:hover { color:var(--rf-ink); background:var(--rf-surface); border-color:var(--rf-rule); }
 .app-sidebar { box-sizing:border-box; max-height:100vh; overflow-y:auto; }
-.app-sidebar .primary-nav { min-height:0; }
+.app-sidebar .primary-nav { min-height:0; flex:1 0 auto; }
 @media(max-width:760px) {
   .app-sidebar { max-height:none; overflow:visible; }
   .theme-toggle { align-self:center; margin:0 0 0 10px; white-space:nowrap; }

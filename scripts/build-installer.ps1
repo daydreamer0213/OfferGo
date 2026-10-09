@@ -153,7 +153,7 @@ foreach ($RelativePath in @(
   "docs\release_boundary.md",
   "docs\workflow_health.md",
   "docs\outcome_analytics.md",
-  "docs\releases\v1.4.0.md"
+  "docs\releases\v1.4.1.md"
 )) {
   Copy-ProjectItem -RelativePath $RelativePath
 }

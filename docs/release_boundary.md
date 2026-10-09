@@ -1,6 +1,6 @@
 # 交付与隐私边界
 
-本文描述 OfferGo v1.4.0 的交付与资料边界。普通用户下载 `OfferGo-Setup-1.4.0.exe`；功能变化和验证范围见[版本说明](releases/v1.4.0.md)，公开状态以 [GitHub Release](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.0) 为准。历史 v1.3.2 使用 RoleFlow 名称与旧图标，不与本版混用。
+本文描述 OfferGo v1.4.1 的交付与资料边界。普通用户下载 `OfferGo-Setup-1.4.1.exe`；功能变化和验证范围见[版本说明](releases/v1.4.1.md)，公开状态以 [GitHub Release](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1) 为准。历史 v1.3.2 使用 RoleFlow 名称与旧图标，不与本版混用。
 
 ## 标准安装器
 

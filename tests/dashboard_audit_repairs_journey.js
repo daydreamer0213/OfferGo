@@ -99,6 +99,28 @@ const { createDashboardServer } = require('../src/dashboard/server');
         await page.setViewportSize({ width: 1440, height: 1000 });
       }
     });
+    await check('sidebar theme control does not overlap navigation', async () => {
+      await page.goto(base+'/queue?planId='+owner.planId+'&site=boss');
+      for (const viewport of [{ width:1528, height:750 }, { width:1440, height:600 }, { width:1440, height:480 }, { width:1440, height:1000 }, { width:640, height:600 }, { width:390, height:844 }]) {
+        await page.setViewportSize(viewport);
+        for (const theme of ['light','dark']) {
+          const overlaps = await page.evaluate(theme => {
+            document.documentElement.dataset.theme = theme;
+            const button = document.querySelector('[data-theme-toggle]').getBoundingClientRect();
+            return [...document.querySelectorAll('.app-sidebar .nav-item')].filter(node => {
+              const item = node.getBoundingClientRect();
+              return Math.min(button.right,item.right)-Math.max(button.left,item.left) > .5
+                && Math.min(button.bottom,item.bottom)-Math.max(button.top,item.top) > .5;
+            }).map(node => node.textContent.trim());
+          }, theme);
+          assert.deepEqual(overlaps, [], `${theme} ${viewport.width}x${viewport.height}: theme button overlaps navigation`);
+          await page.locator('[data-theme-toggle]').click();
+          assert.equal(await page.locator('html').getAttribute('data-theme'), theme === 'light' ? 'dark' : 'light');
+        }
+      }
+      await page.getByRole('link', { name:'运行诊断', exact:true }).click();
+      await page.waitForURL(url => url.pathname === '/diagnostics', { waitUntil:'domcontentloaded' });
+    });
     assert.deepEqual(failures, []);
     console.log('dashboard_audit_repairs_journey ok');
   } finally {
