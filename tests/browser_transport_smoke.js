@@ -210,6 +210,27 @@ async function main() {
     assert.equal(countMethod(websocket.messages, "Page.bringToFront"), 0);
     assert.equal(countMethod(websocket.messages, "Target.detachFromTarget"), 2);
     assert(websocket.instances.every(socket => socket.closed), "restoration connections must close");
+
+    websocket.messages.length = 0;
+    const retainedSearchUrl = "https://www.zhaopin.com/jobs/?jl=763&re=2052&kw=AI";
+    websocket.dormantTargets = [
+      { targetId: "retained-search", type: "tab", url: retainedSearchUrl, pageUrl: retainedSearchUrl },
+      { targetId: "already-loaded", type: "tab", url: "https://example.test/page", pageUrl: "https://example.test/page", pageTargetId: "cdp-tab" },
+      { targetId: "active-search", type: "tab", url: retainedSearchUrl, pageUrl: retainedSearchUrl, embedderData: { tabActive: true } },
+      { targetId: "other-window-search", type: "tab", url: retainedSearchUrl, pageUrl: retainedSearchUrl, windowId: 99 },
+      { targetId: "changed-search", type: "tab", url: retainedSearchUrl, pageUrl: "https://example.test/private" },
+      { targetId: "unrelated", type: "tab", url: "https://example.test/private", pageUrl: "https://example.test/private" }
+    ];
+    const retainedRestored = await cdp.restoreDormantTabs({ windowIds: [42],
+      matchesUrl: url => url === retainedSearchUrl || url === "https://example.test/page" });
+    assert.deepStrictEqual(retainedRestored, ["page-retained-search"],
+      "a dormant search may retain its tab URL even when absent from the loaded-page list");
+    assert.deepStrictEqual(websocket.messages.filter(m => m.method === "Page.reload").map(m => m.sessionId),
+      ["page-session-retained-search"], "loaded, active, changed and foreign pages must not be reloaded");
+    assert.equal(websocket.messages.some(m => m.method === "Target.attachToTarget"
+      && ["active-search", "other-window-search", "unrelated"].includes(m.params.targetId)), false);
+    assert.equal(countMethod(websocket.messages, "Target.createTarget"), 0);
+    assert.equal(countMethod(websocket.messages, "Page.bringToFront"), 0);
     websocket.dormantReloadFailure = true;
     await rejectsWithCode(() => cdp.restoreDormantTabs({ windowIds: [42], matchesUrl: () => true }), "BROWSER_COMMAND_FAILED");
     assert.equal(websocket.messages.at(-1).method, "Target.detachFromTarget", "failed reload must detach");
@@ -936,7 +957,7 @@ function installFakeWebSocket() {
           const target = (control.dormantTargets || []).find(t => payload.sessionId === `tab-session-${t.targetId}`);
           if (target) this.emit("message", { data: JSON.stringify({ method: "Target.attachedToTarget",
             sessionId: payload.sessionId, params: { sessionId: `page-session-${target.targetId}`,
-              targetInfo: { targetId: `page-${target.targetId}`, type: "page", url: target.pageUrl } } }) });
+              targetInfo: { targetId: target.pageTargetId || `page-${target.targetId}`, type: "page", url: target.pageUrl } } }) });
         } else if (payload.method === "Page.reload" && control.dormantReloadFailure) {
           error = { message: "dormant reload failed" };
         } else if (payload.method === "Network.getResponseBody") {

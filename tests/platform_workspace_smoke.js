@@ -58,6 +58,26 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   assert.deepStrictEqual(sleeping.state.createCalls, [], "workspace recovery must reuse dormant tabs rather than duplicate them");
   assert.deepStrictEqual(sleeping.state.frontCalls, []);
 
+  const sleepingFiltered = browserFixture([dashboard,
+    { id: "zhaopin-default-search", url: "https://www.zhaopin.com/jobs/?pageMode=search", windowId: 7, active: false },
+    { id: "zhaopin-chat", url: "https://i.zhaopin.com/im", windowId: 7, active: false }
+  ]);
+  let filteredRestoreCalls = 0;
+  sleepingFiltered.restoreDormantTabs = async ({ windowIds, matchesUrl }) => {
+    assert.deepStrictEqual(windowIds, [7]);
+    const original = { id: "original-filtered-search", url: "https://www.zhaopin.com/jobs/?jl=763&re=2052&kw=AI", windowId: 7, active: false };
+    assert(matchesUrl(original.url));
+    filteredRestoreCalls += 1;
+    if (!sleepingFiltered.state.tabs.some(tab => tab.id === original.id)) sleepingFiltered.state.tabs.push(original);
+    return [original.id];
+  };
+  await preparePlatformWorkspaceTabs({ browser: sleepingFiltered,
+    dashboardUrl: dashboard.url, enabledPlatforms: ["zhaopin"] });
+  assert.equal(filteredRestoreCalls, 1, "existing default pages must not hide a dormant page with user filters");
+  assert(sleepingFiltered.state.tabs.some(tab => tab.url.includes("re=2052")), "saved regional conditions must remain available to normal search consolidation");
+  assert.deepStrictEqual(sleepingFiltered.state.createCalls, []);
+  assert.deepStrictEqual(sleepingFiltered.state.frontCalls, []);
+
   const both = browserFixture([
     dashboard,
     { id: "boss-search-a", url: "https://www.zhipin.com/web/geek/jobs?query=AI", windowId: 7, active: false },

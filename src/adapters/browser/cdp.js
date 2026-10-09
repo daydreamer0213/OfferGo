@@ -68,7 +68,11 @@ class CdpBrowserAdapter {
 
   async restoreDormantTabs({ windowIds = [], matchesUrl } = {}) {
     if (!windowIds.length || typeof matchesUrl !== "function") return [];
-    const version = await this.requestJson("/json/version");
+    const [version, pages] = await Promise.all([
+      this.requestJson("/json/version"), this.requestJson("/json/list")
+    ]);
+    if (!Array.isArray(pages)) throw browserError("BROWSER_COMMAND_FAILED", "CDP tab list response is not an array.");
+    const loadedPageIds = new Set(pages.filter(page => page.type === "page").map(page => page.id));
     const connection = await openCdpConnection(version.webSocketDebuggerUrl, this.timeoutMs, "Target.getTargets");
     const attachedPages = new Map();
     connection.onEvent = (event) => {
@@ -80,7 +84,8 @@ class CdpBrowserAdapter {
     try {
       const targets = (await connection.command("Target.getTargets", { filter: [{ type: "tab" }] })).targetInfos || [];
       for (const target of targets) {
-        if (target.type !== "tab" || target.url || target.embedderData?.tabActive === true) continue;
+        if (target.type !== "tab" || target.embedderData?.tabActive === true
+          || (target.url && !matchesUrl(target.url))) continue;
         const identity = await connection.command("Browser.getWindowForTarget", { targetId: target.targetId });
         if (!windowIds.includes(identity.windowId)) continue;
         const attached = await connection.command("Target.attachToTarget", { targetId: target.targetId, flatten: true });
@@ -94,7 +99,7 @@ class CdpBrowserAdapter {
             await new Promise(resolve => setTimeout(resolve, 50));
           }
           const page = attachedPages.get(attached.sessionId);
-          if (!page || !matchesUrl(page.targetInfo.url)) continue;
+          if (!page || !matchesUrl(page.targetInfo.url) || loadedPageIds.has(page.targetInfo.targetId)) continue;
           await connection.command("Page.reload", { ignoreCache: false }, page.sessionId);
           restored.push(page.targetInfo.targetId);
         } finally {

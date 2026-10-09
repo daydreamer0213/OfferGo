@@ -38,6 +38,13 @@ async function preparePlatformWorkspaceTabs({
     });
   }
 
+  if (typeof browser.restoreDormantTabs === "function") {
+    await browser.restoreDormantTabs({ windowIds: [dashboardTab.windowId],
+      matchesUrl: url => enabled.some(site => matchesRole({ url }, site, "search")
+        || matchesRole({ url }, site, "message")) });
+    tabs = await browser.listTabs();
+  }
+
   const platformTabs = {};
   const createdTabIds = new Set();
   for (const site of enabled) {
@@ -119,15 +126,6 @@ async function ensureRoleTab({ browser, tabs, openerTab, previousTabId, site, ro
   const candidates = tabs.filter((tab) => tab.windowId === openerTab.windowId && matchesRole(tab, site, role));
   const existing = chooseTab(candidates);
   if (existing) return requireWindowIdentity(existing);
-
-  if (typeof browser.restoreDormantTabs === "function") {
-    await browser.restoreDormantTabs({ windowIds: [openerTab.windowId],
-      matchesUrl: url => matchesRole({ url }, site, role, { allowRuntimePath: role === "search" }) });
-    const restoredTabs = await browser.listTabs();
-    const restored = chooseTab(restoredTabs.filter(tab => tab.windowId === openerTab.windowId
-      && matchesRole(tab, site, role, { allowRuntimePath: role === "search" })));
-    if (restored) return requireWindowIdentity(restored);
-  }
 
   const definition = PLATFORM_WORKSPACE_DEFINITIONS[site];
   const url = role === "search" ? definition.searchUrl : definition.messageUrl;
