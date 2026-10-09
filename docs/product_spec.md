@@ -138,7 +138,7 @@ OfferGo 是面向普通求职者的本地岗位筛选和投递决策助手。它
 - 反馈不直接在线学习；开发者通过具体样本定位根因并加入标注集。
 - 日志记录脱敏错误和模型性能指标，不记录业务正文。
 
-## 决策层级（2026-07-31 更新）
+## 当前决策层级（2026-10-09 核对）
 
 硬边界只处理已确认事实：无效链接、明确异地、明确过期、用户未选择实习时的
 实习岗位、用户硬排除词和薪资底线。本地规则不预设职业方向；岗位是否匹配由
@@ -156,7 +156,7 @@ OfferGo 是面向普通求职者的本地岗位筛选和投递决策助手。它
 
 ### 判定规则
 
-根据两个维度查表：**方向匹配度**（角色匹配判断，roleAlignment）× **核心要求符合度**（核心要求对上比例）
+根据两个维度查表：**有效方向匹配度**（角色判断结合职责证据）× **要求符合度**（核心 70% + 支持 30% 的已判断均分）；未知项单独影响证据覆盖率，查表后还受职责、硬边界和风险校验约束。
 
 详见 `docs/roleflow-decision-matrix.md`
 
@@ -193,12 +193,11 @@ OfferGo 是面向普通求职者的本地岗位筛选和投递决策助手。它
 - Text-based PDF resumes are extracted in visual reading order. For scanned files, paste the text before analysis.
 - Names and contact details are redacted locally before any model call.
 - A matching card takes effect only after the user confirms it.
-- The private full-chain benchmark is a merge gate, not a daily scanning command.
+- 私有全链路评测用于岗位理解与匹配质量验收，不是日常找岗命令，也不由公共 CI 自动读取真实资料；改变匹配规则时使用当前冻结样本另行核对。
 - Real inputs and outputs never belong in Git.
 
 - v1.1.0 注册 108 项离线检查，v1.2.0 注册 131 项，v1.2.1 注册 132 项，v1.2.2 注册 132 项，v1.3.0 注册 142 项；每次发布必须在标签所指精确提交上重新全部通过。启动边界测试使用注入的进程与 HTTP 探针，不再创建假的 `msedge.exe`。
-- 31 条脱敏离线 fixture 通过；冻结真实 20 条岗位池必须另走私有 runner 验收，
-  不得用离线 fixture 冒充真实模型结论。
+- 离线岗位样本属于确定性回归；真实模型的匹配质量须使用当前冻结的私有样本另走 runner 验收，不固定沿用历史 20 条岗位池，也不得用离线 fixture 冒充真实模型结论。
 - 主数据库备份后迁移，`PRAGMA quick_check` 为 `ok`，岗位和人工决策数量不下降。
 - 绿色包在干净目录可启动，不包含 Key、数据库、简历、日志或浏览器 profile。
 - 留足冷却后使用已登录 Edge 串行读取 3–5 条，验证卡片和右栏字段一致；沟通执行另用 1 条已确认岗位做单次校准，不能与采集验收混跑。
