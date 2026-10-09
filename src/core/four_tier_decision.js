@@ -44,7 +44,8 @@ function groupRequirements(requirementMatches) {
     soft: []
   };
   for (const item of Array.isArray(requirementMatches) ? requirementMatches : []) {
-    if (isExplicitSoftRequirement(item)) {
+    if (item?.category === 'qualification') continue;
+    if (item?.category === 'preference' || item?.group === 'bonus' || isExplicitSoftRequirement(item)) {
       groups.soft.push(item);
     } else if (item?.foundation === true || item?.central === true || item?.indispensable === true) {
       groups.core.push(item);
@@ -357,6 +358,11 @@ function resolveRoleAlignmentForDecision(analysis = {}, weighted, policy = DECIS
 
 function deriveMatrixDecision(analysis = {}, policy = DECISION_POLICY) {
   assertDecisionPolicy(policy);
+  analysis = { ...analysis, requirementMatches: (analysis.requirementMatches || [])
+    .filter(item => item?.category !== 'qualification').map(item => (
+      item?.category === 'preference' || item?.group === 'bonus' || isExplicitSoftRequirement(item)
+        ? { ...item, foundation: false, central: false, indispensable: false } : item
+    )) };
   const weighted = computeWeightedRequirementFit(analysis.requirementMatches, policy);
   const alignment = resolveRoleAlignmentForDecision(analysis, weighted, policy);
   const roleAlignment = alignment.effectiveRoleAlignment;

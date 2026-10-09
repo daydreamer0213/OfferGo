@@ -741,4 +741,12 @@ const insufficient = decision("insufficient_evidence", [
 assert.strictEqual(insufficient.matrixRecommendation, "caution");
 assert.strictEqual(insufficient.fitBand, "insufficient_evidence");
 
+const categorizedScore = computeWeightedRequirementFit([
+  { ...core('missing'), category: 'capability' },
+  { ...core('matched'), category: 'qualification' },
+  { ...core('matched'), category: 'preference', requirement: '行业背景' }
+]);
+assert.equal(categorizedScore.combinedFit, 0, '资格和偏好不能通过 central 标记混进能力分');
+assert.equal(categorizedScore.core.total, 1);
+assert.equal(categorizedScore.groups.soft.length, 1);
 console.log("four_tier_decision_smoke ok");

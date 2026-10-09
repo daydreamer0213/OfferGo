@@ -6,7 +6,10 @@ const { PRODUCT_POLICY } = require("../src/core/product_policy");
 const {
   deriveRoleAlignment,
   normalizeResponsibilityOutput,
+  normalizeRequirementOutput,
 } = require("../src/core/split_semantic_matching");
+const { buildJobMatchEvidence } = require('../src/core/job_match_evidence');
+const { validateModelResult } = require('../src/core/model_contract');
 
 let requests = 0;
 const payloads = [];
@@ -1954,6 +1957,8 @@ server.listen(0, "127.0.0.1", async () => {
       assert.strictEqual(Object.hasOwn(body, "thinking"), false);
       assert.strictEqual(Object.hasOwn(body, "reasoning_effort"), false);
     }
+    await candidateEvidenceRepairSmoke();
+    await qualificationTrackSelectionSmoke();
     console.log("model_adapter_smoke ok");
   } catch (error) {
     console.error(error.stack || error.message);
@@ -1981,4 +1986,181 @@ async function rejectedError(operation) {
     return error;
   }
   assert.fail("Expected operation to reject");
+}
+
+async function candidateEvidenceRepairSmoke() {
+  const candidateProfile = { education: [{ degree: '本科' }], projects: [{ canSay: ['编写客户查询接口，并优化慢查询。'] }] };
+  const jobUnderstanding = { roleSummary: '开发查询接口', coreRequirements: [
+    { id: 'R1', label: '接口开发', trackIds: ['T1'], evidence: 'JD：接口开发' },
+    { id: 'R2', label: '查询优化', trackIds: ['T1'], evidence: 'JD：查询优化' }
+  ] };
+  const evidence = buildJobMatchEvidence({ candidateProfile, jobFacts: { description: '接口开发、查询优化' } });
+  const projectId = evidence.entries.find(entry => entry.sourcePath === 'projects[0].canSay[0]').id;
+  const degreeId = evidence.entries.find(entry => entry.sourcePath === 'education[0].degree').id;
+  const valid = { id: 'R1', state: 'matched', resumeEvidence: '简历：编写客户查询接口', candidateEvidenceRefs: [projectId] };
+  const invalid = { id: 'R2', state: 'matched', resumeEvidence: '简历：取得硕士学历', candidateEvidenceRefs: [degreeId] };
+  for (const changeFrozen of [false, true]) {
+    const calls = [];
+    const adapter = new OpenAICompatibleAdapter({ baseUrl: 'https://example.invalid', apiKey: 'test', model: 'test' });
+    adapter.chatJson = async (_prompt, input, options) => {
+      calls.push({ input, kind: options.kind });
+      if (!input.contractRepair) return { matches: [valid, invalid], eligibility: [] };
+      return { matches: [changeFrozen ? { ...valid, state: 'transferable' } : valid,
+        { id: 'R2', state: 'matched', resumeEvidence: '简历：优化慢查询', candidateEvidenceRefs: [projectId] }], eligibility: [] };
+    };
+    const after = await adapter.callSplitEvidenceStage({ kind: 'matchRequirements', prompt: '',
+      input: { candidateProfile, jobUnderstanding }, matchEvidence: evidence,
+      normalize: raw => normalizeRequirementOutput(raw, jobUnderstanding, 'T1') });
+    assert.equal(calls.filter(call => call.input.contractRepair).length, 1);
+    assert.deepStrictEqual(calls[1].input.contractRepair.conditionIds, ['R2']);
+    assert.deepStrictEqual(after.raw.matches.find(row => row.id === 'R1'), valid, '已验证行必须被冻结');
+    assert.equal(after.raw.matches.some(row => row.id === 'R2'), !changeFrozen);
+    if (changeFrozen) assert.equal(after.groundingRepair.error, 'repair_changed_valid_row');
+  }
+  const adapter = new OpenAICompatibleAdapter({ baseUrl: 'https://example.invalid', apiKey: 'test', model: 'test' });
+  let unknownCalls = 0;
+  adapter.chatJson = async () => { unknownCalls++; return { matches: [valid], eligibility: [] }; };
+  await adapter.callSplitEvidenceStage({ kind: 'matchRequirements', prompt: '', input: {}, matchEvidence: evidence,
+    normalize: raw => normalizeRequirementOutput(raw, jobUnderstanding, 'T1') });
+  assert.equal(unknownCalls, 1, '真实缺少信息不触发循环修复');
+  const repeatedEvidence = buildJobMatchEvidence({ candidateProfile: { skills: Array.from({ length: 12 },
+    (_, index) => ({ name: `Agent ${index}`, evidence: ['Agent'] })) } });
+  adapter.chatJson = async () => ({ matches: [{ id: 'R1', state: 'matched', resumeEvidence: '简历：Agent' }], eligibility: [] });
+  const recoveredRefs = await adapter.callSplitEvidenceStage({ kind: 'matchRequirements', prompt: '', input: {},
+    matchEvidence: repeatedEvidence, normalize: raw => normalizeRequirementOutput(raw, jobUnderstanding, 'T1') });
+  assert(recoveredRefs.raw.matches[0].candidateEvidenceRefs.length <= 8, '本地恢复引用必须遵守同一模型契约，不能自产超长引用使整个岗位失败');
+  let shapeCalls = 0;
+  adapter.chatJson = async () => { shapeCalls++; return shapeCalls === 1
+    ? { matches: [], eligibility: [], extra: true } : { matches: [valid, invalid], eligibility: [] }; };
+  const bounded = await adapter.callSplitEvidenceStage({ kind: 'matchRequirements', prompt: '', input: {}, matchEvidence: evidence,
+    normalize: raw => normalizeRequirementOutput(raw, jobUnderstanding, 'T1') });
+  assert.equal(shapeCalls, 2, '形状修复已经用过一次，不再叠加事实修复');
+  assert.deepStrictEqual(bounded.raw.matches.map(row => row.id), ['R1']);
+  let cancelCalls = 0;
+  adapter.chatJson = async () => { cancelCalls++; if (cancelCalls === 1) return { matches: [valid, invalid], eligibility: [] };
+    throw Object.assign(new Error('stopped'), { name: 'AbortError' }); };
+  await assert.rejects(adapter.callSplitEvidenceStage({ kind: 'matchRequirements', prompt: '', input: {}, matchEvidence: evidence,
+    normalize: raw => normalizeRequirementOutput(raw, jobUnderstanding, 'T1') }), error => error.name === 'AbortError');
+  assert.equal(cancelCalls, 2, '停止信号不能被事实修复吞掉');
+  const completeUnderstanding = validateModelResult('understandJob', { roleSummary: '查询接口开发',
+    hiringTracks: [{ id: 'T1', label: '开发方向', roleSummary: '查询接口开发',
+      responsibilityEvidence: ['JD：接口开发', 'JD：查询优化'] }],
+    coreRequirements: jobUnderstanding.coreRequirements.map(row => ({ ...row, foundation: true,
+      central: true, indispensable: false })), eligibilityItems: [],
+    jobQuality: { level: 'normal', concerns: [] }, evidenceSnippets: [] });
+  for (const shapeFirst of [false, true]) {
+    const calls = [];
+    adapter.chatJson = async (_prompt, input, { kind }) => {
+      calls.push({ kind, repair: Boolean(input.contractRepair) });
+      if (kind === 'matchResponsibilities') {
+        if (shapeFirst && !input.contractRepair) return { selectedTrackId: 'T1', matches: [], extra: true };
+        return { selectedTrackId: 'T1', matches: [{ ...(input.contractRepair ? valid : invalid), id: 'D1' }] };
+      }
+      return { matches: [valid, invalid], eligibility: [] };
+    };
+    const boundedJob = await adapter.matchJob({ candidateProfile, jobUnderstanding: completeUnderstanding,
+      matchEvidence: evidence, evidenceCatalog: evidence.entries, semanticMatchingMode: 'split' });
+    assert.equal(calls.filter(call => call.repair).length, 1, '一个岗位的两个阶段必须共用一次修复机会');
+    assert.equal(calls.length, 3);
+    assert.equal(boundedJob.evidenceDiagnostics.requirementRepair.attempts, 0, '预算用完后不能虚报修复次数');
+    assert.deepStrictEqual(boundedJob.evidenceDiagnostics.requirementRepair.unresolvedIds, ['R2']);
+  }
+}
+
+async function qualificationTrackSelectionSmoke() {
+  const candidateProfile = { education: [{ degree: '本科' }], credentials: [{ name: 'C1驾驶证', details: '未持有' }],
+    projects: [{ canSay: ['编写接口，并优化查询。'] }] };
+  const description = '驾驶方向必须持有C1驾驶证，负责接口编写和查询优化；开发方向本科及以上学历，负责接口编写和查询优化。';
+  const jobUnderstanding = validateModelResult('understandJob', { roleSummary: '两个招聘方向',
+    hiringTracks: ['T1', 'T2'].map((id, index) => ({ id, label: index ? '开发方向' : '驾驶方向', roleSummary: '接口开发',
+      responsibilityEvidence: ['JD：负责接口编写', 'JD：查询优化'] })),
+    coreRequirements: [{ id: 'R1', label: '接口编写', trackIds: ['T1', 'T2'],
+      foundation: true, central: true, indispensable: false, evidence: 'JD：负责接口编写' }],
+    eligibilityItems: [
+      { label: '必须持有C1驾驶证', evidence: 'JD：必须持有C1驾驶证', trackIds: ['T1'],
+        alternatives: [{ allOf: [{ kind: 'credential', operator: 'has', value: 'C1驾驶证' }] }] },
+      { label: '本科及以上学历', evidence: 'JD：本科及以上学历', trackIds: ['T2'],
+        alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }] }
+    ], jobQuality: { level: 'normal', concerns: [] }, evidenceSnippets: [] });
+  const matchEvidence = buildJobMatchEvidence({ candidateProfile, jobFacts: { description } });
+  const projectId = matchEvidence.entries.find(entry => entry.sourcePath === 'projects[0].canSay[0]').id;
+  const calls = [];
+  const adapter = new OpenAICompatibleAdapter({ baseUrl: 'https://example.invalid', apiKey: 'test', model: 'test' });
+  adapter.chatJson = async (_prompt, input, { kind }) => {
+    calls.push({ kind, input });
+    if (kind === 'matchResponsibilities') return { selectedTrackId: input.hiringTracks[0].id,
+      matches: ['D1', 'D2'].map(id => ({ id, state: 'matched', resumeEvidence: '简历：编写接口，并优化查询。', candidateEvidenceRefs: [projectId] })) };
+    return { matches: input.requirements.map(row => ({ id: row.id, state: 'matched',
+      resumeEvidence: '简历：编写接口，并优化查询。', candidateEvidenceRefs: [projectId] })), eligibility: [] };
+  };
+  const result = await adapter.matchJob({ candidateProfile, jobUnderstanding, matchEvidence,
+    evidenceCatalog: matchEvidence.entries, semanticMatchingMode: 'split' });
+  assert.equal(result.selectedTrackId, 'T2', `确定不满足的方向不能覆盖另一合格方向：${JSON.stringify({ selected: result.selectedTrackId, conditions: result.conditions, results: result.conditionResults, calls: calls.map(call => ({ kind: call.kind, tracks: call.input.hiringTracks?.map(track => track.id) })) })}`);
+  assert.equal(result.qualificationStatus, 'satisfied');
+  assert.equal(calls.length, 2, '本地明确资格比较不增加模型调用');
+  assert.deepStrictEqual(calls[0].input.hiringTracks.map(track => track.id), ['T2']);
+  assert.deepStrictEqual(calls[1].input.eligibility.map(row => row.trackIds), [['T2']]);
+  calls.length = 0;
+  const semanticDirections = { ...jobUnderstanding, eligibilityItems: jobUnderstanding.eligibilityItems.map((row, index) => index
+    ? row : { ...row, alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: row.label }] }] }) };
+  const absentCredentialId = matchEvidence.entries.find(entry => entry.sourcePath === 'credentials[0].details').id;
+  adapter.chatJson = async (_prompt, input, { kind }) => {
+    calls.push({ kind, input });
+    if (kind === 'matchResponsibilities') return { selectedTrackId: input.hiringTracks[0].id,
+      matches: ['D1', 'D2'].map(id => ({ id, state: 'matched', resumeEvidence: '简历：编写接口，并优化查询。', candidateEvidenceRefs: [projectId] })) };
+    return { matches: input.requirements.map(row => ({ id: row.id, state: 'matched',
+      resumeEvidence: '简历：编写接口，并优化查询。', candidateEvidenceRefs: [projectId] })),
+    eligibility: input.selectedTrack.id === 'T1' ? [{ id: 'E1', state: 'conflict', resumeEvidence: '简历：未持有', candidateEvidenceRefs: [absentCredentialId] }] : [] };
+  };
+  const recovered = await adapter.matchJob({ candidateProfile, jobUnderstanding: semanticDirections, matchEvidence,
+    evidenceCatalog: matchEvidence.entries, semanticMatchingMode: 'split' });
+  assert.equal(recovered.selectedTrackId, 'T2', '语义资格失败后应串行检查已有其他方向');
+  assert.deepStrictEqual(recovered.evidenceDiagnostics.attemptedTrackIds, ['T1', 'T2']);
+  assert.equal(calls.length, 4, '两个方向各检查一次，不循环');
+  calls.length = 0;
+  const semanticChat = adapter.chatJson;
+  const degreeId = matchEvidence.entries.find(entry => entry.sourcePath === 'education[0].degree').id;
+  adapter.chatJson = async (prompt, input, options) => {
+    const output = await semanticChat(prompt, input, options);
+    if (options.kind === 'matchResponsibilities' && !input.contractRepair) {
+      output.matches[1] = { id: 'D2', state: 'matched', resumeEvidence: '简历：取得硕士学历', candidateEvidenceRefs: [degreeId] };
+    }
+    return output;
+  };
+  for (let run = 0; run < 2; run++) {
+    calls.length = 0;
+    const boundedTracks = await adapter.matchJob({ candidateProfile, jobUnderstanding: semanticDirections, matchEvidence,
+      evidenceCatalog: matchEvidence.entries, semanticMatchingMode: 'split' });
+    assert.equal(boundedTracks.selectedTrackId, 'T2');
+    assert.equal(calls.length, 5, '换方向仍共用本次岗位的一次修复机会');
+    assert.equal(calls.filter(call => call.input.contractRepair).length, 1, '下一岗位分析应拥有独立预算');
+    assert.equal(boundedTracks.evidenceDiagnostics.repairAttempts, 1);
+    assert.equal(boundedTracks.evidenceDiagnostics.responsibilityRepair.attempts, 0);
+  }
+  adapter.chatJson = semanticChat;
+  calls.length = 0;
+  const semanticGlobal = { ...semanticDirections, eligibilityItems: [
+    { ...semanticDirections.eligibilityItems[0], trackIds: ['T1', 'T2'] }
+  ] };
+  const globallyStopped = await adapter.matchJob({ candidateProfile, jobUnderstanding: semanticGlobal, matchEvidence,
+    evidenceCatalog: matchEvidence.entries, semanticMatchingMode: 'split' });
+  assert.equal(globallyStopped.qualificationStatus, 'conflict');
+  assert.equal(calls.length, 2, '已确认全局语义冲突不能重复检查其他方向');
+  assert.deepStrictEqual(globallyStopped.evidenceDiagnostics.attemptedTrackIds, ['T1']);
+  const frozenDuty = { id: 'D1', state: 'matched', resumeEvidence: '简历：编写接口，并优化查询。', candidateEvidenceRefs: [projectId] };
+  const inventedDuty = { id: 'D2', state: 'matched', resumeEvidence: '简历：已取得硕士学历',
+    candidateEvidenceRefs: [matchEvidence.entries.find(entry => entry.sourcePath === 'education[0].degree').id] };
+  adapter.chatJson = async (_prompt, input) => ({ selectedTrackId: input.contractRepair ? 'T2' : 'T1',
+    matches: input.contractRepair ? [frozenDuty, { ...frozenDuty, id: 'D2' }] : [frozenDuty, inventedDuty] });
+  const immutableTrack = await adapter.callSplitEvidenceStage({ kind: 'matchResponsibilities', prompt: '', input: {}, matchEvidence,
+    normalize: raw => normalizeResponsibilityOutput(raw, jobUnderstanding) });
+  assert.equal(immutableTrack.raw.selectedTrackId, 'T1', '事实修复不能换方向并重新解释已核实的职责');
+  assert.equal(immutableTrack.groundingRepair.error, 'repair_changed_selected_track');
+  assert.deepStrictEqual(immutableTrack.raw.matches, [frozenDuty]);
+  calls.length = 0;
+  const globalFailure = { ...jobUnderstanding, eligibilityItems: [{ ...jobUnderstanding.eligibilityItems[0], trackIds: [] }] };
+  const stopped = await adapter.matchJob({ candidateProfile, jobUnderstanding: globalFailure, matchEvidence,
+    evidenceCatalog: matchEvidence.entries, semanticMatchingMode: 'split' });
+  assert.equal(stopped.qualificationStatus, 'conflict');
+  assert.equal(calls.length, 0, '全局明确资格失败无需继续模型分支');
 }

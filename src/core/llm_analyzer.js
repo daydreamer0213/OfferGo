@@ -17,7 +17,7 @@ function createLlmAnalyzer({ modelConfig = DEFAULT_MODEL_CONFIG, adapter = null,
     matchJob: async (input, options = {}) => validateAdapterResult(
       "matchJob",
       await modelAdapter.matchJob(input, options),
-      { jobUnderstanding: input?.jobUnderstanding }
+      { jobUnderstanding: input?.jobUnderstanding, matchEvidence: input?.matchEvidence }
     ),
     draftCommunication: async (input, options = {}) => validateAdapterResult("draftCommunication", await modelAdapter.draftCommunication(input, options)),
     buildCandidateMatchCard: async (input, options = {}) => validateAdapterResult("buildCandidateMatchCard", await modelAdapter.buildCandidateMatchCard(input, options))

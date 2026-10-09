@@ -3,6 +3,7 @@ const {
   requirementsForTrack
 } = require("./model_contract");
 const { DECISION_POLICY } = require("./decision_policy");
+const { verifyJobMatchEvidence, inferCandidateEvidenceRefs } = require('./job_match_evidence');
 
 const RESPONSIBILITY_STATES = new Set([
   "matched",
@@ -75,7 +76,8 @@ function combineSplitMatchEvidence({
     responsibilityMatches: responsibilities.matches.map((item) => ({
       id: item.id,
       state: item.state,
-      resumeEvidence: item.resumeEvidence
+      resumeEvidence: item.resumeEvidence,
+      ...(item.candidateEvidenceRefs ? { candidateEvidenceRefs: item.candidateEvidenceRefs } : {})
     })),
     matches: requirements.matches,
     eligibility: requirements.eligibility
@@ -112,6 +114,7 @@ function normalizeResponsibilityOutput(raw, jobUnderstanding) {
         state: match?.state || "unknown",
         jdEvidence: item.jdEvidence,
         resumeEvidence: match?.resumeEvidence || "",
+        ...(match?.candidateEvidenceRefs ? { candidateEvidenceRefs: match.candidateEvidenceRefs } : {}),
         gapDimension: match?.gapDimension || ""
       };
     })
@@ -121,7 +124,7 @@ function normalizeResponsibilityOutput(raw, jobUnderstanding) {
 function normalizeRequirementOutput(raw, jobUnderstanding, selectedTrackId) {
   exactKeys(raw, ["matches", "eligibility"], "requirement");
   const requirements = requirementsForTrack(jobUnderstanding, selectedTrackId);
-  const eligibility = eligibilityItems(jobUnderstanding);
+  const eligibility = eligibilityItems(jobUnderstanding, selectedTrackId);
   return {
     requirements,
     matches: normalizeSparseRows(raw.matches, {
@@ -245,11 +248,29 @@ function buildSplitRequirementInput(input, selectedTrackId) {
       roleSummary: track.roleSummary
     },
     requirements: requirementsForTrack(jobUnderstanding, selectedTrackId),
-    eligibility: eligibilityItems(jobUnderstanding)
+    eligibility: eligibilityItems(jobUnderstanding, selectedTrackId)
   };
   if (input?.evidenceCatalog) result.evidenceCatalog = input.evidenceCatalog.filter(entry => entry.sourceKind !== 'jd');
   if (input?.contractRepair) result.contractRepair = input.contractRepair;
   return result;
+}
+
+function groundSplitCandidateEvidence(raw, evidence) {
+  if (!evidence) return { raw, invalidIds: [] };
+  const candidateEntries = evidence.entries.filter(entry => entry.sourceKind !== 'jd');
+  const invalidIds = [];
+  const grounded = { ...raw };
+  for (const field of ['matches', 'eligibility']) {
+    if (!Array.isArray(raw[field])) continue;
+    grounded[field] = raw[field].flatMap(row => {
+      if (row.state === 'unknown') return [row];
+      const refs = row.candidateEvidenceRefs || inferCandidateEvidenceRefs(evidence, row.resumeEvidence);
+      const verified = verifyJobMatchEvidence({ evidence, refs, sourceKind: ['resume', 'profile_fact'], claim: row.resumeEvidence });
+      if (!refs.length || !verified.valid) { invalidIds.push(row.id); return []; }
+      return [{ ...row, candidateEvidenceRefs: refs }];
+    });
+  }
+  return { raw: grounded, invalidIds: [...new Set(invalidIds)] };
 }
 
 function buildSplitResponsibilityInput(input) {
@@ -283,9 +304,9 @@ function hiringTracks(jobUnderstanding) {
   }];
 }
 
-function eligibilityItems(jobUnderstanding) {
+function eligibilityItems(jobUnderstanding, selectedTrackId) {
   if (Array.isArray(jobUnderstanding?.eligibilityItems)) {
-    return jobUnderstanding.eligibilityItems;
+    return jobUnderstanding.eligibilityItems.filter(item => !selectedTrackId || !item.trackIds?.length || item.trackIds.includes(selectedTrackId));
   }
   const values = Array.isArray(jobUnderstanding?.eligibilityConstraints)
     ? jobUnderstanding.eligibilityConstraints
@@ -321,6 +342,7 @@ module.exports = {
   buildSplitRequirementInput,
   buildSplitResponsibilityInput,
   combineSplitMatchEvidence,
+  groundSplitCandidateEvidence,
   deriveRoleAlignment,
   normalizeRequirementOutput,
   normalizeResponsibilityOutput

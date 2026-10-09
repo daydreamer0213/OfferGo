@@ -281,7 +281,7 @@ async function genericEvidenceContractSmoke() {
         jobId: input.job.sourceId,
         roleSummary: "负责抖音店铺经营、活动与投放复盘",
         coreResponsibilities: [{ label: "店铺活动运营", evidence: "JD：负责抖音店铺活动与投放复盘" }],
-        coreRequirements: [{ label: "投放与 ROI 分析", indispensable: true, evidence: "JD：必须独立完成投放 ROI 复盘" }],
+        coreRequirements: [{ label: "投放与 ROI 分析", indispensable: true, evidence: "JD：负责抖音店铺投放与复盘" }],
         preferredRequirements: [{ label: "抖音店铺经验", evidence: "JD：有抖音店铺经验优先" }],
         outcomeExpectations: [],
         jobQuality: { level: "caution", concerns: [{ type: "responsibility_sprawl", evidence: "JD 同时要求直播、拍摄、剪辑" }] },
@@ -847,9 +847,9 @@ async function initialFailureProvenanceSmoke() {
 }
 
 async function pipelineVersionCacheSmoke() {
-  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v20-conditions");
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v46-conditions");
-  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1");
+  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v21-conditions");
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v51-grounded-conditions");
+  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.9-screening-v2-effect-conditions-v1");
   const currentRevision = {
     profileVersion: "profile",
     searchPlanVersion: "plan",
@@ -1580,9 +1580,9 @@ async function multiTrackValidationIdempotenceSmoke() {
   assert(!JSON.stringify(analyzerResult).includes(privacySentinel),
     "analyzer wrapper must not preserve raw extra values");
 
-  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v46-conditions",
+  assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v51-grounded-conditions",
     "source evidence and duty evidence fixes must invalidate previous match caches");
-  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v20-conditions",
+  assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v21-conditions",
     "foundation requirement extraction clarification must invalidate v18 understandings");
   const currentRevision = {
     profileVersion: "profile",
@@ -2326,9 +2326,9 @@ function staleAnalysisSmoke() {
   const contractUpgradeReasons = analysisStaleReasons({ revision: oldPipelineRevision }, currentPipelineRevision);
   assert(contractUpgradeReasons.includes("decision_rules_changed"), "old revisions without local decision rules must be stale");
   assert.deepStrictEqual(PIPELINE_VERSIONS, {
-    understandJob: "job-understanding-v20-conditions",
-    matchJob: "match-decision-v46-conditions",
-    decisionRules: "four-tier-weighted-v4.8-screening-v2-effect-conditions-v1",
+    understandJob: "job-understanding-v21-conditions",
+    matchJob: "match-decision-v51-grounded-conditions",
+    decisionRules: "four-tier-weighted-v4.9-screening-v2-effect-conditions-v1",
     communication: "communication-v3-candidate-speaker"
   });
   const decisionRulesOnlyChanged = analysisStaleReasons({
@@ -3225,6 +3225,13 @@ function coreRequirementScoreSmoke() {
         evidence
       }), ModelContractError, `混合硬条件必须要求拆分：${evidence}`);
     }
+  }
+  const splitSource = 'JD：必须熟练 Java、Spring Cloud、Kubernetes 并具备 3-5 年高并发经验';
+  for (const join of ['和','与','、']) assert.equal(validateIndispensableRequirement({ label: '熟练Python',
+    evidence: `JD：必须熟练Java${join}Python`, indispensable: false }), true, '共同技能前提不因并列词不同而丢失');
+  for (const [label, expected] of [['熟练Java', true], ['熟练Spring Cloud', true], ['熟练Kubernetes', true], ['3-5年高并发经验', false]]) {
+    assert.equal(validateIndispensableRequirement({ label, evidence: splitSource, indispensable: false }), expected,
+      '任职条件已经拆成独立标签时，共用的完整JD引用不能造成结构失败');
   }
   for (const evidence of [
     "JD：必须拥有 3 年以上经验和 PMP 证书",
@@ -4646,8 +4653,8 @@ function understanding(jobId) {
     businessScenario: "企业知识库",
     coreResponsibilities: [{ label: "企业知识库应用开发", evidence: "JD：负责 RAG 知识库和 Agent 应用开发" }],
     coreRequirements: [
-      { label: "Python", foundation: true, indispensable: true, evidence: "JD：必须熟练使用 Python" },
-      { label: "RAG", indispensable: true, evidence: "JD：必须具备 RAG 知识库建设能力" }
+      { label: "Python", foundation: true, indispensable: true, evidence: "JD：熟练使用 Python" },
+      { label: "RAG", indispensable: true, evidence: "JD：负责 RAG 知识库和 Agent 应用开发" }
     ],
     preferredRequirements: [],
     outcomeExpectations: [],

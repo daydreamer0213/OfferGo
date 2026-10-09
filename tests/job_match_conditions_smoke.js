@@ -15,6 +15,34 @@ function evaluate({ candidateProfile, label, alternatives, trackIds = ['T1'], st
   const conditionResults = assessJobConditions({ conditions, reportedResults, evidence, selectedTrackId });
   return { conditions, conditionResults, summary: summarizeQualifications({ conditions, conditionResults, selectedTrackId }) };
 }
+for (const [label, fact, expected] of [
+  ['计算机科学与技术或相关专业', '电子信息工程', 'unknown'],
+  ['仅接受计算机科学与技术专业', '电子信息工程', 'conflict'],
+  ['计算机科学与技术或相关专业', '招聘方已确认不接受电子信息工程专业', 'conflict']
+]) {
+  const candidateProfile = { education: [{ major: fact }] };
+  const evidence = buildJobMatchEvidence({ candidateProfile });
+  assert.equal(evaluate({ candidateProfile, label,
+    alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: label }] }],
+    reportedResults: [{ id: 'E1', state: 'conflict', resumeEvidence: `简历：${fact}，非计算机科学与技术或相关专业。`,
+      candidateEvidenceRefs: evidence.entries.map(entry => entry.id) }]
+  }).summary.status, expected, '开放的相关专业范围不能因专业名称不同而直接认定冲突');
+}
+assert.equal(evaluate({ candidateProfile: { experiences: [{ durationMonths: 8, highlights: ['参与接口开发'] }] },
+  label: '3-5年工作经验', alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '3-5年工作经验' }] }]
+}).summary.status, 'not_required', '模型把年限放入资格时也必须保留原有可冲政策');
+assert.equal(evaluate({ candidateProfile: {}, label: '必须熟练Java并具备3年经验',
+  alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '必须熟练Java并具备3年经验' }] }]
+}).conditions[0].category, 'qualification', '混合独立技能前提不能被年限政策整条抹掉');
+for (const [degree, expected] of [['本科','satisfied'], ['大专','conflict']]) {
+  const label = '本科及以上学历且具备3年经验';
+  const candidateProfile = { education: [{ degree }], experiences: [{ durationMonths: 8 }] };
+  const evidence = buildJobMatchEvidence({ candidateProfile });
+  assert.equal(evaluate({ candidateProfile, label, alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: label }] }],
+    reportedResults: [{ id: 'E1', state: 'conflict', resumeEvidence: `简历：${degree}，8个月工作经验`,
+      candidateEvidenceRefs: evidence.entries.map(entry => entry.id) }] }).summary.status, expected,
+  '合取仍用语义原子时只移除可冲年限，保留学历资格');
+}
 for (const [date, expected] of [
   ['2024-06', 'conflict'], ['2026-10-31', 'conflict'], ['2026-11-01', 'satisfied'],
   ['2027-10-31', 'satisfied'], ['2027-11-01', 'conflict'], ['2026', 'unknown'], ['', 'unknown']
@@ -88,6 +116,36 @@ const inferredCredential = normalizeJobConditions({ evidence: credentialEvidence
   jobUnderstanding: { eligibilityItems: ['必须持有C1驾驶证'] } });
 assert.equal(summarizeQualifications({ conditions: inferredCredential,
   conditionResults: assessJobConditions({ conditions: inferredCredential, evidence: credentialEvidence }) }).status, 'satisfied');
+for (const [credentials, expected] of [
+  [[{ name: 'C1驾驶证', details: '已取得' }], 'satisfied'],
+  [[{ name: 'C1驾驶证', details: '尚未取得' }, { name: 'C2驾驶证', details: '尚未取得' }], 'conflict'],
+  [[{ name: 'C1驾驶证', details: '尚未取得' }], 'unknown']
+]) {
+  const label = '必须持有C1或C2驾驶证';
+  const evidence = buildJobMatchEvidence({ candidateProfile: { credentials }, jobFacts: { description: label } });
+  const conditions = normalizeJobConditions({ evidence, jobUnderstanding: { coreRequirements: [
+    { id: 'R1', label: '持有C1或C2驾驶证', evidence: `JD：${label}`, trackIds: ['T1'], indispensable: true }
+  ] } });
+  assert.equal(summarizeQualifications({ conditions, conditionResults: assessJobConditions({ conditions, evidence }) }).status,
+    expected, '真实旧格式输出中的任选证照不能合成一张不存在的证照');
+}
+assert.equal(evaluate({ candidateProfile: { education: [
+  { degree: '本科', endDate: '2024-06', status: '已毕业' }, { degree: '硕士', status: '在读' }
+] }, label: windowClause, alternatives: [{ allOf: [
+  { kind: 'education_level', operator: 'at_least', value: '本科' },
+  { kind: 'graduation_date', operator: 'within', value: ['2026-11-01', '2027-10-31'] }
+] }] }).summary.status, 'conflict', '真实模型漏写educationLevels时仍应遵守JD明确的本科日期范围');
+assert.equal(evaluate({ candidateProfile: { education: [
+  { degree: '本科', endDate: '2024-06', status: '已毕业' }, { degree: '硕士', endDate: '2027-06', status: '已毕业' }
+], credentials: [{ name: 'C1驾驶证', details: '已取得' }] },
+label: '本科毕业时间需在2026年11月1日至2027年10月31日之间，并必须持有C1或C2驾驶证',
+alternatives: ['C1驾驶证','C2驾驶证'].map(value => ({ allOf: [
+  { kind: 'education_level', operator: 'at_least', value: '本科' },
+  { kind: 'graduation_date', operator: 'within', value: ['2026-11-01','2027-10-31'] },
+  { kind: 'credential', operator: 'has', value }
+] })) }).summary.status, 'conflict', '证照的替代分支不能抹掉每个分支共用的本科日期范围');
+assert.equal(evaluate({ candidateProfile: { credentials: [{ name: 'C1驾驶证', details: '未持有' }] },
+  label: '必须持有C1驾驶证', alternatives: [certificate('C1驾驶证')] }).summary.status, 'conflict', '未持有不能被持有子串误判');
 const separateIds = normalizeJobConditions({ evidence, jobUnderstanding: {
   eligibilityItems: ['本科及以上学历'], coreRequirements: ['Python接口开发'], bonusRequirements: ['SQL优先']
 } });
@@ -118,4 +176,32 @@ assert.equal(evaluate({ candidateProfile: { education: [{ degree: '本科' }] },
   label: '硕士及以上学历，教师资格证优先', alternatives: degree }).summary.status,
 'conflict', 'a certificate preference does not cancel an independently mandatory degree');
 assert.equal(normalizeJobConditions({ evidence, jobUnderstanding: { eligibilityConstraints: ['JD：本科及以上学历'] } })[0].category, 'qualification');
+assert.equal(evaluate({ candidateProfile: { education: [], source: { resumeEvidenceText: '已取得本科学历，2024年6月毕业。' } },
+  label: '本科及以上学历', alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }] }).summary.status,
+'satisfied', '画像漏掉学历时应复用原简历明确事实');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '博士' }] }, label: '硕士及以上学历',
+  alternatives: [{ allOf: [{ kind: 'education_level', operator: 'equals', value: '硕士' }] }] }).summary.status,
+'satisfied', '及以上不能被模型改成恰好该学历');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '本科' }], source: { resumeEvidenceText: '已取得本科学历，2024年6月毕业。' } },
+  label: '仅招2024届', alternatives: [{ allOf: [{ kind: 'graduation_date', operator: 'cohort', value: [2024] }] }] }).summary.status,
+'satisfied', '原简历已有毕业日期时补齐画像遗漏');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '本科', endDate: '2022' }], source: { resumeEvidenceText: '本科2022毕业。硕士2025毕业。' } },
+  label: '硕士及以上学历', alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '硕士' }] }] }).summary.status,
+'satisfied', '画像遗漏后续学历时仍使用原简历明确记录');
+assert.notEqual(evaluate({ candidateProfile: { education: [], source: { resumeEvidenceText: '因未完成毕业要求，未获得本科学历。' } },
+  label: '本科及以上学历', alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }] }).summary.status,
+'satisfied', '原文明确未获得学历不能回填为已取得');
 console.log('job_match_conditions_smoke ok');
+const masterJdEvidence = buildJobMatchEvidence({ candidateProfile: { education: [{ degree: '本科' }] },
+  jobFacts: { description: '硕士及以上学历' } });
+for (const item of [
+  { label: '本科及以上学历', evidence: 'JD：本科及以上学历', alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }] },
+  { label: '硕士及以上学历', evidence: 'JD：硕士及以上学历', alternatives: [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }] }
+]) {
+  const conditions = normalizeJobConditions({ evidence: masterJdEvidence, jobUnderstanding: { eligibilityItems: [
+    { ...item, jdEvidenceRefs: [masterJdEvidence.entries.find(entry => entry.sourceKind === 'jd').id] }
+  ] } });
+  const result = assessJobConditions({ conditions, evidence: masterJdEvidence });
+  assert.notEqual(summarizeQualifications({ conditions, conditionResults: result }).status, 'satisfied',
+    '真实 JD 来源 ID 不能为改写的学历门槛背书');
+}

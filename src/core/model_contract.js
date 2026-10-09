@@ -1,5 +1,6 @@
 const { educationMentions, educationRank, negatedEducationRank } = require("./job_eligibility");
-const { normalizeJobConditions, assessJobConditions, summarizeQualifications } = require('./job_match_conditions');
+const { normalizeJobConditions, assessJobConditions, summarizeQualifications, isExperienceYearsRequirement } = require('./job_match_conditions');
+const { verifyJobMatchEvidence, inferCandidateEvidenceRefs } = require('./job_match_evidence');
 class ModelContractError extends Error {
   constructor(kind, message) {
     super(`${kind} 模型输出不符合契约：${message}`);
@@ -57,16 +58,20 @@ function attachJobConditions(result, raw, context) {
   if (!context.matchEvidence) return result;
   const conditions = normalizeJobConditions({ jobUnderstanding: context.jobUnderstanding, evidence: context.matchEvidence });
   const candidateEntries = context.matchEvidence.entries.filter(entry => ['resume', 'profile_fact'].includes(entry.sourceKind));
-  const rows = [...(raw.eligibility || []), ...(raw.matches || [])].map(row => {
-    const quote = text(row.resumeEvidence).replace(/^简历[:：]\s*/, '').replace(/[。.]$/, '');
-    const refs = row.candidateEvidenceRefs || candidateEntries.filter(entry => quote && text(entry.quote).includes(quote)).map(entry => entry.id);
-    return { ...row, conditionId: row.id, candidateEvidenceRefs: refs };
+  const rows = [...(raw.conditionResults || []), ...(raw.eligibility || []), ...(raw.matches || []), ...(raw.requirementMatches || [])].map(row => {
+    const refs = row.candidateEvidenceRefs || inferCandidateEvidenceRefs(context.matchEvidence, row.resumeEvidence);
+    return { ...row, conditionId: row.conditionId || row.id || conditions.find(condition => condition.label === text(row.requirement).normalize('NFKC').replace(/\s+/g, ' '))?.id,
+      candidateEvidenceRefs: refs };
   });
   const conditionResults = assessJobConditions({ conditions, reportedResults: rows, evidence: context.matchEvidence,
     selectedTrackId: result.selectedTrackId });
   const qualification = summarizeQualifications({ conditions, conditionResults, selectedTrackId: result.selectedTrackId });
   return { ...result, conditionSchemaVersion: 1, conditions, conditionResults,
     qualificationStatus: qualification.status, qualification,
+    evidenceDiagnostics: raw.evidenceDiagnostics || {},
+    evidence: { ...result.evidence, resume: (result.evidence?.resume || []).filter(claim => verifyJobMatchEvidence({
+      evidence: context.matchEvidence, refs: candidateEntries.map(entry => entry.id), claim
+    }).valid) },
     hardBlockers: (result.hardBlockers || []).filter(blocker => blocker.kind !== 'eligibility'
       && !conditions.some(condition => condition.category === 'qualification'
         && condition.label === text(blocker.requirement).replace(/^JD[:：]\s*/, ''))) };
@@ -116,14 +121,6 @@ const MATCH_CERTAINTY_LEVELS = ["high", "medium", "low"];
 const COMPACT_CAUTION_KINDS = ["candidate_transition", "preferred_gap", "outcome_uncertain", "preference_conflict"];
 const HARD_BLOCKER_KINDS = ["eligibility", "indispensable_core", "safety"];
 const JOB_QUALITY_LEVELS = ["normal", "caution", "risk"];
-
-function isExperienceYearsRequirement(requirement) {
-  const source = `${requirement?.requirement || ""} ${requirement?.jdEvidence || ""}`;
-  const numeral = String.raw`(?:\d+|一|二|两|三|四|五|六|七|八|九|十)`;
-  const years = String.raw`${numeral}\s*(?:[-至到~～]\s*${numeral})?\s*年`;
-  const experience = String.raw`(?:经验|年限|工作经历|从业经历|相关经历)`;
-  return new RegExp(`${experience}.{0,20}${years}|${years}.{0,12}${experience}`).test(source);
-}
 
 function isSoftOnlyEligibilityConstraint(value) {
   const source = String(value || "");
@@ -607,7 +604,8 @@ function validateSparseMatchEvidence(value, context = {}) {
       id: expected.id,
       state: match.state,
       jdEvidence: expected.jdEvidence,
-      resumeEvidence: match.resumeEvidence
+      resumeEvidence: match.resumeEvidence,
+      ...(match.candidateEvidenceRefs ? { candidateEvidenceRefs: match.candidateEvidenceRefs } : {})
     };
   });
   const requirements = selected.requirements.map(normalizeExpectedRequirement);
@@ -1202,7 +1200,23 @@ function validateIndispensableRequirement(item = {}) {
   const jdEvidence = item.evidence || item.jdEvidence || "";
   const indispensable = item?.indispensable === true;
   const source = String(jdEvidence || requirement).replace(/^JD[：:]\s*/i, "");
-  const clauses = source.split(/[，,；;。、\n]|并且|同时|而且|以及|但|且|和|与/).map((value) => value.trim()).filter(Boolean);
+  let clauses = source.split(/[，,；;。、\n]|并且|同时|而且|以及|但|且|和|与|并具备|并拥有/).map((value) => value.trim()).filter(Boolean);
+  // A flattened label can cite its original full sentence. Assess the one
+  // identifiable clause, rather than treating adjacent years/bonus terms as
+  // part of this already separated requirement; retain the full stored quote.
+  const literal = String(requirement).normalize('NFKC').replace(/\s/g, '');
+  const atomic = !/[，,；;、]|并且|同时|以及|且|和|与/.test(literal);
+  if (atomic && clauses.length > 1) {
+    const label = literal.replace(/^(?:必须|须|熟练|掌握|熟悉|具备|拥有|精通|使用|了解)+/, '');
+    const selected = label.length >= 2 ? clauses.filter(clause => clause.normalize('NFKC').replace(/\s/g, '').includes(label)) : [];
+    if (selected.length === 1) {
+      const group = source.split(/[，,；;。\n]|并且|同时|而且|以及|但|并具备|并拥有/).find(part => part.includes(selected[0]));
+      const sharedHard = /、|和|与/.test(group || '') && hasExplicitHardBoundaryEvidence(group)
+        && !isExperienceYearsRequirement({ requirement: selected[0] })
+        && !isExplicitlyOptionalRequirement({ requirement: selected[0] });
+      clauses = [sharedHard ? `必须${selected[0]}` : selected[0]];
+    }
+  }
   let hasHardOnlyClause = false;
   let hasHardExperienceClause = false;
   let hasOptionalClause = false;

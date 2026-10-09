@@ -407,6 +407,7 @@ function layeredDecisionAnalysis(roleAlignment, states) {
     ...completeAnalysis(),
     roleAlignment,
     requirementMatches: states.map((state, index) => ({
+      requirement: `核心能力 ${index + 1}`,
       state,
       foundation: true,
       central: false,
