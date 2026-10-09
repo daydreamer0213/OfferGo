@@ -24,13 +24,18 @@ const ZHAOPIN_COMPONENT_ACCESSORS_SOURCE = String.raw`
 `;
 
 const ZHAOPIN_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
-  if (window.__zhaopinReadSearchState?.__roleflowVersion === 9) return true;
+  if (window.__zhaopinReadSearchState?.__roleflowVersion === 10) return true;
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const validSourceId = (value) => /^[A-Za-z0-9]{1,160}$/.test(String(value || '')) ? String(value) : '';
   const cardTitle = (card) => {
     const node = card.querySelector('.vue-clamp__text') || card.querySelector('.job-card__title-main');
     const displayed = clean(node?.textContent);
-    return displayed ? clean(node?.getAttribute('aria-label')) || displayed : '';
+    const ariaTitle = clean(node?.getAttribute('aria-label'));
+    if (displayed) return ariaTitle || displayed;
+    if (ariaTitle) return '';
+    const job = cardJob(card);
+    const company = clean(card.querySelector('.job-card__company-name')?.textContent);
+    return validSourceId(job?.number) && company && clean(job?.companyName) === company ? clean(job?.name) : '';
   };
   ${ZHAOPIN_COMPONENT_ACCESSORS_SOURCE}
   const cardJob = (card) => {
@@ -155,7 +160,7 @@ const ZHAOPIN_PAGE_HELPERS_EXPRESSION = String.raw`(() => {
       isSearchPage: location.protocol === 'https:' && location.hostname === 'www.zhaopin.com' && pathname === '/jobs/' && new URL(location.href).searchParams.get('pageMode') === 'search'
     };
   };
-  window.__zhaopinReadSearchState.__roleflowVersion = 9;
+  window.__zhaopinReadSearchState.__roleflowVersion = 10;
   window.__zhaopinActivateCard = (expectedIndex, expectedSignature, expectedEmpty = false) => {
     const cards = Array.from(document.querySelectorAll('.job-list-panel .job-card'));
     const card = cards[Number(expectedIndex)];

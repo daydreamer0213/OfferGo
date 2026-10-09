@@ -82,7 +82,7 @@ const PAGE_HELPERS = String.raw`
     });
   };
 
-  window.__bossCardActivationPoint = function(jobId) {
+  window.__bossCardActivationPoint = function(jobId, dispatchBackground = false) {
     const expectedJobId = String(jobId || "").trim();
     if (!expectedJobId) return { ready: false, jobId: "", x: 0, y: 0, reason: "job_id_missing" };
     const card = window.__bossCards().find((item) => {
@@ -105,6 +105,16 @@ const PAGE_HELPERS = String.raw`
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
     if (!(rect.width > 0 && rect.height > 0)) {
       return { ready: false, jobId: componentJobId, x: 0, y: 0, reason: "card_not_visible" };
+    }
+    if (dispatchBackground === true && viewportWidth === 0 && viewportHeight === 0) {
+      const style = getComputedStyle(card);
+      if (component?.$options?.name !== "JodCard" || Number(component?.data?.jobValidStatus) !== 1
+        || card.tagName !== "LI" || !card.matches(".job-card-box")
+        || style.display === "none" || style.visibility === "hidden") {
+        return { ready: false, jobId: componentJobId, x: 0, y: 0, reason: "background_card_unverified" };
+      }
+      card.click();
+      return { ready: true, dispatched: true, jobId: componentJobId, x: 0, y: 0, reason: "" };
     }
     if (!(x >= 0 && y >= 0 && x < viewportWidth && y < viewportHeight)) {
       return { ready: false, jobId: componentJobId, x: 0, y: 0, reason: "point_out_of_viewport" };
@@ -1844,7 +1854,7 @@ class BossSiteAdapter {
           await this.assertSearchPage(tabId);
           const activation = await this.browser.evalValue(
             tabId,
-            `(() => window.__bossCardActivationPoint(${JSON.stringify(expectedJobId)}))()`
+            `(() => window.__bossCardActivationPoint(${JSON.stringify(expectedJobId)}, true))()`
           );
           await assertRuntimeTabBindings(assertTabBindings);
           await this.assertSearchPage(tabId);
@@ -1856,7 +1866,7 @@ class BossSiteAdapter {
             || pointX < 0 || pointY < 0) {
             return null;
           }
-          await this.browser.clickAt(tabId, { x: pointX, y: pointY });
+          if (activation.dispatched !== true) await this.browser.clickAt(tabId, { x: pointX, y: pointY });
         } finally {
           await this.browser.cdp(tabId, "Emulation.setFocusEmulationEnabled", { enabled: false });
         }

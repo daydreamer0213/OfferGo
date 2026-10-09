@@ -278,7 +278,7 @@ async function main() {
       window.__zhaopinReadSearchState.__roleflowVersion = 5;
     });
     assert.equal(await page.evaluate(ZHAOPIN_PAGE_HELPERS_EXPRESSION), true, "the upgraded DOM helper must run in an already-open page");
-    assert.equal(await page.evaluate(() => window.__zhaopinReadSearchState.__roleflowVersion), 9,
+    assert.equal(await page.evaluate(() => window.__zhaopinReadSearchState.__roleflowVersion), 10,
       "the upgraded injection replaces a previously cached version 5 helper");
     const vue2State = await adapter.readSearchState("ZHAOPIN-SEARCH");
     assert.equal(vue2State.cards[0].sourceId, "CCSYNTHV2A1J00000000001", "Vue 2 JobCard exposes the trusted card ID");
@@ -335,6 +335,33 @@ async function main() {
       "an empty visible title must not fall back to a residual aria-label");
     assert.equal(activationCountBeforeTitleChecks(), beforeEmptyTitleClick,
       "an empty visible title must be rejected before clicking");
+    await page.evaluate(() => {
+      document.querySelector("#vue2-card .vue-clamp__text").setAttribute("aria-label", "");
+    });
+    const backgroundTitleState = await adapter.readSearchState("ZHAOPIN-SEARCH");
+    assert.equal(backgroundTitleState.cards[0].title, "合成智能应用工程师（Python与视觉方向）",
+      "a blank rendered and aria title can use the current ID-and-company-verified JobCard name");
+    assert.equal(backgroundTitleState.cards[0].sourceId, "CCSYNTHV2A1J00000000001");
+    assert.ok(await adapter.readVisiblePaneDetail("ZHAOPIN-SEARCH", backgroundTitleState.cards[0]),
+      "a background card with trusted current identity must retain complete detail coverage");
+    for (const invalid of ["company", "number", "component"]) {
+      await page.evaluate(kind => {
+        const card = document.getElementById("vue2-card");
+        window.savedBackgroundJobComponent = card.__vue__;
+        window.savedBackgroundJob = { ...card.__vue__.$props.job };
+        if (kind === "company") card.__vue__.$props.job.companyName = "另一家公司";
+        if (kind === "number") card.__vue__.$props.job.number = "invalid/id";
+        if (kind === "component") delete card.__vue__;
+      }, invalid);
+      const rejected = await adapter.readSearchState("ZHAOPIN-SEARCH");
+      assert.equal(rejected.cards[0].title, "", `${invalid} cannot supply a trusted background title`);
+      assert.equal(rejected.cards[0].sourceId, undefined);
+      await page.evaluate(() => {
+        const card = document.getElementById("vue2-card");
+        card.__vue__ = window.savedBackgroundJobComponent;
+        card.__vue__.$props.job = window.savedBackgroundJob;
+      });
+    }
     await page.evaluate(() => {
       const text = document.querySelector("#vue2-card .vue-clamp__text");
       text.textContent = "合成智能应用工程师（Python…";
@@ -573,7 +600,7 @@ async function backgroundReadinessSmoke(page, fixtureHtml) {
   const cancelled = renderingBridge();
   const controller = new AbortController();
   const cancelledAdapter = new ZhaopinSiteAdapter({ browser: cancelled.bridge, sleepFn: async () => controller.abort() });
-  await assert.rejects(() => cancelledAdapter.waitForSearchReady("ZHAOPIN-SEARCH", { ...options, signal: controller.signal }), (error) => error.code === "ZHAOPIN_ABORTED");
+  await assert.rejects(() => cancelledAdapter.waitForSearchReady("ZHAOPIN-SEARCH", { ...options, keyword: "不同关键词", signal: controller.signal }), (error) => error.code === "ZHAOPIN_ABORTED");
   assert.deepEqual(cancelled.bridge.calls.filter((call) => call.type === "cdp").map((call) => call.params.enabled), [true, false], "cancellation must release background focus emulation");
 
   await reset();

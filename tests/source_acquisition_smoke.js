@@ -161,6 +161,7 @@ assert.deepStrictEqual(ambiguousNative.unresolvedSelections, [{ field: "jobType"
   await visiblePaneIdentitySmoke();
   await visiblePaneActivationWaitSmoke();
   await visiblePaneTrustedClickOrderSmoke();
+  await visiblePaneBackgroundContainerSmoke();
   await visiblePaneLocateFailureNoClickSmoke();
   await visiblePaneClickIdentityDriftSmoke();
   await visiblePaneClickCapabilityFailClosedSmoke();
@@ -758,6 +759,15 @@ async function accessReservationSmoke() {
 }
 
 function pageHelperCardActivationPointSmoke() {
+  const background = runCardActivationPointFixture({ viewport: 0, dispatchBackground: true, hit: "none" });
+  assert.strictEqual(background.result.dispatched, true, "a verified background card must use its original non-link container click");
+  assert.strictEqual(background.events.filter(event => event === "card_click").length, 1);
+  assert.strictEqual(background.events.includes("hit"), false, "zero viewport must not depend on an unavailable coordinate hit");
+  for (const invalid of [{ componentJobId: "other-job" }, { jobValidStatus: 0 }, { cardTag: "A" }]) {
+    const rejected = runCardActivationPointFixture({ viewport: 0, dispatchBackground: true, ...invalid });
+    assert.strictEqual(rejected.result.ready, false);
+    assert.strictEqual(rejected.events.includes("card_click"), false);
+  }
   const visible = runCardActivationPointFixture();
   assert.deepStrictEqual({ ...visible.result }, {
     ready: true,
@@ -990,6 +1000,48 @@ async function visiblePaneTrustedClickOrderSmoke() {
   );
   assert.strictEqual(events.filter((event) => event.type === "click_at").length, 1);
   assert.strictEqual(navigations, 0);
+}
+
+async function visiblePaneBackgroundContainerSmoke() {
+  for (const outcome of ["complete", "half", "drift", "lost_response"]) {
+    let clicked = false;
+    const helper = runCardActivationPointFixture({
+      viewport: 0,
+      hit: "none",
+      execute: false,
+      onCardClick: () => { clicked = true; }
+    });
+    const fixture = paneBrowserFixture({
+      activation: ({ expression }) => {
+        const result = helper.evaluate(expression);
+        if (outcome === "lost_response") {
+          throw Object.assign(new Error("response lost after container click"), { code: "BROWSER_DISCONNECTED" });
+        }
+        return result;
+      },
+      states: () => !clicked ? paneState("old-job", "Old job")
+        : outcome === "drift" ? paneState("other-job", "Other job")
+          : paneState("target-job", "Target job", outcome === "half"
+            ? { paneJobId: "old-job", jobDetailLoading: true } : {})
+    });
+    const adapter = new BossSiteAdapter({ browser: fixture.browser, sleepFn: async () => {}, randomFn: () => 0 });
+    const read = () => adapter.readVisiblePaneDetail("pane-tab", {
+      title: "Target job", url: "https://www.zhipin.com/job_detail/target-job.html"
+    });
+    if (outcome === "lost_response") {
+      await assert.rejects(read, error => error.code === "BROWSER_DISCONNECTED");
+    } else {
+      const result = await read();
+      if (outcome === "complete") assert(result.description.length >= 120);
+      else assert.strictEqual(result, null, `${outcome} must not adopt another or unfinished detail`);
+    }
+    assert.strictEqual(helper.events.filter(event => event === "card_click").length, 1);
+    assert.strictEqual(fixture.count("locate"), 1, "background activation must not replay");
+    assert.strictEqual(fixture.count("click_at"), 0, "container dispatch must not be followed by a coordinate click");
+    assert.strictEqual(fixture.count("bring_to_front"), 0);
+    assert.strictEqual(fixture.count("navigate"), 0);
+    assert.deepStrictEqual(fixture.focusStates(), [true, false]);
+  }
 }
 
 async function visiblePaneLocateFailureNoClickSmoke() {
@@ -2780,7 +2832,13 @@ function card(id) {
 function runCardActivationPointFixture({
   hit = "safe",
   rect = { left: 100, top: 200, width: 60, height: 40 },
-  componentJobId = "target-job"
+  componentJobId = "target-job",
+  viewport = 300,
+  dispatchBackground = false,
+  jobValidStatus = 1,
+  cardTag = "LI",
+  execute = true,
+  onCardClick = null
 } = {}) {
   const events = [];
   let scrolled = false;
@@ -2798,7 +2856,7 @@ function runCardActivationPointFixture({
   };
   const overlay = { closest() { return null; } };
   const wrap = {
-    __vue__: { data: { encryptJobId: componentJobId } },
+    __vue__: { $options: { name: "JodCard" }, data: { encryptJobId: componentJobId, jobValidStatus } },
     scrollIntoView() {
       scrolled = true;
       events.push("scroll");
@@ -2813,6 +2871,9 @@ function runCardActivationPointFixture({
     }
   };
   const targetCard = {
+    tagName: cardTag,
+    matches: selector => selector === ".job-card-box",
+    click() { events.push("card_click"); onCardClick?.(); },
     innerText: "Target job unique card",
     querySelector(selector) {
       return selector.startsWith("a") ? targetLink : null;
@@ -2832,7 +2893,7 @@ function runCardActivationPointFixture({
     }
   };
   const document = {
-    documentElement: { clientWidth: 300, clientHeight: 300 },
+    documentElement: { clientWidth: viewport, clientHeight: viewport },
     querySelectorAll(selector) {
       if (selector.includes(".job-card-box")) return [decoyCard, targetCard];
       return [];
@@ -2845,10 +2906,12 @@ function runCardActivationPointFixture({
       return safeHit;
     }
   };
-  const window = { innerWidth: 300, innerHeight: 300 };
-  vm.runInNewContext(PAGE_HELPERS, { window, document });
+  const window = { innerWidth: viewport, innerHeight: viewport };
+  const context = vm.createContext({ window, document, getComputedStyle: () => ({ display: "block", visibility: "visible" }) });
+  vm.runInContext(PAGE_HELPERS, context);
   return {
-    result: window.__bossCardActivationPoint("target-job"),
+    result: execute ? window.__bossCardActivationPoint("target-job", dispatchBackground) : null,
+    evaluate: expression => vm.runInContext(expression, context),
     events
   };
 }
@@ -2886,7 +2949,7 @@ function paneBrowserFixture({
       if (expression.includes("(() => window.__bossCardActivationPoint(")) {
         events.push({ type: "locate", tabId });
         return typeof activation === "function"
-          ? activation({ focused, paneReads, tabId })
+          ? activation({ focused, paneReads, tabId, expression })
           : activation;
       }
       if (expression.includes("window.__bossPaneState()")) {
