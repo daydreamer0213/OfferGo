@@ -12,7 +12,7 @@ const CLAIM_PATTERNS = Object.freeze({
   salary: /(?:期望|薪资|月薪|年薪)[^，。；\n]{0,12}(?:\d+(?:\.\d+)?\s*[KkWw万千]?)/g,
   percentage: /[^，。；\n]{0,12}\d+(?:\.\d+)?%[^，。；\n]{0,12}/g,
   duration: /[^，。；\n]{0,12}\d+(?:\.\d+)?\s*(?:年|个月|月|天)(?!\s*\d{1,2}(?:月|日|号))[^，。；\n]{0,12}/g,
-  numeric_achievement: /[^，。；\r\n]{0,16}\d+(?:\.\d+)?[^\S\r\n]*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)[^，。；\r\n]{0,24}/g,
+  numeric_achievement: /[^，,。；;\r\n]{0,16}\d+(?:\.\d+)?[^\S\r\n]*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)[^，,。；;\r\n]{0,24}/g,
   arrival: /(?:(?:不能|无法|不可以|不可|不便|没法)[^，。；\n]{0,4})?(?:本周|下周|这周|今天|明天|后天|周[一二三四五六日天]|随时|立即|一周内|两周后|两周内|一个月内|\d+天后|\d+周后|\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日)[^，。；\n]{0,8}(?:到岗|入职)/g,
   employment: /(?:我(?:目前|现在|当前|仍然|仍|还)?|目前|现在|当前|已经|已|仍然|仍|还)(?:尚未|没有|还没|未|不再|不)?(?:已经|已)?(?:在职|离职)/g,
   interview_availability: /(?:本周|下周|今天|明天|后天|周[一二三四五六日天])[^，。；\n]{0,10}(?:可以|可|方便|有空)?[^，。；\n]{0,4}(?:面试|沟通)/g,
@@ -65,9 +65,9 @@ function likelyCandidateNumericAchievement(value) {
   const quantity = "\\d+(?:\\.\\d+)?\\s*(?:个|人|位|名|家|次|万|千|项|篇|条|单|场)";
   const before = "提升|增长|降低|减少|服务|处理|解决|覆盖|完成|负责|响应|支持|管理|维护|交付|产出|实现|达成|达到|优化|节省|新增|转化|获得|拥有|做过|带领|组织|策划|撰写|发布";
   const after = "提升|增长|降低|减少|完成|处理|解决|响应|支持|管理|维护|交付|产出|实现|达成|达到|优化|节省|新增|转化|获得|带领|组织|策划|撰写|发布";
-  const achievementBeforeQuantity = new RegExp(`(?:${before})[^，。；\\n\\d]{0,16}${quantity}`);
-  const achievementAfterQuantity = new RegExp(`${quantity}[^，。；\\n]{0,16}(?:${after})`);
-  const ownership = new RegExp(`有[^，。；\\n\\d]{0,8}${quantity}([^，。；\\n]{0,20})`).exec(text);
+  const achievementBeforeQuantity = new RegExp(`(?:${before})[^，,。；;\\n\\d]{0,16}${quantity}`);
+  const achievementAfterQuantity = new RegExp(`${quantity}[^，,。；;\\n]{0,16}(?:${after})`);
+  const ownership = new RegExp(`有[^，,。；;\\n\\d]{0,8}${quantity}([^，,。；;\\n]{0,20})`).exec(text);
   const ownedObject = /客户|用户|项目|请求|调用|门店|店铺|商家|企业|公司|订单|合同|文章|视频|员工|成员/;
   const ownershipTail = String(ownership?.[1] || "");
   const communicationOnly = communicationObject.test(ownershipTail)

@@ -1,0 +1,2138 @@
+{
+  "schema": 1,
+  "frozenAt": "2026-10-09T03:41:21.836Z",
+  "source": "Historical exact inputs preserved with original output and hash; new synthetic variations frozen before implementation. Expectations require human semantic judgement, no phrase blacklist.",
+  "cases": [
+    {
+      "id": "old-mixed",
+      "method": "draftMessageGroup",
+      "expected": "Confirm known appointment, answer own interfaces; no unrelated frontend/cloud disclaimer, no claim resume sent.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "Node.js后端开发工程师",
+              "后端开发工程师"
+            ]
+          },
+          "projects": [
+            {
+              "name": "订单后台",
+              "canSay": [
+                "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+        },
+        "job": {
+          "id": 1,
+          "title": "Node.js后端开发工程师",
+          "company": "验收合成公司",
+          "description": "广州Node.js后端开发，负责订单和发票业务接口、SQL查询优化、参数校验与异常处理，参与代码评审和联调。要求1—3年后端经验，PostgreSQL经验优先。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [
+          {
+            "kind": "resume_request"
+          }
+        ],
+        "messages": [
+          {
+            "text": "明天下午3点线上面试可以吗？另外，订单后台你个人负责哪部分？发下附件简历。"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          },
+          {
+            "key": "interview_availability",
+            "value": "2026-10-09下午3点可以参加线上面试。",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [],
+        "requestedSubjectKeys": []
+      },
+      "baseline": {
+        "file": "reply-after-1.json",
+        "fileHash": "7ffa227bd78cb9d96774c2563791649c8cd8ed0b4bcc31f18571f64232aa668c",
+        "inputHash": "6068225004382aa196c50ec358050d01fa0425f2c20809354ed719822f742472",
+        "output": {
+          "messageIntent": "interview_invitation",
+          "messageCategory": "availability",
+          "messageSummary": "对方询问明天下午3点线上面试是否方便，并要求说明订单后台个人负责部分，同时索要附件简历。",
+          "requiredFactKeys": [],
+          "usedFactKeys": [
+            "interview_availability"
+          ],
+          "usedMemoryIds": [],
+          "usedEvidenceIds": [],
+          "responseStrategy": {
+            "concern": "面试可参加性和订单后台个人职责",
+            "focus": "确认明天下午3点可参加，简述个人负责订单状态与发票导出接口及参数校验错误处理"
+          },
+          "responseItems": [
+            {
+              "id": "interview_time_confirmation",
+              "kind": "question",
+              "required": true
+            },
+            {
+              "id": "order_backend_responsibility",
+              "kind": "question",
+              "required": true
+            }
+          ],
+          "coverage": [
+            {
+              "responseItemId": "interview_time_confirmation",
+              "covered": true
+            },
+            {
+              "responseItemId": "order_backend_responsibility",
+              "covered": true
+            }
+          ],
+          "missingFact": null,
+          "messages": [
+            "可以的，明天下午3点线上面试没问题。订单后台我主要负责订单状态和发票导出接口，用Node.js、Fastify和PostgreSQL实现，还补充了参数校验和错误处理；前端和云环境是其他同事负责的。",
+            "明天下午3点线上面试我可以参加。订单后台部分，我独立完成了订单状态和发票导出接口，基于Node.js、Fastify、PostgreSQL，并做了参数校验和异常处理，前端与云环境不在我职责内。"
+          ],
+          "progressUpdate": {
+            "stage": "面试时间确认",
+            "nextAction": "等待招聘方提供线上面试链接或后续安排"
+          }
+        }
+      }
+    },
+    {
+      "id": "old-duties",
+      "method": "draftMessageGroup",
+      "expected": "Answer actual own duties naturally, omit unrelated non-ownership.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "Node.js后端开发工程师",
+              "后端开发工程师"
+            ]
+          },
+          "projects": [
+            {
+              "name": "订单后台",
+              "canSay": [
+                "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+        },
+        "job": {
+          "id": 1,
+          "title": "Node.js后端开发工程师",
+          "company": "验收合成公司",
+          "description": "广州Node.js后端开发，负责订单和发票业务接口、SQL查询优化、参数校验与异常处理，参与代码评审和联调。要求1—3年后端经验，PostgreSQL经验优先。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [],
+        "messages": [
+          {
+            "text": "先说说订单后台你负责哪部分，合适的话我们再约面试。"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [],
+        "requestedSubjectKeys": []
+      },
+      "baseline": {
+        "file": "reply-after-1.json",
+        "fileHash": "7ffa227bd78cb9d96774c2563791649c8cd8ed0b4bcc31f18571f64232aa668c",
+        "inputHash": "00c60478c6812442eebf1e2167aa626649690e33766a8448056d5a955e28d563",
+        "output": {
+          "messageIntent": "information_request",
+          "messageCategory": "project_fact",
+          "messageSummary": "招聘方要求候选人先说明订单后台中个人负责的模块，表示合适再约面试。",
+          "requiredFactKeys": [],
+          "usedFactKeys": [],
+          "usedMemoryIds": [],
+          "usedEvidenceIds": [],
+          "responseStrategy": {
+            "concern": "招聘方想了解候选人在订单后台的具体职责边界，判断其是否匹配岗位要求。",
+            "focus": "说明个人负责的订单状态与发票导出接口、参数校验和错误处理，以及订单查询优化，明确前端与云环境由同事负责。"
+          },
+          "responseItems": [
+            {
+              "id": "order_backend_duties",
+              "kind": "question",
+              "required": true
+            }
+          ],
+          "coverage": [
+            {
+              "responseItemId": "order_backend_duties",
+              "covered": true
+            }
+          ],
+          "missingFact": null,
+          "messages": [
+            "在订单后台我主要负责后端部分：订单状态和发票导出两个接口，用 Node.js + Fastify + PostgreSQL，补了参数校验和错误处理；前端和云环境是其他同事负责。另外做过订单查询的慢查询优化，加了索引并改写 SQL，在 2 万条测试数据上平均响应从 480ms 降到 190ms。如果这部分匹配，可以再约面试。"
+          ],
+          "progressUpdate": {
+            "stage": "drafting",
+            "nextAction": "回复招聘方说明订单后台职责，等待对方进一步确认是否约面试"
+          }
+        }
+      }
+    },
+    {
+      "id": "direct-ownership",
+      "method": "draftMessageGroup",
+      "expected": "Answer honestly that own interfaces were completed, whole system not independently owned; no evasiveness.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "Node.js后端开发工程师",
+              "后端开发工程师"
+            ]
+          },
+          "projects": [
+            {
+              "name": "订单后台",
+              "canSay": [
+                "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+        },
+        "job": {
+          "id": 1,
+          "title": "Node.js后端开发工程师",
+          "company": "验收合成公司",
+          "description": "广州Node.js后端开发，负责订单和发票业务接口、SQL查询优化、参数校验与异常处理，参与代码评审和联调。要求1—3年后端经验，PostgreSQL经验优先。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [],
+        "messages": [
+          {
+            "text": "整个订单后台是你独立完成的吗？"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [],
+        "requestedSubjectKeys": []
+      },
+      "source": "new synthetic variation; no historical output"
+    },
+    {
+      "id": "collaboration-known",
+      "method": "draftMessageGroup",
+      "expected": "Explain known joint interface coordination, ask only if HR requires unavailable detail; no invented conflict.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "Node.js后端开发工程师",
+              "后端开发工程师"
+            ]
+          },
+          "projects": [
+            {
+              "name": "订单后台",
+              "canSay": [
+                "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "林川（虚拟）\n求职意向：Node.js后端开发工程师｜广州\n联系方式：13800000002｜linchuan@example.invalid\n教育经历\n南城技术学院（虚构）｜计算机科学与技术｜本科｜2020.09—2024.06\n工作经历\n云桥软件（虚构）｜后端开发工程师｜2024.07—2026.09\n在5人团队参与订单后台开发，个人完成订单状态与发票导出接口，使用Node.js、Fastify、PostgreSQL，并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化｜2026.02—2026.04\n分析慢查询，增加索引并改写SQL。在2万条订单的测试数据上，压测平均响应从480ms降到190ms；没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务｜2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试，仅在本机运行，没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git；Python/FastAPI基础。未使用Kubernetes，不负责微服务架构或团队管理。"
+        },
+        "job": {
+          "id": 1,
+          "title": "Node.js后端开发工程师",
+          "company": "验收合成公司",
+          "description": "广州Node.js后端开发，负责订单和发票业务接口、SQL查询优化、参数校验与异常处理，参与代码评审和联调。要求1—3年后端经验，PostgreSQL经验优先。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [],
+        "messages": [
+          {
+            "text": "你和前端怎么配合完成发票导出接口的？"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [
+          {
+            "id": 1,
+            "subject": "发票接口联调",
+            "text": "先和前端核对筛选字段及格式，联调时检查空结果、非法日期、正常导出；发现日期边界问题后修正，再请前端按这些情况复测通过。",
+            "status": "confirmed"
+          }
+        ],
+        "requestedSubjectKeys": []
+      },
+      "source": "new synthetic variation; no historical output"
+    },
+    {
+      "id": "natural-pm",
+      "method": "draftMessageGroup",
+      "expected": "Concrete own product actions; no gratuitous development disclaimer, no invented production outcomes.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "产品助理"
+            ]
+          },
+          "projects": [
+            {
+              "name": "校园失物招领",
+              "canSay": [
+                "许禾（虚拟）\n教育经历：信息管理与信息系统本科\n求职意向：产品助理\n项目经历\n校园失物招领｜课程项目\n访谈6位同学，整理物品发布、检索和认领流程；用Figma制作原型，组织3位同学走查，根据反馈调整认领页字段并完成课堂展示。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "许禾（虚拟）\n教育经历：信息管理与信息系统本科\n求职意向：产品助理\n项目经历\n校园失物招领｜课程项目\n访谈6位同学，整理物品发布、检索和认领流程；用Figma制作原型，组织3位同学走查，根据反馈调整认领页字段并完成课堂展示。"
+        },
+        "job": {
+          "id": 1,
+          "title": "产品助理",
+          "description": "整理用户反馈、业务流程和需求，制作原型并跟进验收，接受课程项目。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [],
+        "messages": [
+          {
+            "text": "你在失物招领项目里做了什么？"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [],
+        "requestedSubjectKeys": []
+      },
+      "source": "new synthetic variation; no historical output"
+    },
+    {
+      "id": "natural-ops",
+      "method": "draftMessageGroup",
+      "expected": "Describe actual page work and event-scoped metrics, not personal causality or unasked negative tail.",
+      "input": {
+        "now": "2026-10-08T10:00:00.000Z",
+        "profile": {
+          "candidate": {
+            "targetTitles": [
+              "电商运营"
+            ]
+          },
+          "projects": [
+            {
+              "name": "商品详情页",
+              "canSay": [
+                "周遥（虚拟）\n教育经历：电子商务本科\n工作经历\n电商运营助理｜2025.07—2026.08\n整理商品详情页信息，依据客服反馈补充尺码说明，维护活动日报。活动期间店铺转化率从2.1%到2.5%。"
+              ]
+            }
+          ]
+        },
+        "currentResume": {
+          "text": "周遥（虚拟）\n教育经历：电子商务本科\n工作经历\n电商运营助理｜2025.07—2026.08\n整理商品详情页信息，依据客服反馈补充尺码说明，维护活动日报。活动期间店铺转化率从2.1%到2.5%。"
+        },
+        "job": {
+          "id": 1,
+          "title": "电商运营",
+          "description": "商品信息维护、客服反馈分析、活动执行和数据复盘。"
+        },
+        "platform": "zhaopin",
+        "requestedActions": [],
+        "messages": [
+          {
+            "text": "说说你做过的商品页面工作和当时的效果？"
+          }
+        ],
+        "facts": [
+          {
+            "key": "availability_date",
+            "value": "办理交接后两周可到岗",
+            "subjectKey": "",
+            "source": "user_confirmed",
+            "updatedAt": "2026-10-08T10:00:00.000Z"
+          }
+        ],
+        "answerMemories": [],
+        "candidateEvidence": [],
+        "requestedSubjectKeys": []
+      },
+      "source": "new synthetic variation; no historical output"
+    },
+    {
+      "id": "old-resume-general",
+      "method": "generateResumeOptimization",
+      "expected": "Improve real reading problems and remove unnecessary responsibility comments; preserve actions, event metric scope, education and chronology.",
+      "input": {
+        "mode": "general",
+        "candidateEvidence": [],
+        "sourceResume": {
+          "id": 1,
+          "documentId": 1,
+          "contentHash": "bbc3bed49b934814de088bec722e46f9528b6d36004ccdfac6e38e05b49a3727",
+          "text": "[姓名已隐藏]\n求职意向:电商运营|广州\n联系方式:[已隐藏]\n教育经历\n海城商务学院(虚构)|市场营销|本科|2019.09—2023.06\n工作经历\n星灯家居(虚构)|电商运营专员|2023.07—2026.09\n在4人运营团队参与天猫店铺活动执行,个人负责商品上架、详情页信息整理与活动数据日报:用Excel透视表比较点击与转化,记录表现变化供活动复盘。促销定价由主管负责,广告预算与投放由另一位同事负责。\n详情页迭代|2026.04—2026.06\n根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。\n会员活动协助|2025.11—2026.01\n协助整理会员分组和活动名单,统计不同分组的活动参与情况;触达策略由主管制定。\n技能\n天猫后台、商品与详情页维护、Excel透视表、基础活动复盘。不熟悉SQL,不负责海外广告账户,没有团队管理经验。"
+        },
+        "targetDirection": "",
+        "jobs": [],
+        "candidateFacts": [],
+        "answerMemories": [],
+        "funnelDiagnosis": {
+          "analysisSource": "current_pool",
+          "platforms": [
+            {
+              "site": "boss",
+              "strength": "facts",
+              "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+              "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+            },
+            {
+              "site": "zhaopin",
+              "strength": "facts",
+              "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+              "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+            }
+          ],
+          "strength": "facts",
+          "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+          "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+        },
+        "evidenceCatalog": [
+          {
+            "id": "R1",
+            "kind": "resume",
+            "text": "[姓名已隐藏]"
+          },
+          {
+            "id": "R2",
+            "kind": "resume",
+            "text": "求职意向:电商运营|广州"
+          },
+          {
+            "id": "R3",
+            "kind": "resume",
+            "text": "联系方式:[已隐藏]"
+          },
+          {
+            "id": "R4",
+            "kind": "resume",
+            "text": "教育经历"
+          },
+          {
+            "id": "R5",
+            "kind": "resume",
+            "text": "海城商务学院(虚构)|市场营销|本科|2019.09—2023.06"
+          },
+          {
+            "id": "R6",
+            "kind": "resume",
+            "text": "工作经历"
+          },
+          {
+            "id": "R7",
+            "kind": "resume",
+            "text": "星灯家居(虚构)|电商运营专员|2023.07—2026.09"
+          },
+          {
+            "id": "R8",
+            "kind": "resume",
+            "text": "在4人运营团队参与天猫店铺活动执行,个人负责商品上架、详情页信息整理与活动数据日报:用Excel透视表比较点击与转化,记录表现变化供活动复盘。促销定价由主管负责,广告预算与投放由另一位同事负责。"
+          },
+          {
+            "id": "R9",
+            "kind": "resume",
+            "text": "详情页迭代|2026.04—2026.06"
+          },
+          {
+            "id": "R10",
+            "kind": "resume",
+            "text": "根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。"
+          },
+          {
+            "id": "R11",
+            "kind": "resume",
+            "text": "会员活动协助|2025.11—2026.01"
+          },
+          {
+            "id": "R12",
+            "kind": "resume",
+            "text": "协助整理会员分组和活动名单,统计不同分组的活动参与情况;触达策略由主管制定。"
+          },
+          {
+            "id": "R13",
+            "kind": "resume",
+            "text": "技能"
+          },
+          {
+            "id": "R14",
+            "kind": "resume",
+            "text": "天猫后台、商品与详情页维护、Excel透视表、基础活动复盘。不熟悉SQL,不负责海外广告账户,没有团队管理经验。"
+          },
+          {
+            "id": "D1",
+            "kind": "diagnosis",
+            "text": "{\"analysisSource\":\"current_pool\",\"platforms\":[{\"site\":\"boss\",\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"},{\"site\":\"zhaopin\",\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"}],\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"}"
+          }
+        ]
+      },
+      "baseline": {
+        "file": "resume-good-after.json",
+        "fileHash": "f3a857da7fe3a814c69ef78df0d4cd4517d375c9a30d96abce1716147adecca8",
+        "inputHash": "e95f34b2dfcfb0a555ebe32550958aad5d8d04b977d6ed460f9055d8b881b489",
+        "output": {
+          "headline": "优化详情页结果展示与技能栏表述，提升可读性与简洁度",
+          "suggestions": [
+            {
+              "id": "S1",
+              "operation": "replace",
+              "originalText": "根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。",
+              "proposedText": "根据客服常见问题整理材质、尺寸与售后说明，协调设计调整详情页。个人交付是信息整理和页面协作，促销策略由主管决定。\n活动期间店铺转化率从2.1%到2.5%，同期有促销活动，不能全部归因为个人页面修改。",
+              "reason": "将活动结果与个人动作分开展示，便于招聘者先看到个人交付，再看到同期数据变化及归因限制，提升结果可见性。",
+              "evidenceIds": [
+                "R10"
+              ],
+              "editingPrinciple": "result_visibility"
+            },
+            {
+              "id": "S2",
+              "operation": "remove",
+              "originalText": "不熟悉SQL,不负责海外广告账户,没有团队管理经验。",
+              "proposedText": "",
+              "reason": "删除技能栏中的非技能自我限制表述，使技能部分聚焦于实际技能，提升简洁度。",
+              "evidenceIds": [
+                "R14"
+              ],
+              "editingPrinciple": "concision"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "old-resume-job",
+      "method": "generateResumeOptimization",
+      "expected": "Prioritize relevant actions for actual JD; concise accurate wording without generic team label or disclaimers.",
+      "input": {
+        "mode": "job_specific",
+        "candidateEvidence": [],
+        "sourceResume": {
+          "id": 1,
+          "documentId": 1,
+          "contentHash": "bbc3bed49b934814de088bec722e46f9528b6d36004ccdfac6e38e05b49a3727",
+          "text": "[姓名已隐藏]\n求职意向:电商运营|广州\n联系方式:[已隐藏]\n教育经历\n海城商务学院(虚构)|市场营销|本科|2019.09—2023.06\n工作经历\n星灯家居(虚构)|电商运营专员|2023.07—2026.09\n在4人运营团队参与天猫店铺活动执行,个人负责商品上架、详情页信息整理与活动数据日报:用Excel透视表比较点击与转化,记录表现变化供活动复盘。促销定价由主管负责,广告预算与投放由另一位同事负责。\n详情页迭代|2026.04—2026.06\n根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。\n会员活动协助|2025.11—2026.01\n协助整理会员分组和活动名单,统计不同分组的活动参与情况;触达策略由主管制定。\n技能\n天猫后台、商品与详情页维护、Excel透视表、基础活动复盘。不熟悉SQL,不负责海外广告账户,没有团队管理经验。"
+        },
+        "targetDirection": "电商运营专员",
+        "jobs": [
+          {
+            "id": 1,
+            "title": "电商运营专员",
+            "company": "验收合成公司",
+            "description": "广州天猫电商运营，负责商品上架、详情页优化、客服反馈整理、活动执行和Excel数据复盘。要求2年以上电商运营经验，与设计和客服协作。",
+            "analysis": {
+              "semanticStatus": "complete",
+              "recommendation": "primary",
+              "coreResponsibilities": [
+                "广州天猫电商运营，负责商品上架、详情页优化、客服反馈整理、活动执行和Excel数据复盘。要求2年以上电商运营经验，与设计和客服协作。"
+              ],
+              "legacyRecommendation": "apply",
+              "recommendationSchemaVersion": 2
+            }
+          }
+        ],
+        "candidateFacts": [],
+        "answerMemories": [],
+        "funnelDiagnosis": {
+          "analysisSource": "current_pool",
+          "platforms": [
+            {
+              "site": "boss",
+              "strength": "facts",
+              "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+              "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+            },
+            {
+              "site": "zhaopin",
+              "strength": "facts",
+              "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+              "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+            }
+          ],
+          "strength": "facts",
+          "headline": "当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。",
+          "priorityCheck": "继续积累到 30 个成熟样本；已收到的反馈可在下方查看。"
+        },
+        "evidenceCatalog": [
+          {
+            "id": "R1",
+            "kind": "resume",
+            "text": "[姓名已隐藏]"
+          },
+          {
+            "id": "R2",
+            "kind": "resume",
+            "text": "求职意向:电商运营|广州"
+          },
+          {
+            "id": "R3",
+            "kind": "resume",
+            "text": "联系方式:[已隐藏]"
+          },
+          {
+            "id": "R4",
+            "kind": "resume",
+            "text": "教育经历"
+          },
+          {
+            "id": "R5",
+            "kind": "resume",
+            "text": "海城商务学院(虚构)|市场营销|本科|2019.09—2023.06"
+          },
+          {
+            "id": "R6",
+            "kind": "resume",
+            "text": "工作经历"
+          },
+          {
+            "id": "R7",
+            "kind": "resume",
+            "text": "星灯家居(虚构)|电商运营专员|2023.07—2026.09"
+          },
+          {
+            "id": "R8",
+            "kind": "resume",
+            "text": "在4人运营团队参与天猫店铺活动执行,个人负责商品上架、详情页信息整理与活动数据日报:用Excel透视表比较点击与转化,记录表现变化供活动复盘。促销定价由主管负责,广告预算与投放由另一位同事负责。"
+          },
+          {
+            "id": "R9",
+            "kind": "resume",
+            "text": "详情页迭代|2026.04—2026.06"
+          },
+          {
+            "id": "R10",
+            "kind": "resume",
+            "text": "根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。"
+          },
+          {
+            "id": "R11",
+            "kind": "resume",
+            "text": "会员活动协助|2025.11—2026.01"
+          },
+          {
+            "id": "R12",
+            "kind": "resume",
+            "text": "协助整理会员分组和活动名单,统计不同分组的活动参与情况;触达策略由主管制定。"
+          },
+          {
+            "id": "R13",
+            "kind": "resume",
+            "text": "技能"
+          },
+          {
+            "id": "R14",
+            "kind": "resume",
+            "text": "天猫后台、商品与详情页维护、Excel透视表、基础活动复盘。不熟悉SQL,不负责海外广告账户,没有团队管理经验。"
+          },
+          {
+            "id": "J1",
+            "kind": "job",
+            "text": "电商运营专员｜验收合成公司｜广州天猫电商运营，负责商品上架、详情页优化、客服反馈整理、活动执行和Excel数据复盘。要求2年以上电商运营经验，与设计和客服协作。"
+          },
+          {
+            "id": "D1",
+            "kind": "diagnosis",
+            "text": "{\"analysisSource\":\"current_pool\",\"platforms\":[{\"site\":\"boss\",\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"},{\"site\":\"zhaopin\",\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"}],\"strength\":\"facts\",\"headline\":\"当前有 0 个成熟样本，少于 30，先展示事实，不判断瓶颈。\",\"priorityCheck\":\"继续积累到 30 个成熟样本；已收到的反馈可在下方查看。\"}"
+          }
+        ]
+      },
+      "baseline": {
+        "file": "resume-good-after.json",
+        "fileHash": "f3a857da7fe3a814c69ef78df0d4cd4517d375c9a30d96abce1716147adecca8",
+        "inputHash": "5a1872fbba2581fe85f6534b31518fb3639dbeecef00658f24f201a7c571aa0a",
+        "output": {
+          "headline": "",
+          "suggestions": [
+            {
+              "id": "S1",
+              "operation": "replace",
+              "originalText": "在4人运营团队参与天猫店铺活动执行,个人负责商品上架、详情页信息整理与活动数据日报:用Excel透视表比较点击与转化,记录表现变化供活动复盘。促销定价由主管负责,广告预算与投放由另一位同事负责。",
+              "proposedText": "作为4人运营团队成员，参与天猫店铺活动执行。个人负责：商品上架、详情页信息整理、活动数据日报（用Excel透视表比较点击与转化，记录表现变化供活动复盘）。\n促销定价由主管负责，广告预算与投放由另一位同事负责。",
+              "reason": "原文将个人职责与团队分工放在同一长句中，招聘者需要快速识别本人承担的工作；分段后可读性更好，突出商品上架、详情页信息整理和活动数据日报等 JD 核心职责。",
+              "evidenceIds": [
+                "R8",
+                "J1"
+              ],
+              "editingPrinciple": "structure"
+            },
+            {
+              "id": "S2",
+              "operation": "replace",
+              "originalText": "根据客服常见问题整理材质、尺寸与售后说明,协调设计调整详情页。个人交付是信息整理和页面协作,促销策略由主管决定。活动期间店铺转化率从2.1%到2.5%,同期有促销活动,不能全部归因为个人页面修改。",
+              "proposedText": "根据客服常见问题整理材质、尺寸与售后说明，协调设计调整详情页。\n个人交付：信息整理和页面协作；促销策略由主管决定。\n活动期间店铺转化率从2.1%到2.5%（同期有促销活动，不能全部归因为个人页面修改）。",
+              "reason": "原文信息完整，但个人交付和结果限制混在段落中；调整后个人交付单独成行，转化数据及归因限制更易读，便于招聘者看到实际贡献边界。",
+              "evidenceIds": [
+                "R10",
+                "J1"
+              ],
+              "editingPrinciple": "contribution_clarity"
+            },
+            {
+              "id": "S3",
+              "operation": "remove",
+              "originalText": "不熟悉SQL,不负责海外广告账户,没有团队管理经验。",
+              "proposedText": "",
+              "reason": "该句提及不熟悉 SQL、不负责海外广告账户、没有团队管理经验，均不属于目标岗位职责，删除后技能部分更聚焦于天猫后台、商品与详情页维护、Excel 透视表和基础活动复盘。",
+              "evidenceIds": [
+                "R14",
+                "J1"
+              ],
+              "editingPrinciple": "concision"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "old-interview-report",
+      "method": "reviewMockInterview",
+      "expected": "Strengths emphasize diagnosis, method and coordination; no extra reward for disclaimer, outlines solve actual gap.",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "job": null,
+          "resume": {
+            "versionId": 1,
+            "name": "基础简历",
+            "contentHash": "e08b630521aeb85a0c63bbad7446af41666ae27e4dff58d1e2d054ec8e662f71",
+            "text": "[姓名已隐藏]\n求职意向:Node.js后端开发工程师|广州\n联系方式:[已隐藏]\n教育经历\n南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06\n工作经历\n云桥软件(虚构)|后端开发工程师|2024.07—2026.09\n在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化|2026.02—2026.04\n分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务|2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+          },
+          "resumeEvidenceCatalog": [
+            {
+              "id": "R1",
+              "kind": "resume",
+              "text": "[姓名已隐藏]"
+            },
+            {
+              "id": "R2",
+              "kind": "resume",
+              "text": "求职意向:Node.js后端开发工程师|广州"
+            },
+            {
+              "id": "R3",
+              "kind": "resume",
+              "text": "联系方式:[已隐藏]"
+            },
+            {
+              "id": "R4",
+              "kind": "resume",
+              "text": "教育经历"
+            },
+            {
+              "id": "R5",
+              "kind": "resume",
+              "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+            },
+            {
+              "id": "R6",
+              "kind": "resume",
+              "text": "工作经历"
+            },
+            {
+              "id": "R7",
+              "kind": "resume",
+              "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+            },
+            {
+              "id": "R8",
+              "kind": "resume",
+              "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+            },
+            {
+              "id": "R9",
+              "kind": "resume",
+              "text": "订单查询优化|2026.02—2026.04"
+            },
+            {
+              "id": "R10",
+              "kind": "resume",
+              "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+            },
+            {
+              "id": "R11",
+              "kind": "resume",
+              "text": "个人项目"
+            },
+            {
+              "id": "R12",
+              "kind": "resume",
+              "text": "Python记账服务|2025.06—2025.08"
+            },
+            {
+              "id": "R13",
+              "kind": "resume",
+              "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+            },
+            {
+              "id": "R14",
+              "kind": "resume",
+              "text": "技能"
+            },
+            {
+              "id": "R15",
+              "kind": "resume",
+              "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+            }
+          ],
+          "priorWeaknesses": [],
+          "candidateEvidence": [],
+          "candidateFacts": [],
+          "answerMemories": [],
+          "interviewBrief": {
+            "sessionKind": "resume_general",
+            "generalThemes": [
+              "经历与求职方向",
+              "实际承担的工作",
+              "解决问题与取舍",
+              "协作与沟通",
+              "成果与复盘"
+            ],
+            "jobFocus": null,
+            "resumeEvidenceCatalog": [
+              {
+                "id": "R1",
+                "kind": "resume",
+                "text": "[姓名已隐藏]"
+              },
+              {
+                "id": "R2",
+                "kind": "resume",
+                "text": "求职意向:Node.js后端开发工程师|广州"
+              },
+              {
+                "id": "R3",
+                "kind": "resume",
+                "text": "联系方式:[已隐藏]"
+              },
+              {
+                "id": "R4",
+                "kind": "resume",
+                "text": "教育经历"
+              },
+              {
+                "id": "R5",
+                "kind": "resume",
+                "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+              },
+              {
+                "id": "R6",
+                "kind": "resume",
+                "text": "工作经历"
+              },
+              {
+                "id": "R7",
+                "kind": "resume",
+                "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+              },
+              {
+                "id": "R8",
+                "kind": "resume",
+                "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+              },
+              {
+                "id": "R9",
+                "kind": "resume",
+                "text": "订单查询优化|2026.02—2026.04"
+              },
+              {
+                "id": "R10",
+                "kind": "resume",
+                "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+              },
+              {
+                "id": "R11",
+                "kind": "resume",
+                "text": "个人项目"
+              },
+              {
+                "id": "R12",
+                "kind": "resume",
+                "text": "Python记账服务|2025.06—2025.08"
+              },
+              {
+                "id": "R13",
+                "kind": "resume",
+                "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+              },
+              {
+                "id": "R14",
+                "kind": "resume",
+                "text": "技能"
+              },
+              {
+                "id": "R15",
+                "kind": "resume",
+                "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+              }
+            ],
+            "candidateEvidence": [],
+            "priorWeaknesses": [],
+            "coverageRule": "先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。"
+          }
+        },
+        "settings": {
+          "type": "mixed",
+          "difficulty": "standard",
+          "plannedQuestions": 3
+        },
+        "turns": [
+          {
+            "turnNumber": 1,
+            "question": "你在云桥软件参与订单后台开发，简历里提到个人完成订单状态与发票导出接口，并补充了参数校验和错误处理。能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？",
+            "focus": "实际承担的工作",
+            "answer": "我参与了订单后台，主要跟着团队做了一些开发，具体就按需求完成。",
+            "answerReview": {
+              "conclusion": "你的回答只概括地说参与了开发并按需求完成，没有给出问题要求的具体接口案例，也没有说明定位和验证修复效果的过程。",
+              "strengths": [],
+              "improvements": [
+                "问题要求讲一个实际遇到的接口问题，但回答只提到'按需求完成'，没有提供具体案例。",
+                "可以补充当时接口出现了什么现象或报错，你通过什么方式定位原因，以及修复后如何验证效果。"
+              ],
+              "turnNumbers": [
+                1
+              ]
+            }
+          },
+          {
+            "turnNumber": 2,
+            "question": "你刚才提到是跟着团队按需求完成，能否挑一个你记得最清楚的接口问题具体说说？比如在订单状态或发票导出接口里，参数校验、错误处理或者其他异常，当时是什么现象，你怎么定位原因，最后怎么确认修复有效？",
+            "focus": "实际承担的工作",
+            "answer": "我个人做订单状态和发票导出接口。查询慢时，我先看日志确认卡在数据库，使用EXPLAIN找到查询走了全表扫描，按筛选字段增加组合索引，再改写SQL并补测试。2万条订单的测试环境里，按同一批测试数据和相同查询条件比较，平均响应从480ms降到190ms。这个结果只是测试环境；部署和生产指标是同事负责，我没拿到同口径数据。",
+            "answerReview": {
+              "conclusion": "你这次给出了具体的接口慢查询案例，把现象、定位、修复和验证过程都讲清楚了，并且如实说明测试环境与生产环境的区别，整体符合问题要求。",
+              "strengths": [
+                "你具体说明了接口查询慢的现象，并通过日志确认卡在数据库，再用 EXPLAIN 定位到全表扫描，定位链路清晰。",
+                "你给出了修复与验证动作：增加组合索引、改写 SQL、补充测试，并用同一批测试数据和相同查询条件比较，得到 480ms 到 190ms 的改善。",
+                "你明确区分了测试环境指标与生产环境指标，没有夸大效果。"
+              ],
+              "improvements": [],
+              "turnNumbers": [
+                2
+              ]
+            }
+          },
+          {
+            "turnNumber": 3,
+            "question": "简历里也提到你参与过代码评审和接口联调，前端和云环境由其他同事负责。能讲一次你和前端同事在联调中核对接口字段或边界条件时，实际发现并解决的问题吗？后来是怎么确认双方理解一致的？",
+            "focus": "协作与沟通",
+            "answer": "发票导出接口是我写的。我先和前端核对筛选字段及格式，再加参数校验和错误提示。联调时检查空结果、非法日期、正常导出这几种情况，发现日期边界有问题后修正，再让同事按这些情况复测通过。没有统计业务提升比例。",
+            "answerReview": {
+              "conclusion": "你的回答围绕发票导出接口和前端联调展开，列出了核对字段、边界用例和复测，整体覆盖问题要求；若能把日期边界问题的具体表现和修正方式再展开一点，案例会更加完整。",
+              "strengths": [
+                "你明确说明先核对筛选字段及格式，再补充参数校验和错误提示，说明联调前做了接口契约澄清。",
+                "你提到的空结果、非法日期、正常导出三类用例覆盖了主要边界情况，并实际发现日期边界问题后修正。",
+                "你通过让前端同事按这些情况复测通过来确认双方理解一致，符合问题要求。"
+              ],
+              "improvements": [
+                "日期边界问题的具体表现和修正内容可以再展开，例如是日期包含当天、时区处理还是格式校验误判，能让案例更有说服力。",
+                "如果当时有文档、联调记录或代码评审等同步方式，可以补充说明，进一步体现理解一致的确认过程。"
+              ],
+              "turnNumbers": [
+                3
+              ]
+            }
+          }
+        ]
+      },
+      "baseline": {
+        "file": "interview-after-1.json",
+        "fileHash": "ba66fc65ff85be8802ffc9578fa21c2c57fdbb7b922fd6534e8ed995f999b897",
+        "inputHash": "3cab58324066e6a1ece9b35f996e58d24763d376ad8b438252b8e88cce51cc78",
+        "output": {
+          "conclusion": "整体来看，第1题没有提供具体接口案例，是关键缺口；第2题用慢查询案例完整展示了现象、定位、修复和验证，且明确区分测试与生产；第3题体现了与前端核对字段和边界用例的联调链路，但日期边界的细节未展开。面试官在这三题考察的是实际独立排查接口问题、用数据验证结果，以及跨角色协作中确认理解一致。最值得改善的方向：一是把第2题的慢查询案例直接用于第1题；二是第3题回忆并补充日期边界的具体表现和修正动作。",
+          "strengths": [
+            "第2题给出了具体慢查询案例，完整说明了通过日志、EXPLAIN定位全表扫描，增加组合索引、改写SQL并补测试，并用相同测试条件比较出480ms到190ms。",
+            "第2题和第3题均明确区分个人与同事职责，如实说明生产指标由同事负责、未拿到同口径数据，边界清晰。",
+            "第3题展示了与前端核对筛选字段和格式，并通过空结果、非法日期、正常导出三类用例联调，让同事复测确认一致。"
+          ],
+          "improvements": [
+            "第1题回答只停留在参与和按需求完成，没有按题目要求给出具体接口问题；可把第2题的慢查询经历放入该题，先讲现象、定位、修复和验证。",
+            "第3题日期边界问题的具体表现和修正内容仍不清楚；需要回忆并说明当时是哪类日期边界问题以及具体改了什么，不要编造。"
+          ],
+          "followUpRisks": [
+            {
+              "turnNumber": 1,
+              "reason": "回答过于笼统，没有提供具体案例，面试官可能会继续追问你实际处理过的接口问题，以确认独立排查能力。"
+            },
+            {
+              "turnNumber": 2,
+              "reason": "你已给出测试环境对比，但面试官可能追问测试数据与线上查询模式是否一致、索引选择依据及副作用，以判断优化是否可靠；这与生产指标归属不冲突。"
+            },
+            {
+              "turnNumber": 3,
+              "reason": "日期边界问题只说了有问题并修正，没说具体表现，面试官可能追问边界条件定义和修正逻辑，以考察对接口校验规则的理解深度。"
+            }
+          ],
+          "retryRecommendations": [
+            {
+              "turnNumber": 1,
+              "reason": "重练时用第2题已确认的慢查询案例开头，先交代现象，再按定位、修复、验证、边界组织，避免只说参与或按需求完成。"
+            },
+            {
+              "turnNumber": 3,
+              "reason": "重练时补充日期边界问题的具体表现和修正方式，可回忆实际发生的类型和改动；若当时没有文档或记录，明确说明没有，不要编造。"
+            }
+          ],
+          "answerStructures": [
+            {
+              "turnNumber": 1,
+              "outline": [
+                "先给出一个具体接口问题：可使用你已说过的订单查询慢案例，不要只讲参与或按需求完成",
+                "说明当时接口现象：例如订单查询响应慢或超时，卡在数据库",
+                "说明定位过程：先看日志确认卡在数据库，再使用EXPLAIN确认全表扫描（这些是你已确认的操作）",
+                "说明修复动作：按筛选字段增加组合索引、改写SQL并补充测试",
+                "说明验证方式：用2万条订单测试数据，按同一批数据和相同查询条件比较，平均响应从480ms降到190ms",
+                "说明验证边界：该结果只代表测试环境，生产同口径指标由同事负责，你未获取"
+              ]
+            },
+            {
+              "turnNumber": 3,
+              "outline": [
+                "先说明发票导出接口由你负责、前端由同事负责，双方联调分工",
+                "说明联调前核对内容：筛选字段、格式，补充参数校验和错误提示（已说清）",
+                "列出联调用例：空结果、非法日期、正常导出三种情况（已说清）",
+                "补充日期边界问题的具体表现：需要回忆当时是日期包含当天、时区还是格式校验误判（不要编造）",
+                "补充当时的修正动作：需要回忆具体改了哪部分校验或处理逻辑",
+                "说明确认一致的证据：前端同事按这些情况复测通过（已说清）",
+                "若当时有文档、联调记录或代码评审可补一句；没有则明确说没有"
+              ]
+            }
+          ],
+          "evidenceCandidates": [
+            {
+              "turnNumber": 2,
+              "subject": "订单查询慢优化",
+              "sourceQuote": "查询慢时，我先看日志确认卡在数据库，使用EXPLAIN找到查询走了全表扫描，按筛选字段增加组合索引，再改写SQL并补测试。2万条订单的测试环境里，按同一批测试数据和相同查询条件比较，平均响应从480ms降到190ms。这个结果只是测试环境；部署和生产指标是同事负责，我没拿到同口径数据。",
+              "text": "用户处理订单状态和发票导出接口的慢查询：通过日志和EXPLAIN定位全表扫描，增加组合索引、改写SQL并补测试；在2万条测试数据上同条件比较，平均响应从480ms降到190ms。该结果仅限测试环境，生产指标由同事负责未获取。"
+            },
+            {
+              "turnNumber": 3,
+              "subject": "发票导出接口与前端联调中的日期边界问题",
+              "sourceQuote": "我先和前端核对筛选字段及格式，再加参数校验和错误提示。联调时检查空结果、非法日期、正常导出这几种情况，发现日期边界有问题后修正，再让同事按这些情况复测通过。没有统计业务提升比例。",
+              "text": "用户与前端联调发票导出接口：核对筛选字段及格式，补充参数校验和错误提示；检查空结果、非法日期、正常导出，发现日期边界问题后修正，并由前端复测通过。未统计业务提升比例。"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "natural-interview-step",
+      "method": "generateMockInterviewStep",
+      "expected": "Specific method answer is sufficient without unrelated production/colleague disclaimer; meaningful follow-up or transition.",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "job": null,
+          "resume": {
+            "versionId": 1,
+            "name": "基础简历",
+            "contentHash": "e08b630521aeb85a0c63bbad7446af41666ae27e4dff58d1e2d054ec8e662f71",
+            "text": "[姓名已隐藏]\n求职意向:Node.js后端开发工程师|广州\n联系方式:[已隐藏]\n教育经历\n南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06\n工作经历\n云桥软件(虚构)|后端开发工程师|2024.07—2026.09\n在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化|2026.02—2026.04\n分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务|2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+          },
+          "resumeEvidenceCatalog": [
+            {
+              "id": "R1",
+              "kind": "resume",
+              "text": "[姓名已隐藏]"
+            },
+            {
+              "id": "R2",
+              "kind": "resume",
+              "text": "求职意向:Node.js后端开发工程师|广州"
+            },
+            {
+              "id": "R3",
+              "kind": "resume",
+              "text": "联系方式:[已隐藏]"
+            },
+            {
+              "id": "R4",
+              "kind": "resume",
+              "text": "教育经历"
+            },
+            {
+              "id": "R5",
+              "kind": "resume",
+              "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+            },
+            {
+              "id": "R6",
+              "kind": "resume",
+              "text": "工作经历"
+            },
+            {
+              "id": "R7",
+              "kind": "resume",
+              "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+            },
+            {
+              "id": "R8",
+              "kind": "resume",
+              "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+            },
+            {
+              "id": "R9",
+              "kind": "resume",
+              "text": "订单查询优化|2026.02—2026.04"
+            },
+            {
+              "id": "R10",
+              "kind": "resume",
+              "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+            },
+            {
+              "id": "R11",
+              "kind": "resume",
+              "text": "个人项目"
+            },
+            {
+              "id": "R12",
+              "kind": "resume",
+              "text": "Python记账服务|2025.06—2025.08"
+            },
+            {
+              "id": "R13",
+              "kind": "resume",
+              "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+            },
+            {
+              "id": "R14",
+              "kind": "resume",
+              "text": "技能"
+            },
+            {
+              "id": "R15",
+              "kind": "resume",
+              "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+            }
+          ],
+          "priorWeaknesses": [],
+          "candidateEvidence": [],
+          "candidateFacts": [],
+          "answerMemories": [],
+          "interviewBrief": {
+            "sessionKind": "resume_general",
+            "generalThemes": [
+              "经历与求职方向",
+              "实际承担的工作",
+              "解决问题与取舍",
+              "协作与沟通",
+              "成果与复盘"
+            ],
+            "jobFocus": null,
+            "resumeEvidenceCatalog": [
+              {
+                "id": "R1",
+                "kind": "resume",
+                "text": "[姓名已隐藏]"
+              },
+              {
+                "id": "R2",
+                "kind": "resume",
+                "text": "求职意向:Node.js后端开发工程师|广州"
+              },
+              {
+                "id": "R3",
+                "kind": "resume",
+                "text": "联系方式:[已隐藏]"
+              },
+              {
+                "id": "R4",
+                "kind": "resume",
+                "text": "教育经历"
+              },
+              {
+                "id": "R5",
+                "kind": "resume",
+                "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+              },
+              {
+                "id": "R6",
+                "kind": "resume",
+                "text": "工作经历"
+              },
+              {
+                "id": "R7",
+                "kind": "resume",
+                "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+              },
+              {
+                "id": "R8",
+                "kind": "resume",
+                "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+              },
+              {
+                "id": "R9",
+                "kind": "resume",
+                "text": "订单查询优化|2026.02—2026.04"
+              },
+              {
+                "id": "R10",
+                "kind": "resume",
+                "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+              },
+              {
+                "id": "R11",
+                "kind": "resume",
+                "text": "个人项目"
+              },
+              {
+                "id": "R12",
+                "kind": "resume",
+                "text": "Python记账服务|2025.06—2025.08"
+              },
+              {
+                "id": "R13",
+                "kind": "resume",
+                "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+              },
+              {
+                "id": "R14",
+                "kind": "resume",
+                "text": "技能"
+              },
+              {
+                "id": "R15",
+                "kind": "resume",
+                "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+              }
+            ],
+            "candidateEvidence": [],
+            "priorWeaknesses": [],
+            "coverageRule": "先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。"
+          }
+        },
+        "settings": {
+          "type": "mixed",
+          "difficulty": "standard",
+          "plannedQuestions": 3
+        },
+        "turns": [
+          {
+            "turnNumber": 1,
+            "question": "你在云桥软件参与订单后台开发，简历里提到个人完成订单状态与发票导出接口，并补充了参数校验和错误处理。能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？",
+            "focus": "实际承担的工作",
+            "resumeEvidenceIds": [
+              "R8"
+            ],
+            "answer": "发票导出接口是我做的。联调发现月底最后一天的数据漏掉了，我对照请求参数和SQL确认结束日期按零点处理，改为覆盖当天完整时间，再测试月末、跨月和空结果几种情况，前端复测通过。",
+            "answerReview": null
+          }
+        ],
+        "progress": {
+          "askedQuestions": [
+            "你在云桥软件参与订单后台开发，简历里提到个人完成订单状态与发票导出接口，并补充了参数校验和错误处理。能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？"
+          ],
+          "coveredThemes": [
+            "实际承担的工作"
+          ],
+          "remainingThemes": [
+            "经历与求职方向",
+            "解决问题与取舍",
+            "协作与沟通",
+            "成果与复盘"
+          ]
+        }
+      },
+      "source": "new synthetic variation; no historical output"
+    },
+    {
+      "id": "validation-step",
+      "method": "generateMockInterviewStep",
+      "expected": "Recognize relevant controlled test metrics; do not invent production result or demand already-supplied validation.",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "job": null,
+          "resume": {
+            "versionId": 1,
+            "name": "基础简历",
+            "contentHash": "e08b630521aeb85a0c63bbad7446af41666ae27e4dff58d1e2d054ec8e662f71",
+            "text": "[姓名已隐藏]\n求职意向:Node.js后端开发工程师|广州\n联系方式:[已隐藏]\n教育经历\n南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06\n工作经历\n云桥软件(虚构)|后端开发工程师|2024.07—2026.09\n在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化|2026.02—2026.04\n分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务|2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+          },
+          "resumeEvidenceCatalog": [
+            {
+              "id": "R1",
+              "kind": "resume",
+              "text": "[姓名已隐藏]"
+            },
+            {
+              "id": "R2",
+              "kind": "resume",
+              "text": "求职意向:Node.js后端开发工程师|广州"
+            },
+            {
+              "id": "R3",
+              "kind": "resume",
+              "text": "联系方式:[已隐藏]"
+            },
+            {
+              "id": "R4",
+              "kind": "resume",
+              "text": "教育经历"
+            },
+            {
+              "id": "R5",
+              "kind": "resume",
+              "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+            },
+            {
+              "id": "R6",
+              "kind": "resume",
+              "text": "工作经历"
+            },
+            {
+              "id": "R7",
+              "kind": "resume",
+              "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+            },
+            {
+              "id": "R8",
+              "kind": "resume",
+              "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+            },
+            {
+              "id": "R9",
+              "kind": "resume",
+              "text": "订单查询优化|2026.02—2026.04"
+            },
+            {
+              "id": "R10",
+              "kind": "resume",
+              "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+            },
+            {
+              "id": "R11",
+              "kind": "resume",
+              "text": "个人项目"
+            },
+            {
+              "id": "R12",
+              "kind": "resume",
+              "text": "Python记账服务|2025.06—2025.08"
+            },
+            {
+              "id": "R13",
+              "kind": "resume",
+              "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+            },
+            {
+              "id": "R14",
+              "kind": "resume",
+              "text": "技能"
+            },
+            {
+              "id": "R15",
+              "kind": "resume",
+              "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+            }
+          ],
+          "priorWeaknesses": [],
+          "candidateEvidence": [],
+          "candidateFacts": [],
+          "answerMemories": [],
+          "interviewBrief": {
+            "sessionKind": "resume_general",
+            "generalThemes": [
+              "经历与求职方向",
+              "实际承担的工作",
+              "解决问题与取舍",
+              "协作与沟通",
+              "成果与复盘"
+            ],
+            "jobFocus": null,
+            "resumeEvidenceCatalog": [
+              {
+                "id": "R1",
+                "kind": "resume",
+                "text": "[姓名已隐藏]"
+              },
+              {
+                "id": "R2",
+                "kind": "resume",
+                "text": "求职意向:Node.js后端开发工程师|广州"
+              },
+              {
+                "id": "R3",
+                "kind": "resume",
+                "text": "联系方式:[已隐藏]"
+              },
+              {
+                "id": "R4",
+                "kind": "resume",
+                "text": "教育经历"
+              },
+              {
+                "id": "R5",
+                "kind": "resume",
+                "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+              },
+              {
+                "id": "R6",
+                "kind": "resume",
+                "text": "工作经历"
+              },
+              {
+                "id": "R7",
+                "kind": "resume",
+                "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+              },
+              {
+                "id": "R8",
+                "kind": "resume",
+                "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+              },
+              {
+                "id": "R9",
+                "kind": "resume",
+                "text": "订单查询优化|2026.02—2026.04"
+              },
+              {
+                "id": "R10",
+                "kind": "resume",
+                "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+              },
+              {
+                "id": "R11",
+                "kind": "resume",
+                "text": "个人项目"
+              },
+              {
+                "id": "R12",
+                "kind": "resume",
+                "text": "Python记账服务|2025.06—2025.08"
+              },
+              {
+                "id": "R13",
+                "kind": "resume",
+                "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+              },
+              {
+                "id": "R14",
+                "kind": "resume",
+                "text": "技能"
+              },
+              {
+                "id": "R15",
+                "kind": "resume",
+                "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+              }
+            ],
+            "candidateEvidence": [],
+            "priorWeaknesses": [],
+            "coverageRule": "先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。"
+          }
+        },
+        "settings": {
+          "type": "mixed",
+          "difficulty": "standard",
+          "plannedQuestions": 3
+        },
+        "turns": [
+          {
+            "turnNumber": 1,
+            "question": "你在云桥软件参与订单后台开发，简历里提到个人完成订单状态与发票导出接口，并补充了参数校验和错误处理。能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？",
+            "focus": "实际承担的工作",
+            "resumeEvidenceIds": [
+              "R8"
+            ],
+            "answer": "我参与了订单后台，主要跟着团队做了一些开发，具体就按需求完成。",
+            "answerReview": {
+              "conclusion": "你的回答只概括地说参与了开发并按需求完成，没有给出问题要求的具体接口案例，也没有说明定位和验证修复效果的过程。",
+              "strengths": [],
+              "improvements": [
+                "问题要求讲一个实际遇到的接口问题，但回答只提到'按需求完成'，没有提供具体案例。",
+                "可以补充当时接口出现了什么现象或报错，你通过什么方式定位原因，以及修复后如何验证效果。"
+              ],
+              "turnNumbers": [
+                1
+              ]
+            }
+          },
+          {
+            "turnNumber": 2,
+            "question": "你刚才提到是跟着团队按需求完成，能否挑一个你记得最清楚的接口问题具体说说？比如在订单状态或发票导出接口里，参数校验、错误处理或者其他异常，当时是什么现象，你怎么定位原因，最后怎么确认修复有效？",
+            "focus": "实际承担的工作",
+            "resumeEvidenceIds": [
+              "R8"
+            ],
+            "answer": "我个人做订单状态和发票导出接口。查询慢时，我先看日志确认卡在数据库，使用EXPLAIN找到查询走了全表扫描，按筛选字段增加组合索引，再改写SQL并补测试。2万条订单的测试环境里，按同一批测试数据和相同查询条件比较，平均响应从480ms降到190ms。这个结果只是测试环境；部署和生产指标是同事负责，我没拿到同口径数据。",
+            "answerReview": null
+          }
+        ],
+        "progress": {
+          "askedQuestions": [
+            "你在云桥软件参与订单后台开发，简历里提到个人完成订单状态与发票导出接口，并补充了参数校验和错误处理。能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？",
+            "你刚才提到是跟着团队按需求完成，能否挑一个你记得最清楚的接口问题具体说说？比如在订单状态或发票导出接口里，参数校验、错误处理或者其他异常，当时是什么现象，你怎么定位原因，最后怎么确认修复有效？"
+          ],
+          "coveredThemes": [
+            "实际承担的工作"
+          ],
+          "remainingThemes": [
+            "经历与求职方向",
+            "解决问题与取舍",
+            "协作与沟通",
+            "成果与复盘"
+          ]
+        }
+      },
+      "baseline": {
+        "file": "interview-after-1.json",
+        "fileHash": "ba66fc65ff85be8802ffc9578fa21c2c57fdbb7b922fd6534e8ed995f999b897",
+        "inputHash": "d3cdb4f05849df714c34f8a7e508ec949a092d26bdc689d77b93b57db514d36d",
+        "output": {
+          "answerReview": {
+            "conclusion": "你这次给出了具体的接口慢查询案例，把现象、定位、修复和验证过程都讲清楚了，并且如实说明测试环境与生产环境的区别，整体符合问题要求。",
+            "strengths": [
+              "你具体说明了接口查询慢的现象，并通过日志确认卡在数据库，再用 EXPLAIN 定位到全表扫描，定位链路清晰。",
+              "你给出了修复与验证动作：增加组合索引、改写 SQL、补充测试，并用同一批测试数据和相同查询条件比较，得到 480ms 到 190ms 的改善。",
+              "你明确区分了测试环境指标与生产环境指标，没有夸大效果。"
+            ],
+            "improvements": [],
+            "turnNumbers": [
+              2
+            ]
+          },
+          "nextQuestion": {
+            "text": "简历里也提到你参与过代码评审和接口联调，前端和云环境由其他同事负责。能讲一次你和前端同事在联调中核对接口字段或边界条件时，实际发现并解决的问题吗？后来是怎么确认双方理解一致的？",
+            "focus": "协作与沟通",
+            "resumeEvidenceIds": [
+              "R8",
+              "R10"
+            ],
+            "basedOnTurnNumber": null,
+            "answerEvidence": "",
+            "questionKind": "topic_transition"
+          },
+          "complete": false
+        }
+      }
+    },
+    {
+      "id": "natural-resume-clear",
+      "method": "generateResumeOptimization",
+      "expected": "Already clear: keep education and actual specific actions; zero edits acceptable, no capability-label tails or needless title changes.",
+      "input": {
+        "mode": "general",
+        "candidateEvidence": [],
+        "sourceResume": {
+          "id": 1,
+          "documentId": 1,
+          "contentHash": "88548dd21ed55a9cefb3e46c60c39a97155056b89bacf095150569b61b5312f2",
+          "text": "许禾（虚拟）\n联系方式：13800000003｜xuhe@example.invalid\n求职意向：产品助理\n教育经历\n岭南信息学院（虚构）｜信息管理与信息系统｜本科｜2022.09—2026.06\n项目经历\n校园失物招领｜课程项目｜2026.03—2026.06\n访谈6位同学，整理物品发布、检索和认领流程；用Figma制作原型，组织3位同学走查，根据反馈调整认领页字段并完成课堂展示。\n技能\nFigma、Excel基础整理。"
+        },
+        "targetDirection": "",
+        "jobs": [],
+        "candidateFacts": [],
+        "answerMemories": [],
+        "funnelDiagnosis": null,
+        "evidenceCatalog": [
+          {
+            "id": "R1",
+            "kind": "resume",
+            "text": "许禾（虚拟）"
+          },
+          {
+            "id": "R2",
+            "kind": "resume",
+            "text": "联系方式：13800000003｜xuhe@example.invalid"
+          },
+          {
+            "id": "R3",
+            "kind": "resume",
+            "text": "求职意向：产品助理"
+          },
+          {
+            "id": "R4",
+            "kind": "resume",
+            "text": "教育经历"
+          },
+          {
+            "id": "R5",
+            "kind": "resume",
+            "text": "岭南信息学院（虚构）｜信息管理与信息系统｜本科｜2022.09—2026.06"
+          },
+          {
+            "id": "R6",
+            "kind": "resume",
+            "text": "项目经历"
+          },
+          {
+            "id": "R7",
+            "kind": "resume",
+            "text": "校园失物招领｜课程项目｜2026.03—2026.06"
+          },
+          {
+            "id": "R8",
+            "kind": "resume",
+            "text": "访谈6位同学，整理物品发布、检索和认领流程；用Figma制作原型，组织3位同学走查，根据反馈调整认领页字段并完成课堂展示。"
+          },
+          {
+            "id": "R9",
+            "kind": "resume",
+            "text": "技能"
+          },
+          {
+            "id": "R10",
+            "kind": "resume",
+            "text": "Figma、Excel基础整理。"
+          }
+        ]
+      },
+      "source": "new synthetic persona; frozen before its first generation"
+    },
+    {
+      "id": "natural-resume-ops",
+      "method": "generateResumeOptimization",
+      "expected": "Organize concrete responsibilities for readability, preserve event-level observed metric, no personal causal claim or forced negative disclaimer.",
+      "input": {
+        "mode": "general",
+        "candidateEvidence": [],
+        "sourceResume": {
+          "id": 1,
+          "documentId": 1,
+          "contentHash": "3890ddd3fc39a3dc2b7870706033de7144b2c1297dacc3b226162e68866d0e91",
+          "text": "周遥（虚拟）\n联系方式：13800000004｜zhouyao@example.invalid\n教育经历\n南城商学院（虚构）｜电子商务｜本科｜2021.09—2025.06\n工作经历\n电商运营助理｜2025.07—2026.08\n做了商品信息维护，日常整理商品详情页的尺码说明，客户有问题就收集给主管，记录活动日报，活动期间店铺转化率从2.1%到2.5%。"
+        },
+        "targetDirection": "",
+        "jobs": [],
+        "candidateFacts": [],
+        "answerMemories": [],
+        "funnelDiagnosis": null,
+        "evidenceCatalog": [
+          {
+            "id": "R1",
+            "kind": "resume",
+            "text": "周遥（虚拟）"
+          },
+          {
+            "id": "R2",
+            "kind": "resume",
+            "text": "联系方式：13800000004｜zhouyao@example.invalid"
+          },
+          {
+            "id": "R3",
+            "kind": "resume",
+            "text": "教育经历"
+          },
+          {
+            "id": "R4",
+            "kind": "resume",
+            "text": "南城商学院（虚构）｜电子商务｜本科｜2021.09—2025.06"
+          },
+          {
+            "id": "R5",
+            "kind": "resume",
+            "text": "工作经历"
+          },
+          {
+            "id": "R6",
+            "kind": "resume",
+            "text": "电商运营助理｜2025.07—2026.08"
+          },
+          {
+            "id": "R7",
+            "kind": "resume",
+            "text": "做了商品信息维护，日常整理商品详情页的尺码说明，客户有问题就收集给主管，记录活动日报，活动期间店铺转化率从2.1%到2.5%。"
+          }
+        ]
+      },
+      "source": "new synthetic persona; frozen before its first generation"
+    },
+    {
+      "id": "retry-disclaimer-only",
+      "method": "reviewMockInterviewRetry",
+      "expected": "improved=false: still no concrete problem, method or validation; extra division statement is irrelevant.",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "job": null,
+          "resume": {
+            "versionId": 1,
+            "name": "基础简历",
+            "contentHash": "e08b630521aeb85a0c63bbad7446af41666ae27e4dff58d1e2d054ec8e662f71",
+            "text": "[姓名已隐藏]\n求职意向:Node.js后端开发工程师|广州\n联系方式:[已隐藏]\n教育经历\n南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06\n工作经历\n云桥软件(虚构)|后端开发工程师|2024.07—2026.09\n在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化|2026.02—2026.04\n分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务|2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+          },
+          "resumeEvidenceCatalog": [
+            {
+              "id": "R1",
+              "kind": "resume",
+              "text": "[姓名已隐藏]"
+            },
+            {
+              "id": "R2",
+              "kind": "resume",
+              "text": "求职意向:Node.js后端开发工程师|广州"
+            },
+            {
+              "id": "R3",
+              "kind": "resume",
+              "text": "联系方式:[已隐藏]"
+            },
+            {
+              "id": "R4",
+              "kind": "resume",
+              "text": "教育经历"
+            },
+            {
+              "id": "R5",
+              "kind": "resume",
+              "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+            },
+            {
+              "id": "R6",
+              "kind": "resume",
+              "text": "工作经历"
+            },
+            {
+              "id": "R7",
+              "kind": "resume",
+              "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+            },
+            {
+              "id": "R8",
+              "kind": "resume",
+              "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+            },
+            {
+              "id": "R9",
+              "kind": "resume",
+              "text": "订单查询优化|2026.02—2026.04"
+            },
+            {
+              "id": "R10",
+              "kind": "resume",
+              "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+            },
+            {
+              "id": "R11",
+              "kind": "resume",
+              "text": "个人项目"
+            },
+            {
+              "id": "R12",
+              "kind": "resume",
+              "text": "Python记账服务|2025.06—2025.08"
+            },
+            {
+              "id": "R13",
+              "kind": "resume",
+              "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+            },
+            {
+              "id": "R14",
+              "kind": "resume",
+              "text": "技能"
+            },
+            {
+              "id": "R15",
+              "kind": "resume",
+              "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+            }
+          ],
+          "priorWeaknesses": [],
+          "candidateEvidence": [],
+          "candidateFacts": [],
+          "answerMemories": [],
+          "interviewBrief": {
+            "sessionKind": "resume_general",
+            "generalThemes": [
+              "经历与求职方向",
+              "实际承担的工作",
+              "解决问题与取舍",
+              "协作与沟通",
+              "成果与复盘"
+            ],
+            "jobFocus": null,
+            "resumeEvidenceCatalog": [
+              {
+                "id": "R1",
+                "kind": "resume",
+                "text": "[姓名已隐藏]"
+              },
+              {
+                "id": "R2",
+                "kind": "resume",
+                "text": "求职意向:Node.js后端开发工程师|广州"
+              },
+              {
+                "id": "R3",
+                "kind": "resume",
+                "text": "联系方式:[已隐藏]"
+              },
+              {
+                "id": "R4",
+                "kind": "resume",
+                "text": "教育经历"
+              },
+              {
+                "id": "R5",
+                "kind": "resume",
+                "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+              },
+              {
+                "id": "R6",
+                "kind": "resume",
+                "text": "工作经历"
+              },
+              {
+                "id": "R7",
+                "kind": "resume",
+                "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+              },
+              {
+                "id": "R8",
+                "kind": "resume",
+                "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+              },
+              {
+                "id": "R9",
+                "kind": "resume",
+                "text": "订单查询优化|2026.02—2026.04"
+              },
+              {
+                "id": "R10",
+                "kind": "resume",
+                "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+              },
+              {
+                "id": "R11",
+                "kind": "resume",
+                "text": "个人项目"
+              },
+              {
+                "id": "R12",
+                "kind": "resume",
+                "text": "Python记账服务|2025.06—2025.08"
+              },
+              {
+                "id": "R13",
+                "kind": "resume",
+                "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+              },
+              {
+                "id": "R14",
+                "kind": "resume",
+                "text": "技能"
+              },
+              {
+                "id": "R15",
+                "kind": "resume",
+                "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+              }
+            ],
+            "candidateEvidence": [],
+            "priorWeaknesses": [],
+            "coverageRule": "先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。"
+          }
+        },
+        "settings": {
+          "type": "mixed",
+          "difficulty": "standard",
+          "plannedQuestions": 3
+        },
+        "turn": {
+          "turnNumber": 1,
+          "question": "能具体讲一个你实际遇到的接口问题，以及你是怎么定位和验证修复效果的吗？",
+          "originalAnswer": "我参与订单后台开发，按需求完成接口。",
+          "originalReview": {
+            "conclusion": "没有讲清本题要求的具体内容。",
+            "strengths": [],
+            "improvements": [
+              "按原题补充具体内容。"
+            ],
+            "turnNumbers": [
+              1
+            ]
+          },
+          "retryAnswer": "我参与订单后台开发，按需求完成接口。前端和生产发布由同事负责。",
+          "earlierRetries": []
+        }
+      },
+      "source": "new synthetic contrasting retry cases, frozen before generation"
+    },
+    {
+      "id": "retry-direct-ownership",
+      "method": "reviewMockInterviewRetry",
+      "expected": "improved=true: answers direct independence question and supplies actual own work, relevant team scope.",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "job": null,
+          "resume": {
+            "versionId": 1,
+            "name": "基础简历",
+            "contentHash": "e08b630521aeb85a0c63bbad7446af41666ae27e4dff58d1e2d054ec8e662f71",
+            "text": "[姓名已隐藏]\n求职意向:Node.js后端开发工程师|广州\n联系方式:[已隐藏]\n教育经历\n南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06\n工作经历\n云桥软件(虚构)|后端开发工程师|2024.07—2026.09\n在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。\n订单查询优化|2026.02—2026.04\n分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。\n个人项目\nPython记账服务|2025.06—2025.08\n用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。\n技能\nNode.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+          },
+          "resumeEvidenceCatalog": [
+            {
+              "id": "R1",
+              "kind": "resume",
+              "text": "[姓名已隐藏]"
+            },
+            {
+              "id": "R2",
+              "kind": "resume",
+              "text": "求职意向:Node.js后端开发工程师|广州"
+            },
+            {
+              "id": "R3",
+              "kind": "resume",
+              "text": "联系方式:[已隐藏]"
+            },
+            {
+              "id": "R4",
+              "kind": "resume",
+              "text": "教育经历"
+            },
+            {
+              "id": "R5",
+              "kind": "resume",
+              "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+            },
+            {
+              "id": "R6",
+              "kind": "resume",
+              "text": "工作经历"
+            },
+            {
+              "id": "R7",
+              "kind": "resume",
+              "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+            },
+            {
+              "id": "R8",
+              "kind": "resume",
+              "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+            },
+            {
+              "id": "R9",
+              "kind": "resume",
+              "text": "订单查询优化|2026.02—2026.04"
+            },
+            {
+              "id": "R10",
+              "kind": "resume",
+              "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+            },
+            {
+              "id": "R11",
+              "kind": "resume",
+              "text": "个人项目"
+            },
+            {
+              "id": "R12",
+              "kind": "resume",
+              "text": "Python记账服务|2025.06—2025.08"
+            },
+            {
+              "id": "R13",
+              "kind": "resume",
+              "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+            },
+            {
+              "id": "R14",
+              "kind": "resume",
+              "text": "技能"
+            },
+            {
+              "id": "R15",
+              "kind": "resume",
+              "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+            }
+          ],
+          "priorWeaknesses": [],
+          "candidateEvidence": [],
+          "candidateFacts": [],
+          "answerMemories": [],
+          "interviewBrief": {
+            "sessionKind": "resume_general",
+            "generalThemes": [
+              "经历与求职方向",
+              "实际承担的工作",
+              "解决问题与取舍",
+              "协作与沟通",
+              "成果与复盘"
+            ],
+            "jobFocus": null,
+            "resumeEvidenceCatalog": [
+              {
+                "id": "R1",
+                "kind": "resume",
+                "text": "[姓名已隐藏]"
+              },
+              {
+                "id": "R2",
+                "kind": "resume",
+                "text": "求职意向:Node.js后端开发工程师|广州"
+              },
+              {
+                "id": "R3",
+                "kind": "resume",
+                "text": "联系方式:[已隐藏]"
+              },
+              {
+                "id": "R4",
+                "kind": "resume",
+                "text": "教育经历"
+              },
+              {
+                "id": "R5",
+                "kind": "resume",
+                "text": "南城技术学院(虚构)|计算机科学与技术|本科|2020.09—2024.06"
+              },
+              {
+                "id": "R6",
+                "kind": "resume",
+                "text": "工作经历"
+              },
+              {
+                "id": "R7",
+                "kind": "resume",
+                "text": "云桥软件(虚构)|后端开发工程师|2024.07—2026.09"
+              },
+              {
+                "id": "R8",
+                "kind": "resume",
+                "text": "在5人团队参与订单后台开发,个人完成订单状态与发票导出接口,使用Node.js、Fastify、PostgreSQL,并补充接口参数校验和错误处理。前端与云环境由其他同事负责。"
+              },
+              {
+                "id": "R9",
+                "kind": "resume",
+                "text": "订单查询优化|2026.02—2026.04"
+              },
+              {
+                "id": "R10",
+                "kind": "resume",
+                "text": "分析慢查询,增加索引并改写SQL。在2万条订单的测试数据上,压测平均响应从480ms降到190ms;没有记录生产环境同口径指标。参与代码评审和接口联调。"
+              },
+              {
+                "id": "R11",
+                "kind": "resume",
+                "text": "个人项目"
+              },
+              {
+                "id": "R12",
+                "kind": "resume",
+                "text": "Python记账服务|2025.06—2025.08"
+              },
+              {
+                "id": "R13",
+                "kind": "resume",
+                "text": "用FastAPI与SQLite制作基础记账接口并写单元测试,仅在本机运行,没有生产部署。"
+              },
+              {
+                "id": "R14",
+                "kind": "resume",
+                "text": "技能"
+              },
+              {
+                "id": "R15",
+                "kind": "resume",
+                "text": "Node.js、JavaScript、SQL、PostgreSQL、Git;Python/FastAPI基础。未使用Kubernetes,不负责微服务架构或团队管理。"
+              }
+            ],
+            "candidateEvidence": [],
+            "priorWeaknesses": [],
+            "coverageRule": "先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。"
+          }
+        },
+        "settings": {
+          "type": "mixed",
+          "difficulty": "standard",
+          "plannedQuestions": 3
+        },
+        "turn": {
+          "turnNumber": 1,
+          "question": "整个订单后台是你独立完成的吗？具体哪部分是你做的？",
+          "originalAnswer": "我参与了订单后台开发。",
+          "originalReview": {
+            "conclusion": "没有讲清本题要求的具体内容。",
+            "strengths": [],
+            "improvements": [
+              "按原题补充具体内容。"
+            ],
+            "turnNumbers": [
+              1
+            ]
+          },
+          "retryAnswer": "订单后台是5人团队一起做的，我完成订单状态和发票导出接口，并补参数校验与错误处理，前端和云环境由同事负责。",
+          "earlierRetries": []
+        }
+      },
+      "source": "new synthetic contrasting retry cases, frozen before generation"
+    }
+  ]
+}

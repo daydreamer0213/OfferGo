@@ -236,4 +236,9 @@ for (const reply of [
   assert(result.errors.some((item) => item.kind === "numeric_achievement"));
 }
 
+for (const separator of ['，', ',', '；', ';']) {
+  assert.equal(assessMessageDraftQuality({ text: `在5人团队参与接口开发${separator}个人完成发票导出。`, evidenceTexts: ['在5人团队参与接口开发，个人完成发票导出。'] }).valid, true);
+  assert.equal(assessMessageDraftQuality({ text: `我完成100个客户问题${separator}参与接口开发。`, evidenceTexts: ['我处理10个客户问题，参与接口开发。'] }).valid, false,
+    'consistent clause boundaries must still reject inflated personal achievements');
+}
 console.log("message_draft_quality_smoke ok");

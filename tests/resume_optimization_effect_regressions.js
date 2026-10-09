@@ -27,6 +27,42 @@ test('moving a proven personal contribution to a line after employment dates rem
   assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
 
+test('a proven personal subtask can be stated directly without repeating teammate boundaries', () => {
+  const originalText = '个人完成订单状态和发票导出接口，前端与云环境由其他同事负责。';
+  const proposedText = '完成订单状态和发票导出接口。';
+  const sourceText = `${base}${originalText}`;
+  const validated = draft(sourceText, originalText, proposedText);
+  const generatedText = renderOptimizedResume(sourceText, validated.suggestions);
+  assert.equal(generatedText, `${base}${proposedText}`);
+  const result = validateResumeActivationText({ sourceText, generatedText, finalText: generatedText,
+    suggestions: validated.suggestions });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
+test('personal page changes can accompany observed campaign conversion without an attribution disclaimer', () => {
+  const originalText = '活动期本人调整商品详情页按钮位置与文案，期间转化率从2.1%提升至2.5%。';
+  const proposedText = '调整商品详情页按钮位置与文案，活动期转化率从2.1%提升至2.5%。';
+  const sourceText = `${base}${originalText}`;
+  const validated = draft(sourceText, originalText, proposedText);
+  const generatedText = renderOptimizedResume(sourceText, validated.suggestions);
+  assert.equal(generatedText, `${base}${proposedText}`);
+  const result = validateResumeActivationText({ sourceText, generatedText, finalText: generatedText,
+    suggestions: validated.suggestions });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
+test('a proven personal subtask cannot become independent ownership of the entire project', () => {
+  const originalText = '参与订单后台项目，个人完成订单状态和发票导出接口，前端与云环境由其他同事负责。';
+  const sourceText = `${base}${originalText}`;
+  const proposedText = '独立负责订单后台项目，完成订单状态和发票导出接口、前端和云环境。';
+  assert.throws(() => draft(sourceText, originalText, proposedText), /职责边界/);
+  const generatedText = sourceText;
+  const result = validateResumeActivationText({ sourceText, generatedText, finalText: `${base}${proposedText}`,
+    suggestions: [] });
+  assert.equal(result.valid, false);
+  assert(result.errors.some(item => item.code === 'RESUME_FACT_UNSUPPORTED'));
+});
+
 test('already clear resumes can produce a complete unchanged draft with no suggestions', () => {
   const sourceText = `${base}课程项目：整理访谈反馈形成需求表，绘制Figma页面原型并完成课程展示。`;
   const validated = validateResumeOptimizationDraft({ headline: '现稿已清楚，无需修改', suggestions: [] },
@@ -34,6 +70,15 @@ test('already clear resumes can produce a complete unchanged draft with no sugge
   assert.deepEqual(validated.suggestions, []);
   assert.equal(renderOptimizedResume(sourceText, validated.suggestions), sourceText);
   assert.equal(integrity(sourceText).valid, true);
+});
+
+test('punctuation formatting does not turn an existing team size into a new personal achievement', () => {
+  const originalText = '在5人团队参与订单后台开发，个人完成订单状态与发票导出接口。';
+  const sourceText = `${base}${originalText}`;
+  const validated = draft(sourceText, originalText, '在5人团队参与订单后台开发,个人完成订单状态与发票导出接口。');
+  const generatedText = renderOptimizedResume(sourceText, validated.suggestions);
+  const result = validateResumeActivationText({ sourceText, generatedText, finalText: generatedText, suggestions: validated.suggestions });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
 
 test('model-escaped line separators become actual resume lines without changing technical escape examples', () => {
