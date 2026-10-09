@@ -21,6 +21,7 @@ test('learned interview material retains the verified answer instead of a strong
   const result = validateInterviewReport({ conclusion: '联调过程清楚。', strengths: [], improvements: [],
     followUpRisks: [], retryRecommendations: [], answerStructures: [], evidenceCandidates: [
       { turnNumber: 1, subject: '接口联调', sourceQuote: answer, text: '设计了全部边界测试用例并独立负责完整系统。' },
+      { turnNumber: 1, subject: '边界检查', sourceQuote: answer, text: '发现并修正日期边界问题。' },
       { turnNumber: 1, subject: '无依据的资料', sourceQuote: '我设计了全部用例。', text: '我设计了全部用例。' }
     ] }, { turns: [{ turnNumber: 1, answerText: answer }] });
   assert.equal(result.evidenceCandidates.length, 1);

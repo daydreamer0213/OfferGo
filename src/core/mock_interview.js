@@ -277,7 +277,7 @@ function validateInterviewReport(raw, context = {}) {
         || !subject || subject.length > 160 || !text || text.length > 8000 || sourceQuote.length > 8000) return [];
       // Confirmed learning material uses the verified answer, not model embellishment.
       return [{ turnNumber: Number(item.turnNumber), subject, text: sourceQuote, sourceQuote }];
-    }) } : {}),
+    }).filter((item, index, items) => items.findIndex(other => other.sourceQuote === item.sourceQuote) === index) } : {}),
     conclusion: cleanText(raw.conclusion, 3_000, "复盘结论"),
     strengths: reportHighlights(raw.strengths, validTurns, "最强项"),
     improvements: reportHighlights(raw.improvements, validTurns, "改进项"),
