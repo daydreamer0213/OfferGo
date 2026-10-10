@@ -701,7 +701,7 @@ async function reportOnlyAfterDrainedReviewSmoke() {
 async function runnerErrorModeSmoke() {
   const db = openDb(":memory:");
   try {
-    const configs = configFor();
+    const configs = { ...configFor(), semanticMatchingMode: 'split' };
     const timeoutAnalyzer = {
       understandJob: async () => {
         throw Object.assign(new Error("model timeout"), {

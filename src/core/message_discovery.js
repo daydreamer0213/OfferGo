@@ -1482,6 +1482,7 @@ function projectMessageDecisionCard(job = {}) {
   const questionsToConfirm = decisionQuestionsToConfirm(analysis);
   const attentionGap = decisionAttentionGap(analysis);
   const roleTasks = decisionRoleTasks(analysis);
+  const wholeWork = analysis.semanticMatchingMode === "whole_jd" && !boundaryExcluded;
   return {
     title: safeProjectionText(job.title, 160),
     company: safeProjectionText(job.company, 160),
@@ -1508,7 +1509,20 @@ function projectMessageDecisionCard(job = {}) {
       ? "职位已下线，以下资料用于理解这段沟通"
       : opportunityVerdict(analysis.recommendation),
     opportunitySummary: availability === "offline" ? "" : opportunitySummary,
-    availability
+    availability,
+    ...(wholeWork ? {
+      fitLabel: { primary: "主投", apply: "可投", caution: "慎投", not_recommended: "不建议" }[analysis.recommendation] || "待分析",
+      fitSummary: safeProjectionText(analysis.decisionExplanation, 600),
+      opportunitySummary: availability === "offline" ? "" : safeProjectionText(analysis.decisionExplanation, 600),
+      matchHighlights: safeProjectionList(analysis.supportingFacts, 3, 240, fact => fact.quote),
+      resumeConnections: safeProjectionList(analysis.supportingFacts, 3, 320, fact => fact.quote),
+      questionsToConfirm: [],
+      attentionPoint: safeProjectionList(analysis.materialConsiderations, 3, 240, item => item.description).join("；"),
+      recommendationNote: safeProjectionText(analysis.decisionExplanation, 600),
+      continueCondition: analysis.recommendation === "not_recommended"
+        ? "当前经历与岗位主要工作存在实质差距，暂不建议投入投递。"
+        : "可依据上述主要工作、相关经历和实质差距决定下一步投递。"
+    } : {})
   };
 }
 

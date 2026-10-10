@@ -26,6 +26,8 @@ const { listWorkflowInventory } = require("./workflow_inventory");
 const { PIPELINE_VERSIONS, buildAnalysisRevision, modelInferenceVersion } = require("./analysis_revision");
 const { buildJobMatchEvidence } = require('./job_match_evidence');
 const { decideJobMatch } = require('./job_match_decision');
+const { scoreJob, decisionState } = require('./scoring');
+const { WORK_MATCH_POLICY_HASH } = require('./job_work_matching');
 const {
   DECISION_POLICY,
   DECISION_POLICY_HASH,
@@ -49,10 +51,25 @@ function createJobAnalysisRunner(configs, keywordPlan = [], {
 
   return async function analyzeJob(job, { signal = null } = {}) {
     throwIfOperationAborted(signal);
+    const sourceComplete = hasCompleteJobDescription(job);
+    if (semanticMatchingMode === "whole_jd") {
+      const scored = scoreJob(job, configs);
+      const retainedRefreshTags = (Array.isArray(job.qualityTags) ? job.qualityTags : [])
+        .filter(tag => ["detail_unverified", "stale_or_unknown_active"].includes(tag));
+      job = { ...job, ...scored, qualityTags: [...new Set([...scored.qualityTags, ...retainedRefreshTags])] };
+    }
     const ruleMatch = explainJobMatch(job, configs, keywordPlan);
     const facts = jobFacts(job);
     const contentHash = sourceContentHash(facts);
     const revision = buildAnalysisRevision(configs, contentHash);
+    if (semanticMatchingMode === "whole_jd" && (decisionState(job) !== "ready" || !sourceComplete)) {
+      const gate = decisionState(job);
+      return applyRuleGuard({ ...createRuleOnlyAnalysis(configs, job, ruleMatch, revision),
+        provider, semanticMatchingMode, semanticStatus: gate === "blocked" ? "blocked" : gate === "refresh" ? "refresh" : "partial",
+        preScreen: { state: gate === "blocked" ? "excluded" : gate === "refresh" ? "pending" : "allowed" },
+        matchStatus: !sourceComplete ? "partial" : "pending", componentRecommendation: null,
+        decisionSource: "pre_screen", fitReasons: [], error: "", errorCode: "" }, job);
+    }
     if (ruleOnly) return createRuleOnlyAnalysis(configs, job, ruleMatch, revision);
     if (!candidateProfile || typeof candidateProfile !== "object") {
       const missingProfileError = Object.assign(
@@ -70,8 +87,29 @@ function createJobAnalysisRunner(configs, keywordPlan = [], {
       return failedAnalysis(configs, job, revision, missingProfileError);
     }
 
+    if (semanticMatchingMode === "whole_jd" && (!String(candidateProfile.source?.resumeEvidenceText || "").trim()
+      || configs.resumeEvidenceRecovery?.status === "unavailable")) {
+      const error = Object.assign(new Error("当前确认版本的简历原文不可用，补齐后再进行岗位工作判断。"), {
+        code: "CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE", materialIssue: configs.resumeEvidenceRecovery?.reasonCode || "RESUME_TEXT_MISSING"
+      });
+      if (errorMode === "throw") throw error;
+      return applyRuleGuard({ ...failedAnalysis(configs, job, revision, error), semanticMatchingMode,
+        semanticStatus: "partial", matchStatus: "material_missing", materialIssue: error.materialIssue }, job);
+    }
     try {
       const matchEvidence = buildJobMatchEvidence({ candidateProfile, jobFacts: facts });
+      if (semanticMatchingMode === "whole_jd") {
+        const workSelection = await cachedModelCall({ db, configs, logger, kind: "selectJob",
+          pipelineVersion: PIPELINE_VERSIONS.selectJob,
+          input: { candidateProfile: candidateProfileForJobMatch(candidateProfile),
+            candidateMatchCard: configs.matchingCard || null, originalJob: facts,
+            searchPreferences: effectiveSearchPreferences(configs),
+            runtimeContext: { analysisAsOfDate: new Intl.DateTimeFormat('en-CA', {
+              timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+            }).format(new Date()), timeZone: 'Asia/Shanghai' },
+            matchEvidence, evidenceCatalog: matchEvidence.entries }, signal, run: analyzer.selectJob });
+        return applyRuleGuard(compactAnalysis(configs, { job, workSelection, ruleMatch, revision }), job);
+      }
       const jobUnderstanding = await cachedModelCall({
         db,
         configs,
@@ -118,7 +156,8 @@ function createJobAnalysisRunner(configs, keywordPlan = [], {
         if (!error.phase && error.modelPhase) error.phase = error.modelPhase;
         throw error;
       }
-      return applyRuleGuard(failedAnalysis(configs, job, revision, error), job);
+      return applyRuleGuard({ ...failedAnalysis(configs, job, revision, error), semanticMatchingMode,
+        ...(semanticMatchingMode === "whole_jd" ? { matchStatus: "failed", componentRecommendation: null } : {}) }, job);
     }
   };
 }
@@ -326,7 +365,7 @@ async function cachedModelCall({ db, configs, logger = null, kind, pipelineVersi
     jobUnderstanding: input?.jobUnderstanding,
     matchEvidence: input?.matchEvidence,
     modelRecommendationMode: input?.modelRecommendationMode || DECISION_POLICY.modelRecommendationMode
-  } : undefined;
+  } : kind === "selectJob" ? { input } : undefined;
   if (db) {
     const cached = getModelCache(db, cacheKey);
     if (cached) {
@@ -357,7 +396,7 @@ async function cachedModelCall({ db, configs, logger = null, kind, pipelineVersi
     throwIfOperationAborted(signal);
     result = validateModelResult(kind, rawResult, validationContext);
   } catch (error) {
-    if (error?.code !== "MODEL_CONTRACT_INVALID" || error?.modelRepairHandled) {
+    if (kind === "selectJob" || error?.code !== "MODEL_CONTRACT_INVALID" || error?.modelRepairHandled) {
       error.modelStage ||= kind;
       error.modelPhase ||= "initial";
       throw error;
@@ -434,6 +473,23 @@ function compactAnalysis(configs, parts) {
   const versionId = decision.recommendedResumeVersion || ruleMatch.recommendedResumeVersion || "";
   const fullJd = hasCompleteJobDescription(job);
   const semanticMatchingMode = effectiveSemanticMatchingMode(configs);
+  if (parts.workSelection) {
+    const selection = parts.workSelection;
+    return { provider, model, semanticStatus: fullJd ? "complete" : "partial", semanticMatchingMode,
+      decisionSource: "model_work_match", decisionStatus: "pending", recommendation: null,
+      matchStatus: fullJd ? "complete" : "partial", componentRecommendation: selection.modelRecommendation,
+      preScreen: { state: "allowed" },
+      recommendationSchemaVersion: RECOMMENDATION_SCHEMA_VERSION, decisionPolicyHash: WORK_MATCH_POLICY_HASH,
+      ...selection, roleSummary: selection.selectedWork.summary,
+      fitReasons: [selection.decisionExplanation], roleResumeEvidence: selection.supportingFacts.map(fact => fact.quote),
+      responsibilityMatches: [], requirementMatches: [], hardBlockers: [], softGaps: [], questionsToVerify: [],
+      primaryProjects: ruleMatch.primaryProjects || [], recommendedResumeVersion: versionId,
+      recommendedResumeVersionName: resumeVersionName(configs.resumeVersions, versionId),
+      realRoleType: job.employmentType || "", fitLevel: null, confidence: null,
+      error: "", errorCode: "", hrReplies: {}, greeting: job.greeting || "",
+      evidence: { jd: [], resume: selection.supportingFacts.map(fact => fact.quote) },
+      revision: parts.revision || buildAnalysisRevision(configs, sourceContentHash(jobFacts(job))) };
+  }
   return {
     provider,
     model,
@@ -575,10 +631,10 @@ function effectiveSemanticMatchingMode(configs = {}) {
   const mode = String(
     configs.semanticMatchingMode
       || configs.model?.semanticMatchingMode
-      || "split"
+      || "whole_jd"
   ).trim().toLowerCase();
-  if (!["split", "legacy"].includes(mode)) {
-    throw new Error("semanticMatchingMode must be split or legacy");
+  if (!["whole_jd", "split", "legacy"].includes(mode)) {
+    throw new Error("semanticMatchingMode must be whole_jd, split or legacy");
   }
   return mode;
 }
@@ -610,6 +666,15 @@ function searchPreferences(configs) {
     jobTypes: plan.jobTypes || [],
     directions: plan.directions || []
   };
+}
+
+function effectiveSearchPreferences(configs = {}) {
+  const salary = configs.scoring?.salary || {}, positive = value => Number(value) > 0 ? Number(value) : null;
+  const minimumK = positive(salary.expected_min_k), targetMaximumK = positive(salary.expected_max_k);
+  return { cities: [...(configs.profile?.location?.target_cities || [])],
+    experience: [...(configs.scoring?.experience?.selected || [])],
+    jobTypes: [...(configs.targetPolicy?.jobTypes || [])], directions: [...(configs.targetPolicy?.directions || [])],
+    salary: { isSet: minimumK !== null || targetMaximumK !== null, minimumK, targetMaximumK, mode: salary.mode || 'wide' } };
 }
 
 function candidateProfileForJobMatch(profile) {

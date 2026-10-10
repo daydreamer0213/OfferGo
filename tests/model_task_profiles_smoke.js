@@ -61,7 +61,7 @@ async function newInstallDefaultsSmoke() {
     assert.strictEqual(state.settings.taskProfiles.deep_analysis.revision.length, 64);
     assert.strictEqual(state.settings.taskProfiles.batch_screening.model, "deepseek-v4-flash");
     assert.strictEqual(state.settings.taskProfiles.batch_screening.timeoutMs, 90000);
-    assert.strictEqual(state.settings.taskProfiles.batch_screening.thinkingMode, "disabled");
+    assert.strictEqual(state.settings.taskProfiles.batch_screening.thinkingMode, "enabled");
     assert.strictEqual(state.settings.taskProfiles.batch_screening.reasoningEffort, "high");
     assert.strictEqual(state.settings.taskProfiles.batch_screening.concurrency, 2);
     assert.strictEqual(state.settings.taskProfiles.batch_screening.revision.length, 64);
@@ -81,7 +81,7 @@ async function newInstallDefaultsSmoke() {
     const batch = profiles.find((item) => item.id === "batch_screening");
     assert.strictEqual(batch.recommended.model, "deepseek-v4-flash");
     assert.strictEqual(batch.recommended.timeoutMs, 90000);
-    assert.strictEqual(batch.recommended.thinkingMode, "disabled");
+    assert.strictEqual(batch.recommended.thinkingMode, "enabled");
     assert.strictEqual(batch.recommended.concurrency, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

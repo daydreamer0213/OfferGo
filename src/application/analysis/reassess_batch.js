@@ -31,7 +31,8 @@ async function reassessBatch({ db, batchId, planId, createConfigs, logger, clean
     matchingContext.candidateProfile,
     planRecord.plan,
     listMatchingResumeVersions(db, planRecord.profileId),
-    matchingContext.matchingCard
+    matchingContext.matchingCard,
+    { resumeEvidenceRecovery: matchingContext.resumeEvidenceRecovery }
   );
   const keywordPlan = (planRecord.plan.keywords || []).map((item) => ({ ...item }));
   const analyzeJob = createJobAnalysisRunner(configs, keywordPlan, { db, logger });

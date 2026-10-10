@@ -67,7 +67,7 @@ async function runGenericFixture(db, fixture) {
       return fixture.matchDecision;
     }
   };
-  const configs = profileToRuntimeConfigs(loadConfigs(root), fixture.candidateProfile, fixture.searchPlan, [], fixture.matchingCard);
+  const configs = profileToRuntimeConfigs({ ...loadConfigs(root), semanticMatchingMode: 'split' }, fixture.candidateProfile, fixture.searchPlan, [], fixture.matchingCard);
   const job = {
     source: "boss",
     sourceId: fixture.id,

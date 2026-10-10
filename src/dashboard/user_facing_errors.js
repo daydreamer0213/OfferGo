@@ -1,6 +1,11 @@
 "use strict";
 
 const ERROR_GUIDANCE = Object.freeze({
+  CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE: {
+    title: "匹配所用的简历原文暂时不可用",
+    impact: "本轮已暂停分析，已读取的岗位和剩余任务都已保留。",
+    nextAction: "前往“简历分析”重新导入基础简历并确认匹配偏好卡，再返回本轮继续分析。"
+  },
   MODEL_CONTRACT_INVALID: {
     title: "模型返回的分析暂时无法使用",
     impact: "岗位资料已保存，本次没有生成可用的匹配结果。",

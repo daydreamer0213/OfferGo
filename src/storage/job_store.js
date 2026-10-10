@@ -788,6 +788,8 @@ function decisionBucket(job) {
   if (["pending", "failed", "stale"].includes(semanticStatus)) return "analysis_pending";
   if (semanticStatus === "refresh") return "refresh";
   if (semanticStatus === "partial") return "analysis_pending";
+  if (analysis.semanticMatchingMode === "whole_jd") return semanticStatus === "complete"
+    && analysis.decisionStatus === "decided" ? (recommendation || "analysis_pending") : "analysis_pending";
   if (decisionHardBlockers(analysis).length) return "not_recommended";
   if (semanticStatus === "blocked") return "not_recommended";
   if (semanticStatus === "complete") return analysis.jobQuality?.level === "risk" ? "not_recommended" : (recommendation || "analysis_pending");

@@ -4,14 +4,15 @@ const EXCLUSIVE_QUALIFIER = /仅限|只招|仅招|限定|仅面向|只接受|仅
 function evaluateJobEligibility(job = {}, {
   candidateProfile = {},
   targetJobTypes = ["全职"],
-  allowPartTime = false
+  allowPartTime = false,
+  deferJdQualifications = false
 } = {}) {
   const jobEvidence = [];
   const candidateEvidence = [];
   const qualityTags = [];
   const risks = [];
   const targetAcceptsInternship = targetJobTypes.some((item) => /实习|intern/i.test(String(item || "")));
-  const employment = employmentTypeOf(job);
+  const employment = employmentTypeOf(job, { scopedDescription: deferJdQualifications });
   jobEvidence.push(...employment.evidence);
 
   let reasonCode = "";
@@ -29,6 +30,7 @@ function evaluateJobEligibility(job = {}, {
     risks.push("岗位明确为实习性质，不符合当前全职目标");
   }
 
+  const employmentBoundary = { status, reasonCode, qualityTags: [...qualityTags], risks: [...risks] };
   const candidate = candidateEducationFacts(candidateProfile);
   const cohort = requiredCohortConstraint(job.description);
   if (cohort) {
@@ -88,11 +90,16 @@ function evaluateJobEligibility(job = {}, {
     evidence: {
       job: evidenceSnippets(jobEvidence),
       candidate: evidenceSnippets(candidateEvidence)
-    }
+    },
+    ...(deferJdQualifications ? {
+      ...employmentBoundary,
+      jdScopeSignals: { qualityTags: qualityTags.filter(tag => !employmentBoundary.qualityTags.includes(tag)),
+        jobEvidence: evidenceSnippets(jobEvidence), candidateEvidence: evidenceSnippets(candidateEvidence) }
+    } : {})
   };
 }
 
-function employmentTypeOf(job) {
+function employmentTypeOf(job, { scopedDescription = false } = {}) {
   const title = normalized(job.title);
   const structured = normalized([
     job.jobType,
@@ -102,11 +109,24 @@ function employmentTypeOf(job) {
   ].filter(Boolean).join(" "));
   const description = normalized(job.description);
   const combined = `${title} ${structured} ${description}`;
+  const metadata = `${title} ${structured}`;
+  // A description may advertise separate employment options. An explicit
+  // internship/part-time card remains a boundary; a generic card must not
+  // apply one advertised option to every independently offered full-time job.
+  if (scopedDescription && !/实习生?|intern(?:ship)?|兼职|part[ _-]?time/i.test(metadata)) {
+    const clauses = semanticClauses(description);
+    const fullTime = clauses.find(clause => /(?:社会招聘|社招).{0,12}(?:岗位|方向|职位)|全职(?:岗位|方向|职位)|(?:岗位|方向|职位|工作性质).{0,8}全职|^(?:社会招聘|社招)[:：]/.test(clause)
+      && !/转正|转为|转成|实习(?:期)?后|不接受|不招|非全职/.test(clause)
+      && !/(?:负责|协助|参与|承担|开展|推进|跟进|执行|支持|主要工作|岗位职责).{0,20}(?:社会招聘|社招|全职.{0,8}招聘)/.test(clause));
+    const otherType = clauses.find(clause => clause !== fullTime
+      && /实习生(?:岗位|方向|职位)|(?:岗位|方向|职位).{0,12}实习生|兼职(?:岗位|方向|职位)|(?:岗位|方向|职位).{0,12}兼职/.test(clause)
+      && !/实习经验|实习经历|不接受|不招|非兼职/.test(clause));
+    if (fullTime && otherType) return { type: "mixed", evidence: [fullTime, otherType] };
+  }
   const partTime = partTimeEmployment(title, structured, description, job.salary);
   const mixed = combined.match(/(?:全职|社招).{0,10}(?:或|\/|、|均可|皆可).{0,10}实习(?:生)?|实习(?:生)?.{0,10}(?:或|\/|、|均可|皆可).{0,10}(?:全职|社招)|(?:可接受|欢迎)实习生/);
   if (mixed) return partTime || { type: "mixed", evidence: [mixed[0]] };
 
-  const metadata = `${title} ${structured}`;
   const metadataInternship = /实习经验|实习经历/.test(metadata)
     ? null
     : metadata.match(/实习生?|intern(?:ship)?/i);

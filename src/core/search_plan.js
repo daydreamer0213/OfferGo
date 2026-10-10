@@ -52,6 +52,7 @@ function profileToRuntimeConfigs(configs, candidateProfile, searchPlan, resumeVe
     candidateProfile,
     searchPlan: plan,
     matchingCard: matchingCard || null,
+    resumeEvidenceRecovery: acquisition.resumeEvidenceRecovery || null,
     analysisContext: runtimeAnalysisContext(candidateProfile, plan, matchingCard),
     targetPolicy: {
       allowPartTime: plan.allowPartTime === true,

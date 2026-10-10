@@ -36,6 +36,7 @@ const RETRYABLE_ERROR_CODES = new Set([
 // Configuration errors pause the workflow with a user-visible pause reason
 // that is separate from the attempt/task error code.
 const CONFIGURATION_PAUSE_CODES = new Map([
+  ["CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE", "CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE"],
   ["MODEL_KEY_REQUIRED", "MODEL_AUTH_REQUIRED"],
   ["MODEL_AUTH_FAILED", "MODEL_AUTH_REQUIRED"],
   ["MODEL_ENDPOINT_OR_MODEL_NOT_FOUND", "MODEL_CONFIGURATION_REQUIRED"],

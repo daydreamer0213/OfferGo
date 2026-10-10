@@ -452,7 +452,7 @@ async function checkMockAnalyzer() {
     },
     draftCommunication: async () => { calls.draftCommunication += 1; return { kind: "greeting", messages: ["Hello"], missingFact: null, evidence: { jd: ["JD"], resume: ["resume"] }, tone: "natural" }; }
   };
-  const cachedRunner = createJobAnalysisRunner(configs, keywordPlan, { db, analyzer: fakeAnalyzer });
+  const cachedRunner = createJobAnalysisRunner({ ...configs, semanticMatchingMode: "split" }, keywordPlan, { db, analyzer: fakeAnalyzer });
   const cacheJob = { ...sample[0], ...good, sourceId: "model-cache-regression", title: "Cache test", greeting };
   const cachedAnalysis = await cachedRunner(cacheJob);
   assert.deepStrictEqual(cachedAnalysis.responsibilityEvidence, [`JD：${cacheJob.title}`]);
@@ -463,7 +463,7 @@ async function checkMockAnalyzer() {
   await cachedRunner(cacheJob);
   assert.deepStrictEqual(calls, { analyzeResume: 0, understandJob: 1, matchJob: 1, draftCommunication: 0 });
 
-  const communicationFailureRunner = createJobAnalysisRunner(configs, keywordPlan, {
+  const communicationFailureRunner = createJobAnalysisRunner({ ...configs, semanticMatchingMode: "split" }, keywordPlan, {
     db,
     analyzer: {
       analyzeResume: async () => ({ candidate: { name: "Fallback Candidate", targetTitles: ["AI Engineer"] }, skills: [], projects: [] }),

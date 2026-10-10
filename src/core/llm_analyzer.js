@@ -14,6 +14,7 @@ function createLlmAnalyzer({ modelConfig = DEFAULT_MODEL_CONFIG, adapter = null,
     analyzeResume: async (input, options = {}) => validateAdapterResult("analyzeResume", await modelAdapter.analyzeResume(input, options)),
     recommendSearchPlan: async (input, options = {}) => validateAdapterResult("recommendSearchPlan", await modelAdapter.recommendSearchPlan(input, options)),
     understandJob: async (input, options = {}) => validateAdapterResult("understandJob", await modelAdapter.understandJob(input, options)),
+    selectJob: async (input, options = {}) => validateAdapterResult("selectJob", await modelAdapter.selectJob(input, options), { input }),
     matchJob: async (input, options = {}) => validateAdapterResult(
       "matchJob",
       await modelAdapter.matchJob(input, options),

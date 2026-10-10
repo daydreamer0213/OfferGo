@@ -1,4 +1,6 @@
 const { validateModelResult, ModelContractError } = require("../../core/model_contract");
+const { WORK_MATCH_PROMPT, presentWorkMatchInput, normalizeWorkMatchOutput,
+  validateWorkMatchOutput, runWorkMatch } = require("../../core/job_work_matching");
 const { normalizeJobConditions, assessJobConditions, summarizeQualifications } = require('../../core/job_match_conditions');
 const {
   buildSplitRequirementInput,
@@ -273,6 +275,40 @@ class StructuredModelAdapter {
     ].join("\n");
     const result = await this.chatJson(prompt, prepareUnderstandJobInput(input), { kind: "understandJob", signal });
     return normalizeUnderstandRepairOutput(result, input);
+  }
+
+  async selectJob(input, { signal = null } = {}) {
+    try {
+      return await runWorkMatch({
+        payload: presentWorkMatchInput(input),
+        verify: raw => {
+          const normalized = normalizeWorkMatchOutput(raw);
+          const result = validateWorkMatchOutput(normalized.raw, input);
+          if (normalized.changes.length) this.logger?.info("model_output_normalized", {
+            kind: "selectJob", fields: normalized.changes.map(change => change.field)
+          });
+          return result;
+        },
+        call: async (payload, { retryOf } = {}) => {
+          if (signal?.aborted) throw signal.reason || Object.assign(new Error("operation aborted"), { code: "OPERATION_ABORTED" });
+          const truncated = retryOf?.code === "MODEL_OUTPUT_TRUNCATED";
+          try {
+            return await this.chatJson(WORK_MATCH_PROMPT, payload, { kind: "selectJob", signal,
+              maxRetries: 0, maxTokens: truncated ? 8192 : 4096,
+              ...(truncated ? { timeoutMs: Math.min(300000, (this.transport.timeoutMs || 90000) * 2) } : {}),
+              ...(retryOf?.code === "json_mode_unsupported" ? { jsonMode: false } : {}),
+              allowJsonModeFallback: false });
+          } catch (error) {
+            if (error.code === "json_mode_unsupported") error.retryable = true;
+            throw error;
+          }
+        }
+      });
+    } catch (error) {
+      error.modelRepairHandled = true;
+      error.modelStage = "selectJob";
+      throw error;
+    }
   }
 
   async matchJob(input, { signal = null } = {}) {
@@ -656,8 +692,8 @@ class StructuredModelAdapter {
     return this.chatJson(prompt, input, { kind: "reviewMockInterviewRetry" });
   }
 
-  async chatJson(systemPrompt, input, { kind = "unknown", signal = null } = {}) {
-    return this.transport.requestJson({ systemPrompt, input, kind, signal });
+  async chatJson(systemPrompt, input, { kind = "unknown", signal = null, ...requestOptions } = {}) {
+    return this.transport.requestJson({ systemPrompt, input, kind, signal, ...requestOptions });
   }
 }
 

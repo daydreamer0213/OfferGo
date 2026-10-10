@@ -19,7 +19,7 @@ test('matching retains the supplied masked resume when structural extraction omi
   let captured;
   const sentinel = Object.assign(new Error('captured matching input'), { code: 'TEST_CAPTURE' });
   const run = createJobAnalysisRunner({ ...loadConfigs(require('node:path').resolve(__dirname, '..')),
-    model: { provider: 'mock' }, candidateProfile: profile }, [], { errorMode: 'throw',
+    model: { provider: 'mock' }, semanticMatchingMode: 'split', candidateProfile: profile }, [], { errorMode: 'throw',
     analyzer: { understandJob: input => new (require('../src/adapters/models/mock').MockModelAdapter)().understandJob(input),
       matchJob: async input => { captured = input; throw sentinel; } } });
   await assert.rejects(run({ title: '架构师', description: '主导生产Kubernetes与架构', source: 'boss' }), error => error === sentinel);

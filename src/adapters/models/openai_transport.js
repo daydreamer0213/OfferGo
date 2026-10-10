@@ -16,6 +16,7 @@ const THINKING_LONG_STRUCTURED_TASKS = new Set([
 ]);
 const DEEPSEEK_V4_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
 const DETERMINISTIC_EVIDENCE_KINDS = new Set([
+  "selectJob",
   "understandJob",
   "matchJob",
   "matchResponsibilities",
@@ -106,7 +107,9 @@ class OpenAICompatibleTransport {
     this.logger = config.logger || null;
   }
 
-  async requestJson({ systemPrompt, input, kind = "unknown", signal = null } = {}) {
+  async requestJson({ systemPrompt, input, kind = "unknown", signal = null,
+    maxRetries = this.maxRetries, maxTokens = this.maxTokens, timeoutMs = this.timeoutMs,
+    jsonMode: requestedJsonMode = this.jsonMode, allowJsonModeFallback = true } = {}) {
     throwIfAborted(signal);
     const apiKey = this.apiKey || (this.apiKeyEnv ? process.env[this.apiKeyEnv] : "");
     if (!apiKey) {
@@ -123,19 +126,19 @@ class OpenAICompatibleTransport {
     let structuredJsonModeFallback = false;
     const longStructuredTask = usesLongStructuredBudget(kind, this.thinkingMode);
     let responseTokenLimit = longStructuredTask
-      ? Math.max(this.maxTokens, LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS)
-      : this.maxTokens;
+      ? Math.max(maxTokens, LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS)
+      : maxTokens;
     const startedAt = Date.now();
     try {
-      for (const jsonMode of this.jsonMode ? [true, false] : [false]) {
-        const retryLimit = structuredJsonModeFallback && !jsonMode ? 0 : this.maxRetries;
+      for (const jsonMode of requestedJsonMode && allowJsonModeFallback ? [true, false] : [requestedJsonMode]) {
+        const retryLimit = structuredJsonModeFallback && !jsonMode ? 0 : maxRetries;
         for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
           throwIfAborted(signal);
           attempts += 1;
           const attemptStartedAt = Date.now();
           const requestTimeoutMs = adaptiveRequestTimeoutMs(
-            this.timeoutMs,
-            this.maxTokens,
+            timeoutMs,
+            maxTokens,
             responseTokenLimit,
             longStructuredTask
           );
@@ -177,7 +180,7 @@ class OpenAICompatibleTransport {
               error
             }));
             throwIfAborted(signal);
-            if (jsonMode && error.code === "json_mode_unsupported") {
+            if (jsonMode && allowJsonModeFallback && error.code === "json_mode_unsupported") {
               jsonModeFallback = true;
               break;
             }
@@ -190,7 +193,7 @@ class OpenAICompatibleTransport {
               await delay(retryDelayMs(error, attempt), signal);
               continue;
             }
-            if (jsonMode && this.maxRetries > 0 && error.retryable && JSON_MODE_RECOVERY_ERRORS.has(error.code)) {
+            if (jsonMode && allowJsonModeFallback && maxRetries > 0 && error.retryable && JSON_MODE_RECOVERY_ERRORS.has(error.code)) {
               jsonModeFallback = true;
               structuredJsonModeFallback = true;
               break;
@@ -369,6 +372,7 @@ class OpenAICompatibleTransport {
         };
       } catch (error) {
         Object.assign(error, responseMeta, { responseFailureKind: "invalid_content_json" });
+        if (kind === "selectJob") Object.defineProperty(error, "invalidResponseText", { value: content });
         throw error;
       }
     } catch (error) {

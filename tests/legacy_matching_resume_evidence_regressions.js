@@ -108,5 +108,33 @@ for (const [name, tamper, reasonCode] of [
   });
 }
 
+check('same-bound 1000-character prefix restores the full redacted text without overwriting user changes', ({ db, saved, cardId }) => {
+  const raw = '姓名：李明\n' + '订单接口与数据库交付记录。'.repeat(120) + '\n后半段：独立完成检索评估和上线问题定位。';
+  const prepared = require('../src/core/resume_privacy').prepareResumeTextForModel(raw, { strict: true }).text;
+  db.prepare('UPDATE resume_documents SET resume_text = ? WHERE id = ?').run(raw, saved.resumeDocumentId);
+  const prefixProfile = { ...oldProfile, source: { resumeEvidenceText: prepared.slice(0, 1000) } };
+  db.prepare('UPDATE profile_versions SET profile_json = ? WHERE id = ?').run(JSON.stringify(prefixProfile), saved.profileVersionId);
+  const before = materialSnapshot(db);
+  const recovered = store.getCandidateMatchingContext(db, saved.profileId, { includeResumeEvidence: true });
+  assert.equal(recovered.candidateProfile.source.resumeEvidenceText, prepared);
+  assert.equal(recovered.resumeEvidenceRecovery.reasonCode, 'TRUNCATED_PROFILE_EVIDENCE');
+  assert.equal(materialSnapshot(db), before);
+  assert.equal(require('../src/core/profile_schema').normalizeCandidateProfile(prefixProfile,
+    { resumeEvidenceText: prepared }).source.resumeEvidenceText, prepared);
+
+  prefixProfile.source.resumeEvidenceText = '用户重新整理了经历。'.repeat(120).slice(0, 1000);
+  db.prepare('UPDATE profile_versions SET profile_json = ? WHERE id = ?').run(JSON.stringify(prefixProfile), saved.profileVersionId);
+  const edited = store.getCandidateMatchingContext(db, saved.profileId, { includeResumeEvidence: true });
+  assert.equal(edited.candidateProfile.source.resumeEvidenceText, prefixProfile.source.resumeEvidenceText);
+  assert.equal(edited.resumeEvidenceRecovery.status, 'existing');
+
+  prefixProfile.source.resumeEvidenceText = prepared.slice(0, 1000);
+  db.prepare('UPDATE profile_versions SET profile_json = ? WHERE id = ?').run(JSON.stringify(prefixProfile), saved.profileVersionId);
+  db.prepare('UPDATE candidate_matching_cards SET resume_content_hash = ? WHERE id = ?').run('wrong-hash', cardId);
+  const mismatched = store.getCandidateMatchingContext(db, saved.profileId, { includeResumeEvidence: true });
+  assert.equal(mismatched.candidateProfile.source.resumeEvidenceText, prefixProfile.source.resumeEvidenceText);
+  assert.equal(mismatched.resumeEvidenceRecovery.reasonCode, 'DOCUMENT_HASH_MISMATCH');
+});
+
 if (failed) process.exitCode = 1;
-else console.log('legacy_matching_resume_evidence_regressions ok (9 checks)');
+else console.log('legacy_matching_resume_evidence_regressions ok (10 checks)');

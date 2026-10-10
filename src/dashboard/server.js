@@ -5704,6 +5704,10 @@ function foundationEvidenceLists(analysis = {}) {
 }
 
 function renderRoleEvidenceSummary(analysis = {}, className = "line", tag = "span") {
+  if (analysis.semanticMatchingMode === "whole_jd") {
+    const considerations = (analysis.materialConsiderations || []).map(item => item.description).filter(Boolean);
+    return `<${tag} class="${escapeAttr(className)}">主要工作：${escapeHtml(analysis.roleSummary || "等待岗位工作判断")} · ${escapeHtml(analysis.decisionExplanation || "")}${considerations.length ? ` · 重要考虑：${escapeHtml(considerations.join("；"))}` : ""}</${tag}>`;
+  }
   const foundation = foundationEvidenceLists(analysis); const track = analysis.selectedTrackLabel ? `匹配分支：${escapeHtml(analysis.selectedTrackLabel)} · ` : ""; const covered = foundation.covered.filter(Boolean).join("、") || "暂无"; const unresolved = foundation.unresolved.filter(Boolean).join("、") || "暂无";
   return `<${tag} class="${escapeAttr(className)}">${track}岗位主体：${escapeHtml(String(analysis.roleSummary || "岗位主体待确认"))} · 主体匹配：${escapeHtml(roleAlignmentLabel(analysis.roleAlignment))} · 主体依据：${Array.isArray(analysis.roleResumeEvidence) ? analysis.roleResumeEvidence.length : 0} 条 · 已覆盖根基：${escapeHtml(covered)} · 待确认根基：${escapeHtml(unresolved)}</${tag}>`;
 }
@@ -6731,6 +6735,7 @@ function compactDecisionLabel(bucket) {
 function compactDecisionSource(analysis = {}) {
   return {
     model: "模型证据匹配",
+    model_work_match: "岗位工作判断",
     weighted_decision_matrix: "本地加权二维表",
     model_partial: "模型初步判断",
     model_low_confidence: "模型低置信度复核",

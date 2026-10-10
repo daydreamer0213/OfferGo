@@ -57,7 +57,8 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
   if (!jobs.length) throw new Error(bulk ? "当前没有待重试的语义分析岗位。" : "岗位不存在或不属于当前筛选方案。");
   const baseConfigs = loadConfigs(deps.root);
   baseConfigs.model = deps.modelConfig;
-  const configs = profileToRuntimeConfigs(baseConfigs, matchingContext.candidateProfile, plan.plan, listMatchingResumeVersions(db, plan.profileId), matchingContext.matchingCard);
+  const configs = profileToRuntimeConfigs(baseConfigs, matchingContext.candidateProfile, plan.plan, listMatchingResumeVersions(db, plan.profileId), matchingContext.matchingCard,
+    { resumeEvidenceRecovery: matchingContext.resumeEvidenceRecovery });
   const makeRunner = deps.createJobAnalysisRunner || createJobAnalysisRunner;
   const analyze = makeRunner(configs, plan.plan.keywords || [], { db, logger: deps.logger });
   const batchId = createBatch(db, jobs[0].source || "boss", bulk ? "analysis-retry-bulk" : "analysis-retry", bulk
@@ -73,8 +74,11 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
   const recordConfigurationError = error => {
     const classified = classifyWorkflowAnalysisError(error);
     if (classified.kind !== "configuration") return null;
-    configurationError ||= appError(classified.pauseCode === "MODEL_QUOTA_EXHAUSTED"
-      ? "MODEL_QUOTA_EXHAUSTED" : "MODEL_CONFIGURATION_REQUIRED", "模型连接需要恢复，已完成的分析已保存，剩余岗位仍待分析。", { statusCode: 409 });
+    const missingResume = classified.code === 'CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE';
+    configurationError ||= appError(missingResume ? classified.code : classified.pauseCode === "MODEL_QUOTA_EXHAUSTED"
+      ? "MODEL_QUOTA_EXHAUSTED" : "MODEL_CONFIGURATION_REQUIRED", missingResume
+      ? "匹配所用的简历原文暂时不可用，已完成的分析已保存，剩余岗位仍待分析。"
+      : "模型连接需要恢复，已完成的分析已保存，剩余岗位仍待分析。", { statusCode: 409 });
     return classified;
   };
   const results = await mapWithConcurrency(jobs, concurrency, async (job) => {
@@ -91,7 +95,9 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
       if (!classified) throw error;
       analysis = { semanticStatus: "failed", decisionSource: "analysis_pending", errorCode: classified.code, error: "模型服务暂不可用。" };
     }
-    if (analysis.semanticStatus === "failed") recordConfigurationError({ code: analysis.errorCode, httpStatus: analysis.errorHttpStatus });
+    if (analysis.semanticStatus === "failed" || analysis.errorCode === 'CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE') {
+      recordConfigurationError({ code: analysis.errorCode, httpStatus: analysis.errorHttpStatus });
+    }
     throwIfAborted(deps.signal);
     if (needsMessageContext && job.source === "zhaopin") {
       const sourceAvailability = job.analysis?.sourceAvailability === "offline" ? "offline" : "unknown";

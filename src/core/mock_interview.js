@@ -315,6 +315,11 @@ function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], can
     roleGaps: job.analysis?.roleGaps || [],
     questionsToVerify: job.analysis?.questionsToVerify || [],
     roleResumeEvidence: job.analysis?.roleResumeEvidence || [],
+    ...(job.analysis?.semanticMatchingMode === 'whole_jd' ? {
+      recommendation: job.analysis.recommendation ?? null,
+      decisionExplanation: job.analysis.decisionExplanation || '',
+      materialConsiderations: job.analysis.materialConsiderations || []
+    } : {}),
     requirements: understanding.coreRequirements || job.analysis?.coreRequirements
       || understanding.requirements || job.analysis?.requirementAssessments || [],
     matchingEvidence: job.analysis?.evidence || {}

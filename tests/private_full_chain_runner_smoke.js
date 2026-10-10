@@ -504,6 +504,7 @@ async function injectedLiveFlowSmoke(identityPath) {
     }
   };
   const baseConfigs = {
+    semanticMatchingMode: "split", // 本夹具注入 understandJob/matchJob，验证旧双阶段实验器的绑定和隐私。
     profile: {
       candidate: { name: "Synthetic Candidate", city: "", target_roles: [], strengths: [] },
       location: { target_cities: [], default_city: "", boss_city_code: "" },

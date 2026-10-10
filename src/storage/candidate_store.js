@@ -561,7 +561,9 @@ function recoverMatchingResumeEvidence(db, context, version, card, profileId) {
   };
   if (Number(version.profile_id) !== Number(profileId)) return unavailable("VERSION_PROFILE_MISMATCH");
   const profile = context.candidateProfile;
-  if (String(profile.source?.resumeEvidenceText || "").trim()) {
+  const storedEvidence = String(profile.source?.resumeEvidenceText || "");
+  const existingEvidence = storedEvidence.trim();
+  if (existingEvidence && storedEvidence.length !== 1000) {
     context.resumeEvidenceRecovery = { status: "existing", source: "stored_profile" };
     return;
   }
@@ -584,8 +586,14 @@ function recoverMatchingResumeEvidence(db, context, version, card, profileId) {
       strict: true
     });
     if (!prepared.redactions.name) return unavailable("RESUME_PRIVACY_REDACTION_FAILED");
-    context.candidateProfile = { ...profile, source: { ...(profile.source || {}), resumeEvidenceText: prepared.text } };
-    context.resumeEvidenceRecovery = { status: "recovered", source: "same_profile_version_document" };
+    const completeEvidence = prepared.text.trim();
+    if (existingEvidence && (!completeEvidence.startsWith(storedEvidence) || completeEvidence.length <= storedEvidence.length)) {
+      context.resumeEvidenceRecovery = { status: "existing", source: "stored_profile" };
+      return;
+    }
+    context.candidateProfile = { ...profile, source: { ...(profile.source || {}), resumeEvidenceText: completeEvidence } };
+    context.resumeEvidenceRecovery = { status: "recovered", source: "same_profile_version_document",
+      ...(existingEvidence ? { reasonCode: "TRUNCATED_PROFILE_EVIDENCE" } : {}) };
   } catch (error) {
     if (error.code !== "RESUME_PRIVACY_REDACTION_FAILED") throw error;
     unavailable(error.code);

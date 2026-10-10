@@ -1,5 +1,6 @@
 const { PRODUCT_POLICY } = require("./product_policy");
 const { canonicalSearchPlanV2 } = require("./search_plan_schema");
+const { MAX_RESUME_CHARS } = require("./resume_parser");
 
 function normalizeCandidateProfile(input = {}, meta = {}) {
   const source = object(input.source);
@@ -32,7 +33,7 @@ function normalizeCandidateProfile(input = {}, meta = {}) {
       model: text(source.model || meta.model || ""),
       resumeTextLength: Number(source.resumeTextLength || meta.resumeTextLength || 0),
       ...(meta.resumeEvidenceText !== undefined || source.resumeEvidenceText !== undefined
-        ? { resumeEvidenceText: text(meta.resumeEvidenceText ?? source.resumeEvidenceText) } : {}),
+        ? { resumeEvidenceText: String(meta.resumeEvidenceText ?? source.resumeEvidenceText ?? "").trim().slice(0, MAX_RESUME_CHARS) } : {}),
       inputMethod: text(source.inputMethod || meta.inputMethod || "unknown"),
       inputTrust: text(source.inputTrust || meta.inputTrust || "user_provided"),
       generatedAt: new Date().toISOString()

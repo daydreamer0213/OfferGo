@@ -28,6 +28,8 @@ const MODEL_RECOMMENDATION_STATES = Object.freeze([
 const MODEL_RECOMMENDATION_MODES = Object.freeze(["off", "shadow"]);
 
 function validateModelResult(kind, value, context = {}) {
+  if (kind === "selectJob") return require('./job_work_matching').validateWorkMatchOutput(value, context.input,
+    { useSourceAliases: false });
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ModelContractError(kind, "必须返回 JSON 对象");
   if (kind === "analyzeResume") return validateResume(value);
   if (kind === "recommendSearchPlan") return validateSearchPlan(value);

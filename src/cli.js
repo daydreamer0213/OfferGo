@@ -953,7 +953,7 @@ async function scan(
       runtimePlan,
       listMatchingResumeVersions(db, runtimePlanRecord.profileId),
       matchingContext.matchingCard,
-      { site, acquisitionMode }
+      { site, acquisitionMode, resumeEvidenceRecovery: matchingContext.resumeEvidenceRecovery }
     );
   }
   if (analysisOnly) {
@@ -1922,7 +1922,8 @@ async function refreshDetails(db, args, { signal = null, execution = null } = {}
     );
   }
   configs.model = batchModelState.modelConfig;
-  configs = profileToRuntimeConfigs(configs, matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard);
+  configs = profileToRuntimeConfigs(configs, matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard,
+    { resumeEvidenceRecovery: matchingContext.resumeEvidenceRecovery });
   const browser = createBrowser(args);
   if (!browser) throw new Error("补读岗位详情需要 --browser edge 或 --browser portable。");
   const accessController = createSiteAccessController({
@@ -2765,7 +2766,8 @@ function rescorePlan(db, args) {
     { acquisitionMode: "inherited" }
   );
   if (!matchingContext) throw new Error(`Search Plan #${planId} 缺少已确认匹配偏好卡对应的画像版本。`);
-  const configs = profileToRuntimeConfigs(loadConfigs(ROOT), matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard);
+  const configs = profileToRuntimeConfigs(loadConfigs(ROOT), matchingContext.candidateProfile, planRecord.plan, listMatchingResumeVersions(db, planRecord.profileId), matchingContext.matchingCard,
+    { resumeEvidenceRecovery: matchingContext.resumeEvidenceRecovery });
   const result = rescorePlanObservations(db, { planId, configs });
   logger.info("plan_rescored", result);
   console.log(`Search Plan #${planId} 已按最新规则重算 ${result.rescored} 条岗位。`);

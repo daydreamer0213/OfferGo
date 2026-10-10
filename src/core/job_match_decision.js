@@ -4,17 +4,11 @@ const { decisionHardBlockers, hardBlockerText, isAbsentResumeEvidence } = requir
 const { deriveMatrixDecision } = require('./four_tier_decision');
 const { normalizeJobConditions, summarizeQualifications, projectCapabilityRequirements } = require('./job_match_conditions');
 const { DECISION_POLICY, DECISION_POLICY_HASH, RECOMMENDATION_SCHEMA_VERSION, capRecommendationTier } = require('./decision_policy');
+const { WORK_MATCH_POLICY_HASH } = require('./job_work_matching');
 
 function decideJobMatch({ analysis, job = {} }) {
   const gate = decisionState(job);
-  const conditions = analysis.conditionSchemaVersion === 1 ? analysis.conditions || []
-    : normalizeJobConditions({ jobUnderstanding: { coreRequirements: (analysis.requirementMatches || [])
-      .map((row, index) => ({ ...row, id: row.id || 'R' + (index + 1), label: row.requirement })) } });
-  const conditionResults = analysis.conditionSchemaVersion === 1 ? analysis.conditionResults || []
-    : conditions.map(condition => ({ conditionId: condition.id, state: (analysis.requirementMatches || [])
-      .find((row, index) => (row.id || 'R' + (index + 1)) === condition.id)?.state || 'unknown' }));
-  analysis = { ...analysis, requirementMatches: projectCapabilityRequirements({ conditions, conditionResults,
-    selectedTrackId: analysis.selectedTrackId, requirementMatches: analysis.requirementMatches }), decisionReasons: [] };
+  analysis = { ...analysis, decisionReasons: [] };
   const qualityTags = new Set(job.qualityTags || []);
 
   // 一、本地已确认的基础边界不依赖模型语义，可直接排除。
@@ -38,9 +32,28 @@ function decideJobMatch({ analysis, job = {} }) {
   if (["failed", "stale", "pending"].includes(analysis.semanticStatus)) {
     return needsRetry(analysis);
   }
+  if (analysis.matchStatus === "material_missing") return {
+    ...needsRetry(analysis, analysis.error || "当前确认版本的简历原文不可用。", "material_missing"), decisionStatus: "needs_material"
+  };
   if (analysis.semanticStatus === "partial") {
     return needsRetry(analysis, "当前只有卡片级信息，完整 JD 补齐前不进入判定。");
   }
+  if (analysis.semanticMatchingMode === "whole_jd") {
+    if (analysis.semanticStatus !== "complete" || !["primary", "apply", "caution", "not_recommended"].includes(analysis.modelRecommendation)) {
+      return needsRetry(analysis, "岗位工作判断尚未完成，等待重新分析。");
+    }
+    return { ...analysis, recommendation: analysis.modelRecommendation, decisionStatus: "decided",
+      decisionSource: "model_work_match", fitLevel: null, decisionMetrics: null,
+      recommendationSchemaVersion: RECOMMENDATION_SCHEMA_VERSION, decisionPolicyHash: WORK_MATCH_POLICY_HASH };
+  }
+  const conditions = analysis.conditionSchemaVersion === 1 ? analysis.conditions || []
+    : normalizeJobConditions({ jobUnderstanding: { coreRequirements: (analysis.requirementMatches || [])
+      .map((row, index) => ({ ...row, id: row.id || 'R' + (index + 1), label: row.requirement })) } });
+  const conditionResults = analysis.conditionSchemaVersion === 1 ? analysis.conditionResults || []
+    : conditions.map(condition => ({ conditionId: condition.id, state: (analysis.requirementMatches || [])
+      .find((row, index) => (row.id || 'R' + (index + 1)) === condition.id)?.state || 'unknown' }));
+  analysis = { ...analysis, requirementMatches: projectCapabilityRequirements({ conditions, conditionResults,
+    selectedTrackId: analysis.selectedTrackId, requirementMatches: analysis.requirementMatches }) };
   const qualification = analysis.conditionSchemaVersion === 1
     ? summarizeQualifications({ conditions: analysis.conditions, conditionResults: analysis.conditionResults, selectedTrackId: analysis.selectedTrackId })
     : null;

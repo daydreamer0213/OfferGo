@@ -107,7 +107,7 @@ async function persistedDecisionJourney() {
         location: '广州', salary: '面议', experience: '不限', education: '本科', tags: [],
         description: '必须持有C1驾驶证。负责查询接口开发；优化慢查询。'.repeat(8), detailRead: true, detailRequired: true };
       const configs = { model: { provider: 'openai_compatible', providers: { openai_compatible: { model: 'synthetic' } } },
-        candidateProfile: profile, searchPlan, analysisContext: runtimeAnalysisContext(profile, searchPlan), scoring: {} };
+        semanticMatchingMode: 'split', candidateProfile: profile, searchPlan, analysisContext: runtimeAnalysisContext(profile, searchPlan), scoring: {} };
       let calls = 0;
       const runner = createJobAnalysisRunner(configs, [], { db, analyzer: {
         understandJob: async () => { calls++; return { industryContext: '合成验收', hiringTracks: [{ id: 'T1', label: '查询开发', roleSummary: '查询开发',

@@ -347,6 +347,7 @@ function duration(seconds) { const value = Math.max(0, Math.ceil(number(seconds)
 function etaLabel(eta = {}) { if (eta.status === "available") return `预计剩余 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（基于最近 ${number(eta.sampleSize)} 个完成岗位估算）`; if (eta.status === "paused") return eta.minSeconds == null || eta.maxSeconds == null ? "已暂停；样本不足，正在估算" : `已暂停；剩余区间冻结为 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（${number(eta.sampleSize)} 个样本）`; return eta.status === "estimating" ? "正在估算" : "当前阶段不估算剩余时间"; }
 function activityLabel(activity = {}) { const action = { analysis_started: "开始分析", analysis_succeeded: "已成功保存", analysis_failed: "分析失败", analysis_skipped: "已按本地规则处理", waiting_lease_expiry: "正在等待安全收尾", control_requested: "正在执行控制请求" }[activity.type] || "状态已更新"; return `任务 #${number(activity.taskId)} ${action}${activity.attempt ? `，第 ${number(activity.attempt)} 次尝试` : ""}${activity.modelRole === "backup" ? "，备用模型" : ""}${activity.errorCode ? `，${String(activity.errorCode)}` : ""}`; }
 function evidenceLabel(analysis = {}) {
+  if (analysis.semanticMatchingMode === "whole_jd") return [analysis.roleSummary, analysis.decisionExplanation].filter(Boolean).join("；");
   const unresolved = (analysis.requirementMatches || [])
     .filter((item) => item?.foundation && !["matched", "transferable"].includes(item.state))
     .map((item) => item.requirement).filter(Boolean);

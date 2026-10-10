@@ -24,7 +24,7 @@ const RECOMMENDED_TASK_PROFILES = Object.freeze({
   batch_screening: Object.freeze({
     model: "deepseek-v4-flash",
     timeoutMs: 90000,
-    thinkingMode: "disabled",
+    thinkingMode: "enabled",
     reasoningEffort: "high",
     concurrency: 2
   })

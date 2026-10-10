@@ -41,6 +41,7 @@ let server;
     await testApplicationBoundary();
     await testUnresolvedMatchCanActuallyRetry();
     await testBulkRecoveryStopsOnQuotaFailure();
+    await testUnavailableResumeStopsRecoveryBeforeModel();
     await testRecoveryPreservesInFlightSuccess();
     await testProductionRecoveryStopsOnHttpConfigurationFailure();
     assert(!runtimeWarnings.some((warning) => /circular dependency/i.test(warning.message)), "analysis inventory core ownership must not introduce a circular dependency");
@@ -330,6 +331,28 @@ async function testBulkRecoveryStopsOnQuotaFailure() {
     assert.equal(JSON.stringify(job(db, saved.planId, id).analysis), before[ids.indexOf(id)], 'unstarted jobs retain their original pending results');
   }
   for (const id of calls) assert.equal(job(db, saved.planId, id).analysis.errorCode, 'HTTP_402', 'issued failures remain recorded');
+}
+
+async function testUnavailableResumeStopsRecoveryBeforeModel() {
+  const saved = seedPlan('resume-unavailable-recovery');
+  const ids = Array.from({ length: 6 }, (_, i) => seedFailedJob(saved, `resume-unavailable-${i}`, { source: 'zhaopin' }));
+  db.prepare('UPDATE resume_documents SET content_hash = ? WHERE id = ?').run('wrong-confirmed-document-hash', saved.resumeDocumentId);
+  let calls = 0;
+  const deps = applicationDeps(controlledRunner(), {
+    createJobAnalysisRunner(configs, keywords, options) {
+      assert.equal(configs.resumeEvidenceRecovery.status, 'unavailable');
+      assert.equal(configs.resumeEvidenceRecovery.reasonCode, 'DOCUMENT_HASH_MISMATCH');
+      return require('../src/core/job_analysis').createJobAnalysisRunner(configs, keywords, { ...options,
+        analyzer: { async selectJob() { calls++; throw Error('Unavailable resume must not reach the model'); } } });
+    }
+  });
+  await assert.rejects(retryPendingJobAnalyses({ db, input: { planId: saved.planId, jobIds: ids, site: 'zhaopin' }, deps }),
+    error => error.code === 'CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE' && error.statusCode === 409);
+  assert.equal(calls, 0);
+  const changed = ids.map(id => job(db, saved.planId, id).analysis).filter(analysis => analysis.errorCode === 'CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE');
+  assert.equal(changed.length, PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency);
+  assert(changed.every(analysis => analysis.matchStatus === 'material_missing' && analysis.decisionStatus === 'needs_material'));
+  assert.equal(ids.length - changed.length, 4, 'Unstarted jobs remain available for recovery');
 }
 
 async function testRecoveryPreservesInFlightSuccess() {

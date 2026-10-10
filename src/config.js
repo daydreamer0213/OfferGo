@@ -36,9 +36,9 @@ function loadConfigs(root = process.cwd(), options = {}) {
 }
 
 function normalizeSemanticMatchingMode(value) {
-  const mode = String(value || "split").trim().toLowerCase();
-  if (!["split", "legacy"].includes(mode)) {
-    throw new Error("semantic matching mode must be split or legacy");
+  const mode = String(value || "whole_jd").trim().toLowerCase();
+  if (!["whole_jd", "split", "legacy"].includes(mode)) {
+    throw new Error("semantic matching mode must be whole_jd, split or legacy");
   }
   return mode;
 }

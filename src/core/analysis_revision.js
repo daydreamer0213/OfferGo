@@ -5,7 +5,8 @@ const { normalizeThinkingMode, normalizeReasoningEffort } = require("./model_set
 const PIPELINE_VERSIONS = Object.freeze({
   understandJob: "job-understanding-v21-conditions",
   matchJob: "match-decision-v55-grounded-conditions",
-  decisionRules: "four-tier-weighted-v4.10-screening-v2-effect-education-mode",
+  selectJob: "whole-jd-work-v1-source-bound",
+  decisionRules: "four-tier-v5-whole-jd-work",
   communication: "communication-v3-candidate-speaker"
 });
 
@@ -68,7 +69,9 @@ function recommendationPolicyContext(searchPlan = {}, targetPolicy = {}, scoring
   return {
     searchPlan: {
       ...modelSearchPlanContext(searchPlan),
-      salary: searchPlan.salary || {}
+      salary: searchPlan.salary || {},
+      preferences: searchPlan.preferences || {},
+      targets: searchPlan.targets || []
     },
     targetPolicy: targetPolicy || {},
     scoring: scoring || {}
@@ -97,7 +100,7 @@ function buildAnalysisRevision(configs, sourceContentHash) {
     sourceContentHash: String(sourceContentHash || ""),
     semanticMatchingMode: configs.semanticMatchingMode
       || configs.model?.semanticMatchingMode
-      || "split",
+      || "whole_jd",
     modelInferenceVersion: modelInferenceVersion(modelInferenceConfig(configs.model)),
     pipelineVersions: PIPELINE_VERSIONS
   };
@@ -126,6 +129,8 @@ function analysisStaleReasons(analysis, currentRevision) {
   if (revision.pipelineVersions?.understandJob !== PIPELINE_VERSIONS.understandJob) reasons.push("job_understanding_pipeline_changed");
   if (revision.pipelineVersions?.matchJob !== PIPELINE_VERSIONS.matchJob) reasons.push("match_pipeline_changed");
   if (revision.pipelineVersions?.decisionRules !== PIPELINE_VERSIONS.decisionRules) reasons.push("decision_rules_changed");
+  if (currentRevision.semanticMatchingMode === "whole_jd"
+    && revision.pipelineVersions?.selectJob !== PIPELINE_VERSIONS.selectJob) reasons.push("work_matching_pipeline_changed");
   return reasons;
 }
 

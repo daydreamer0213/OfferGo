@@ -549,10 +549,19 @@ const postJdCohortMismatch = scoreJob(job({
   title: "AI 应用开发工程师",
   description: "负责 Python、RAG 与 Agent 应用开发。任职要求：26/27届毕业生，熟悉 Python。"
 }), eligibilityConfigs);
-assert.strictEqual(postJdCohortMismatch.eligibilityStatus, "blocked");
-assert(postJdCohortMismatch.qualityTags.includes("cohort_mismatch"));
-assert.strictEqual(decisionState(postJdCohortMismatch), "blocked");
-const cohortRuleGate = ruleGateAnalysis(postJdCohortMismatch, "blocked");
+// 完整 JD 路径保留届别信号，由实际工作方向判断其作用域；旧 split 路径仍显式检查原前筛。
+assert.strictEqual(postJdCohortMismatch.eligibilityStatus, "eligible");
+assert(!postJdCohortMismatch.qualityTags.includes("cohort_mismatch"));
+assert(postJdCohortMismatch.jdScopeSignals.qualityTags.includes("cohort_mismatch"));
+assert.strictEqual(decisionState(postJdCohortMismatch), "ready");
+const legacyPostJdCohortMismatch = scoreJob(job({
+  title: "AI 应用开发工程师",
+  description: "负责 Python、RAG 与 Agent 应用开发。任职要求：26/27届毕业生，熟悉 Python。"
+}), { ...eligibilityConfigs, semanticMatchingMode: "split" });
+assert.strictEqual(legacyPostJdCohortMismatch.eligibilityStatus, "blocked");
+assert(legacyPostJdCohortMismatch.qualityTags.includes("cohort_mismatch"));
+assert.strictEqual(decisionState(legacyPostJdCohortMismatch), "blocked");
+const cohortRuleGate = ruleGateAnalysis(legacyPostJdCohortMismatch, "blocked");
 assert.strictEqual(cohortRuleGate.recommendation, "not_recommended");
 assert.match(cohortRuleGate.fitReasons[0], /毕业年份不符合/);
 assert(cohortRuleGate.evidence.jd.some((item) => /26\/27届/.test(item)));

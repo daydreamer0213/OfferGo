@@ -956,6 +956,7 @@ async function testRunWorkflowAnalysisRetryCooldownCannotBeBypassed() {
 
 async function testRunWorkflowAnalysisConfigurationPauseStopsClaiming() {
   for (const [failureCode, pauseCode] of [
+    ['CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE', 'CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE'],
     ['MODEL_AUTH_FAILED', 'MODEL_AUTH_REQUIRED'],
     ['HTTP_402', 'MODEL_QUOTA_EXHAUSTED'],
     ['MODEL_QUOTA_EXHAUSTED', 'MODEL_QUOTA_EXHAUSTED']

@@ -53,7 +53,8 @@ function scoreJob(job, configs) {
   const eligibility = evaluateJobEligibility(job, {
     candidateProfile: configs.candidateProfile,
     allowPartTime: configs.targetPolicy?.allowPartTime === true,
-    targetJobTypes: enforceJobTypes ? targetJobTypes : unique([...targetJobTypes, "实习"])
+    targetJobTypes: enforceJobTypes ? targetJobTypes : unique([...targetJobTypes, "实习"]),
+    deferJdQualifications: (configs.semanticMatchingMode || configs.model?.semanticMatchingMode || "whole_jd") === "whole_jd"
   });
   const salary = salaryRangeK(job.salary);
   const days = activeDays(job.bossActiveText);
@@ -289,6 +290,7 @@ function scoreJob(job, configs) {
     employmentType: eligibility.employmentType,
     eligibilityReasonCode: eligibility.reasonCode,
     eligibilityEvidence: eligibility.evidence,
+    ...(eligibility.jdScopeSignals ? { jdScopeSignals: eligibility.jdScopeSignals } : {}),
     workSchedule: workSchedule.kind,
     workScheduleEvidence: workSchedule.evidence
   };

@@ -4,6 +4,7 @@
 
 ## 当前检查点
 
+- 最新工作为 10 月 10 日完整 JD 主工作判断的有限实施，当前状态以[实施检查点](../reports/2026-10-10-jd-work-selection-implementation-checkpoint.md)为准。新 `whole_jd` 路径不再沿用普通学制遗漏降档和整份 JD 资格预筛；下列旧提交、旧入口和旧采集仅保留历史证据。新提交完整门禁、同 SHA CI、普通 Edge 新空操作基线及原四步最终效果验收仍待完成，不使用 8796 的历史进程证明新实现。
 - 正式版仍为 v1.4.1，冻结提交 `19dd6b1`；桌面入口未因源码修复自动升级。
 - 岗位筛选与恢复修复已提交为 `5e6f82ed0c8dee2d78b839af305ac1e5e7408c1e`，工作区代码已收口。前一提交7598636的197项浏览器必跑完整门禁与同SHA CI通过；5e6f82e补修暂停任务的推荐数量，写入本记录时其精确版本门禁与CI仍在运行。b7c1a9a是Tasks 0–4的历史基线，其CI失败保留，不代表当前源码状态。最终结果以[当前分支CI](https://github.com/daydreamer0213/OfferGo/actions?query=branch%3Acodex%2Foffergo-robustness-20260916)和隔离验收目录的final-validation.json为准。
 - 第 1 步完成多项真实只读补验，真实智联简历动作尚未通过；第 2 步两个新职业背景的选定效果补验已完成；第 3 步已有新采集和首 20 份判读，确认岗位筛选设计缺口；第 4 步完成一个跨次复用/更正/重开案例，仍有恢复体验待办。完整交接见[10 月 10 日检查点](../reports/2026-10-10-four-step-acceptance-checkpoint.md)。

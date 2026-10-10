@@ -849,7 +849,7 @@ async function initialFailureProvenanceSmoke() {
 async function pipelineVersionCacheSmoke() {
   assert.strictEqual(PIPELINE_VERSIONS.understandJob, "job-understanding-v21-conditions");
   assert.strictEqual(PIPELINE_VERSIONS.matchJob, "match-decision-v55-grounded-conditions");
-  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.10-screening-v2-effect-education-mode");
+  assert.strictEqual(PIPELINE_VERSIONS.decisionRules, "four-tier-v5-whole-jd-work");
   const currentRevision = {
     profileVersion: "profile",
     searchPlanVersion: "plan",
@@ -868,7 +868,8 @@ async function pipelineVersionCacheSmoke() {
     ["semantic_matching_mode_changed"],
     "split/legacy 切换必须使已保存分析过期"
   );
-  assert.strictEqual(normalizeSemanticMatchingMode(undefined), "split");
+  assert.strictEqual(normalizeSemanticMatchingMode(undefined), "whole_jd");
+  assert.strictEqual(normalizeSemanticMatchingMode("split"), "split");
   assert.strictEqual(normalizeSemanticMatchingMode("legacy"), "legacy");
   assert.throws(() => normalizeSemanticMatchingMode("invalid"), /split or legacy/);
   assert.deepStrictEqual(
@@ -2262,7 +2263,7 @@ function genericPolicySmoke() {
 }
 
 async function compactRoleEvidencePersistenceSmoke() {
-  const configs = { model: { provider: "test", providers: { test: { model: "test-model" } } }, resumeVersions: { versions: [] } };
+  const configs = { semanticMatchingMode: 'split', model: { provider: "test", providers: { test: { model: "test-model" } } }, resumeVersions: { versions: [] } };
   const jobUnderstanding = understanding("persist-role-evidence");
   const matchDecision = {
     ...decision("apply", "A", "Python"),
@@ -2328,7 +2329,8 @@ function staleAnalysisSmoke() {
   assert.deepStrictEqual(PIPELINE_VERSIONS, {
     understandJob: "job-understanding-v21-conditions",
     matchJob: "match-decision-v55-grounded-conditions",
-    decisionRules: "four-tier-weighted-v4.10-screening-v2-effect-education-mode",
+    selectJob: "whole-jd-work-v1-source-bound",
+    decisionRules: "four-tier-v5-whole-jd-work",
     communication: "communication-v3-candidate-speaker"
   });
   const decisionRulesOnlyChanged = analysisStaleReasons({
@@ -2361,7 +2363,7 @@ function staleAnalysisSmoke() {
     document: { originalFileName: "semantic.txt", format: "text", contentHash: "semantic-profile", text: "semantic profile", diagnostics: {} },
     searchPlan: initialPlan
   });
-  const configs = profileToRuntimeConfigs(loadConfigs(root), candidate, initialPlan, []);
+  const configs = profileToRuntimeConfigs({ ...loadConfigs(root), semanticMatchingMode: 'split' }, candidate, initialPlan, []);
   const source = completeJob("stale-analysis");
   const analysis = {
     ...decision("apply", "A", "Python"),
@@ -2383,7 +2385,7 @@ function staleAnalysisSmoke() {
   upsertJob(db, { ...source, score: 20, level: "优先", matches: [], risks: [], qualityTags: [], analysis }, batchId);
   const changedPlan = { ...initialPlan, salary: { minK: 15, maxK: 25 } };
   saveSearchPlan(db, { id: planId, profileId, plan: changedPlan });
-  const changedConfigs = profileToRuntimeConfigs(loadConfigs(root), candidate, changedPlan, []);
+  const changedConfigs = profileToRuntimeConfigs({ ...loadConfigs(root), semanticMatchingMode: 'split' }, candidate, changedPlan, []);
   rescorePlanObservations(db, { planId, configs: changedConfigs });
   const salaryChanged = listReportJobs(db, { planId, limit: 100 }).find((job) => job.sourceId === "stale-analysis");
   assert.strictEqual(salaryChanged.analysis.semanticStatus, "complete");
@@ -2392,7 +2394,7 @@ function staleAnalysisSmoke() {
 
   const directionPlan = { ...changedPlan, directions: ["AI解决方案"] };
   saveSearchPlan(db, { id: planId, profileId, plan: directionPlan });
-  const directionConfigs = profileToRuntimeConfigs(loadConfigs(root), candidate, directionPlan, []);
+  const directionConfigs = profileToRuntimeConfigs({ ...loadConfigs(root), semanticMatchingMode: 'split' }, candidate, directionPlan, []);
   rescorePlanObservations(db, { planId, configs: directionConfigs });
   const directionChanged = listReportJobs(db, { planId, limit: 100 }).find((job) => job.sourceId === "stale-analysis");
   assert.strictEqual(directionChanged.analysis.semanticStatus, "stale");
@@ -2454,6 +2456,7 @@ function configFor(skills) {
   const candidateProfile = profile(skills, ["AI应用开发"]);
   const searchPlan = plan(["AI应用开发"]);
   return {
+    semanticMatchingMode: "split",
     model: { provider: "openai_compatible", providers: { openai_compatible: { model: "test-model" } } },
     candidateProfile,
     searchPlan,

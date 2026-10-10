@@ -12,6 +12,16 @@ const { getPlatformSearchContext } = require('../src/storage/platform_search_con
 const root = path.resolve(__dirname, '..');
 const logger = { info() {}, warn() {}, error() {}, child() { return this; }, requestId() { return 'synthetic-zhaopin'; }, listRecent() { return []; } };
 const syntheticAnalyzer = {
+  async selectJob(input) {
+    assert(input.candidateProfile.resumeEvidenceText.includes('合成 Python 项目经历'));
+    assert(!input.candidateProfile.resumeEvidenceText.includes('合成候选人'));
+    const jd = input.evidenceCatalog.find(entry => entry.sourceKind === 'jd' && entry.sourcePath === 'description');
+    const resume = input.evidenceCatalog.find(entry => entry.sourcePath === 'source.resumeEvidenceText');
+    assert(jd && resume, 'Whole JD workflow receives bound JD and restored resume evidence');
+    return { selectedWork: { summary: 'Python AI 服务开发', jdEvidenceRefs: [jd.id] },
+      supportingEvidenceRefs: [resume.id], materialConsiderations: [], modelRecommendation: 'apply',
+      decisionExplanation: '合成 Python 项目经历支持岗位的服务开发和接口交付，值得投递。' };
+  },
   async understandJob({ job }) {
     return { jobId: job.sourceId, realRoleType: 'ai_application', roleSummary: 'Python AI 服务开发', responsibilityEvidence: ['JD：负责 Python AI 服务开发和接口设计'], coreRequirements: [{ label: 'Python', foundation: true, indispensable: true, evidence: 'JD：掌握 Python' }], hiddenRisks: [], jobQuality: { level: 'normal', concerns: [] }, evidenceSnippets: ['掌握 Python，具备项目开发经验'] };
   },
@@ -22,7 +32,7 @@ const syntheticAnalyzer = {
 
 function seed(db) {
   const profile = { candidate: { name: '合成候选人', city: '广州', targetTitles: ['AI工程师'] }, skills: [{ name: 'Python' }], projects: [] };
-  const saved = storage.saveProfileAnalysis(db, { profile, document: { originalFileName: 'synthetic.txt', format: 'text', contentHash: 'synthetic-dashboard', text: '合成 Python 项目经历', diagnostics: {} }, searchPlan: { name: '合成筛选方案', acquisitionMode: 'generated', platform: { site: 'boss', generated: { cities: ['北京'], experience: ['3-5年（可冲）'], jobTypes: ['实习'] } }, allowExperienceStretch: false, directions: ['AI应用开发'], keywords: [{ word: 'AI工程师', priority: 'A' }, { word: 'Python', priority: 'A' }], salary: {}, bossActiveDays: 3 } });
+  const saved = storage.saveProfileAnalysis(db, { profile, document: { originalFileName: 'synthetic.txt', format: 'text', contentHash: 'synthetic-dashboard', text: '合成候选人\n合成 Python 项目经历', diagnostics: {} }, searchPlan: { name: '合成筛选方案', acquisitionMode: 'generated', platform: { site: 'boss', generated: { cities: ['北京'], experience: ['3-5年（可冲）'], jobTypes: ['实习'] } }, allowExperienceStretch: false, directions: ['AI应用开发'], keywords: [{ word: 'AI工程师', priority: 'A' }, { word: 'Python', priority: 'A' }], salary: {}, bossActiveDays: 3 } });
   const draft = storage.createMatchingCardDraft(db, { profileId: saved.profileId, profileVersionId: saved.profileVersionId, resumeDocumentId: saved.resumeDocumentId, resumeContentHash: 'synthetic-dashboard', card: matchingCardFromProfile(profile), source: 'migration' });
   storage.confirmMatchingCard(db, { profileId: saved.profileId, cardId: draft.id });
   return saved;
