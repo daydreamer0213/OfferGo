@@ -946,6 +946,17 @@ let server;
   assert.match(legacyPage.body, /使用当前 Edge（高级，需要浏览器连接组件）/);
   resumeBrowserReadinessStatus = "login_required";
   const spawnCountBeforeLegacyPreflight = spawns.length;
+  const probeCountBeforeBusyLegacyResume = resumeBrowserProbeInputs.length;
+  const busyLegacyResume = await postForm(baseUrl, "/api/workflow-run/resume", {
+    workflowRunId: legacyInherited.id,
+    browserMode: "edge"
+  });
+  assert.strictEqual(busyLegacyResume.status, 409);
+  assert.match(busyLegacyResume.body, /WORKFLOW_SCAN_ALREADY_RUNNING/);
+  assert.strictEqual(resumeBrowserProbeInputs.length, probeCountBeforeBusyLegacyResume, "an existing scan prevents even a login readiness probe");
+  assert.strictEqual(spawns.length, spawnCountBeforeLegacyPreflight);
+  spawns.at(-1).child.emit("close", 0, null);
+  finishScanRun(db, { runId: resumedScan.id, status: "completed" });
   const rejectedLegacyResume = await postForm(baseUrl, "/api/workflow-run/resume", {
     workflowRunId: legacyInherited.id,
     browserMode: "edge"
@@ -958,7 +969,8 @@ let server;
   transitionWorkflowRun(db, { id: legacyInherited.id, status: "stopped" });
 
   const batchId = validInheritedResumeBatchId;
-  attachWorkflowScan(db, { id: workflow.id, scanRunId: resumedScan.id, scanBatchId: batchId });
+  assert.strictEqual(getWorkflowRun(db, workflow.id).scanRunId, resumedScan.id, "finishing the fixture scan retains its workflow association");
+  assert.strictEqual(getWorkflowRun(db, workflow.id).scanBatchId, batchId);
   for (let index = 0; index < 6; index += 1) {
     const seededJob = index === 0 ? layeredTalkJob() : job(index + 1);
     if (index === 1) seededJob.title = "<script>health-xss</script>";
