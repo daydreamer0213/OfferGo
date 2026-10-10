@@ -135,7 +135,11 @@ const { createMockInterviewService } = require('../src/application/mock_intervie
         await a.unroute('**' + operationUrl + '?*');
       }
       const response = a.waitForResponse(value => value.url().endsWith(endpoint) && value.request().method() === 'POST');
-      await button().click(); if (!completeBeforeReturn) releaseGeneration();
+      const pendingRequest = !completeBeforeReturn
+        ? a.waitForRequest(value => value.url().endsWith(endpoint) && value.method() === 'POST') : null;
+      await button().click();
+      // 点击返回时，页面可能仍在异步查询旧操作；发出复用请求后才让 pending 生成完成。
+      if (!completeBeforeReturn) { await pendingRequest; releaseGeneration(); }
       await response; await a.waitForLoadState('networkidle');
       const newResults = getResults().filter(item => !idsBefore.has(item.id));
       const result = { kind, completeBeforeReturn, laterHistory, callsBeforeReturn, calls, firstId, resultIds: newResults.map(item => item.id) };
