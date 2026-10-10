@@ -235,7 +235,7 @@ assert.deepEqual(compact.responsibilityMatches, [{
 }], "compact analysis must preserve responsibility evidence for the production decision path");
 
 assert.equal(PIPELINE_VERSIONS.matchJob, "match-decision-v55-grounded-conditions");
-assert.equal(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.9-screening-v2-effect-conditions-v1");
+assert.equal(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.10-screening-v2-effect-education-mode");
 
 const capabilityConditions = [
   { id: 'R1', label: '交付业务接口', category: 'capability', central: true, foundation: true },

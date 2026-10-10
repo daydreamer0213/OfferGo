@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const storage = require('../src/core/storage');
+const { getJob } = require('../src/storage/job_store');
 const { createLogger } = require('../src/core/observability');
 const { createDashboardServer } = require('../src/dashboard/server');
 const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
@@ -99,6 +100,30 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         await page.setViewportSize({ width: 1440, height: 1000 });
       }
+    });
+    await check('failed analysis shows recovery rather than internal matching fields', async () => {
+      const technicalError = 'understandJob 模型输出不符合契约：riskSignals.evidence evidence 必须以 JD：开头';
+      const saved = [];
+      for (const site of ['boss', 'zhaopin']) {
+        const batch = storage.createBatch(db, site, 'analysis-retry', '失败分析', { profileId: owner.profileId, searchPlanId: owner.planId });
+        const id = storage.upsertJob(db, { source: site, sourceId: 'failed-'+site, title: '待分析工程师', company: '模拟公司',
+          location: '广州', salary: '12-18K', description: '负责订单接口开发，参与联调和测试。', bossActiveDays: 1,
+          analysis: { semanticStatus: 'failed', errorCode: 'MODEL_CONTRACT_INVALID', error: technicalError,
+            decisionSource: 'analysis_pending', revision: { pipelineVersions: PIPELINE_VERSIONS } } }, batch);
+        saved.push(id);
+        logger.warn('job_analysis_failed', { jobId: id, errorCode: 'MODEL_CONTRACT_INVALID', errorMessage: technicalError });
+        await page.goto(base+'/queue?planId='+owner.planId+'&site='+site+'&pool=analysis_pending');
+        const card = page.locator('article.job').filter({ hasText: '待分析工程师' });
+        assert.equal(await card.count(), 1);
+        const risk = await card.locator('.job-risk').innerText();
+        assert(!risk.includes('riskSignals.evidence') && !risk.includes('契约'), `${site}: internal validation errors must not be shown as job requirements`);
+        assert(/重试|重新分析/.test(risk), `${site}: failed analysis gives an actionable recovery instruction`);
+        assert(!risk.includes('需要确认：'), `${site}: technical recovery is not a question about job requirements`);
+        assert.equal(await page.locator('form[action="/api/analyze-jobs"] button').isEnabled(), true);
+      }
+      await page.goto(base+'/diagnostics');
+      assert((await page.locator('main').innerText()).includes('MODEL_CONTRACT_INVALID'), 'technical failure remains available for diagnosis');
+      for (const id of saved) assert.equal(getJob(db, id).analysis.error, technicalError, 'presentation does not remove diagnostic evidence');
     });
     await check('sidebar theme control does not overlap navigation', async () => {
       await page.goto(base+'/queue?planId='+owner.planId+'&site=boss');

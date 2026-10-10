@@ -62,7 +62,7 @@ async function main() {
         distinctSaveGate.started();
         await distinctSaveGate.wait;
       }
-      return { status: "verified", checkedAt: new Date().toISOString(), latencyMs: 7, httpStatus: 200 };
+      return { status: "verified", checkedAt: "2026-10-10T02:24:00.000Z", latencyMs: 7, httpStatus: 200 };
     }
   });
   await listen(server);
@@ -193,6 +193,8 @@ async function main() {
   ), true);
   const readySettings = await fetch(baseUrl + "/settings?profile=primary_models&modelConfigured=1");
   const readySettingsHtml = await readySettings.text();
+  assert(readySettingsHtml.includes('2026-10-10 10:24'), 'connection verification uses the same Beijing time as job records');
+  assert(!readySettingsHtml.includes('2026-10-10 02:24'), 'UTC is not presented as the local verification time');
   assert(readySettingsHtml.includes('class="settings-next" href="/onboarding"'));
   assert(!readySettingsHtml.includes('class="settings-next disabled"'));
 

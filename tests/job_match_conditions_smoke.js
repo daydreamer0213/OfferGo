@@ -15,6 +15,63 @@ function evaluate({ candidateProfile, label, alternatives, trackIds = ['T1'], st
   const conditionResults = assessJobConditions({ conditions, reportedResults, evidence, selectedTrackId });
   return { conditions, conditionResults, summary: summarizeQualifications({ conditions, conditionResults, selectedTrackId }) };
 }
+const bachelor = [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }];
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制本科' }] },
+  label: '本科及以上学历，必须为全日制', alternatives: bachelor }).summary.status, 'conflict');
+for (const [mode, expected] of [['全日制', 'satisfied'], ['非全日制', 'conflict']]) {
+  assert.equal(evaluate({ candidateProfile: { education: [{ degree: '本科' }], source: {
+    resumeEvidenceText: `已取得本科学历，学制为${mode}，2024年6月毕业。`
+  } }, label: '全日制本科及以上学历', alternatives: bachelor }).summary.status, expected);
+}
+const modeOrCredentialProfile = { education: [{ degree: '本科' }],
+  credentials: [{ name: '教师资格证', held: false }], projects: [{ name: '软件交付', canSay: ['完成软件交付'] }] };
+const modeOrCredentialEvidence = buildJobMatchEvidence({ candidateProfile: modeOrCredentialProfile });
+assert.equal(evaluate({ candidateProfile: modeOrCredentialProfile,
+  label: '全日制本科并具有软件交付经验，或者持有教师资格证', alternatives: [{ allOf: [bachelor[0].allOf[0],
+    { kind: 'semantic', operator: 'meets', value: '软件交付经验' }] }, { allOf: [{ kind: 'credential', operator: 'has', value: '教师资格证' }] }],
+  reportedResults: [{ id: 'E1', state: 'satisfied', resumeEvidence: '简历：本科；完成软件交付',
+    candidateEvidenceRefs: modeOrCredentialEvidence.entries.map(entry => entry.id) }] }).summary.status, 'unknown');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制本科' }] },
+  label: '全日制本科及以上学历', alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '全日制本科及以上学历' }] }] }).summary.status,
+  'conflict', '语义形式的单一学历要求也应进入确定比较，不能漏掉学制');
+for (const [education, expected] of [
+  [[{ degree: '非全日制本科' }], 'conflict'],
+  [[{ degree: '本科', studyMode: '非全日制' }], 'conflict'],
+  [[{ degree: '本科', studyMode: '全日制' }], 'satisfied'],
+  [[{ degree: '本科' }], 'unknown'],
+  [[{ degree: '非全日制本科' }, { degree: '大专', studyMode: '全日制' }], 'conflict'],
+  [[{ degree: '非全日制本科' }, { degree: '硕士', studyMode: '全日制' }], 'satisfied']
+]) {
+  const result = evaluate({ candidateProfile: { education }, label: '要求全日制本科及以上学历', alternatives: bachelor });
+  assert.equal(result.summary.status, expected, '学制与学历必须在同一条教育记录共同满足');
+  if (expected === 'conflict') {
+    const decision = require('../src/core/job_match_decision').decideJobMatch({ job: {}, analysis: {
+      semanticStatus: 'complete', conditionSchemaVersion: 1, conditions: result.conditions,
+      conditionResults: result.conditionResults, selectedTrackId: 'T1', requirementMatches: [], responsibilityMatches: []
+    } });
+    assert.equal(decision.recommendation, 'not_recommended');
+    assert.equal(decision.decisionSource, 'qualification_conflict');
+  }
+}
+for (const label of ['本科及以上学历', '本科及以上学历，全日制优先', '本科及以上学历，学制不限']) {
+  assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制本科' }] }, label, alternatives: bachelor }).summary.status,
+    'satisfied', '普通本科和全日制优先不能成为学制硬门槛');
+}
+const educationChoices = ['本科','硕士'].map(value => ({ allOf: [{ kind: 'education_level', operator: 'equals', value }] }));
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制硕士' }] },
+  label: '必须符合以下任一项：全日制本科，或者全日制硕士学历', alternatives: educationChoices }).summary.status, 'conflict');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制硕士' }] },
+  label: '必须符合以下任一项：全日制本科，或者硕士学历（学制不限）', alternatives: educationChoices }).summary.status,
+  'satisfied', '局部学制约束不能越过OR边界污染明确不限学制的替代分支');
+const unknownModeProfile = { education: [{ degree: '本科' }], projects: [{ name: '软件交付', canSay: ['完成软件交付'] }] };
+const unknownModeEvidence = buildJobMatchEvidence({ candidateProfile: unknownModeProfile });
+assert.equal(evaluate({ candidateProfile: unknownModeProfile, label: '全日制本科并具有软件交付经验', alternatives: [{ allOf: [
+  bachelor[0].allOf[0], { kind: 'semantic', operator: 'meets', value: '软件交付经验' }
+] }], reportedResults: [{ id: 'E1', state: 'satisfied', resumeEvidence: '简历：本科；完成软件交付',
+  candidateEvidenceRefs: unknownModeEvidence.entries.map(entry => entry.id) }] }).summary.status,
+  'unknown', '语义经验已满足也不能覆盖同一合取分支中未知的学制');
+assert.equal(evaluate({ candidateProfile: { education: [{ degree: '本科' }], source: { resumeEvidenceText: '已取得非全日制本科学历，2024年6月毕业。' } },
+  label: '全日制本科及以上学历', alternatives: bachelor }).summary.status, 'conflict', '原简历已明确学制时补齐画像遗漏');
 for (const [label, fact, expected] of [
   ['计算机科学与技术或相关专业', '电子信息工程', 'unknown'],
   ['仅接受计算机科学与技术专业', '电子信息工程', 'conflict'],

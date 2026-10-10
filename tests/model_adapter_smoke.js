@@ -714,6 +714,24 @@ server.listen(0, "127.0.0.1", async () => {
       );
     }
     const stubbornEvidenceBody = "负责数据处理、接口开发与系统交付。".repeat(8);
+    const riskRepairAdapter = new OpenAICompatibleAdapter({ baseUrl: 'https://example.invalid', apiKey: 'test-key', model: 'test' });
+    const validRisk = { type: 'outsourcing_dispatch', severity: 'medium', evidence: 'JD：驻场客户项目' };
+    const invalidRisk = { type: 'responsibility_sprawl', severity: 'medium', evidence: 'JD：'+ '拼接的非连续职责；'.repeat(18) };
+    const riskInput = { job: { description: '负责AI应用开发与实施。另需开发数据调度流程。驻场客户项目。' },
+      contractRepair: { reason: 'understandJob 模型输出不符合契约：riskSignals.evidence evidence 必须以 JD：开头、包含原文且最多 120 个字符',
+        invalidOutput: { hiringTracks: [{ id: 'T1', label: 'AI应用' }], riskSignals: [invalidRisk, validRisk] } } };
+    const originalRiskInput = JSON.parse(JSON.stringify(riskInput));
+    riskRepairAdapter.chatJson = async (_, modelInput) => {
+      assert.equal(Object.hasOwn(modelInput.contractRepair.invalidOutput.riskSignals[0], 'evidence'), false,
+        '证据修复不能把已知无效长引用再次提供给模型照抄');
+      assert.deepEqual(modelInput.contractRepair.invalidOutput.riskSignals[0], { type: invalidRisk.type, severity: invalidRisk.severity });
+      assert.deepEqual(modelInput.contractRepair.invalidOutput.riskSignals[1], validRisk, '有效风险引用仍被冻结');
+      assert.deepEqual(modelInput.contractRepair.invalidOutput.hiringTracks, riskInput.contractRepair.invalidOutput.hiringTracks);
+      return { riskSignals: [{ ...invalidRisk, evidence: 'JD：另需开发数据调度流程。' }, validRisk] };
+    };
+    const repairedRisk = await riskRepairAdapter.understandJob(riskInput);
+    assert.deepEqual(riskInput, originalRiskInput, '准备修复输入不能修改调用方保留的失败证据');
+    assert.equal(repairedRisk.riskSignals[0].severity, 'medium');
     const evidenceRepairScenarios = [{
       name: "requirements",
       reason: understandEvidenceReason,

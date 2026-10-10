@@ -150,10 +150,24 @@ function prepareMatchJobInput(input) {
 
 function prepareUnderstandJobInput(input) {
   if (!isUnderstandEvidenceRepair(input)) return input;
+  let invalidOutput = input.contractRepair.invalidOutput;
+  if (String(input.contractRepair.reason || '').includes('riskSignals.evidence')
+    && Array.isArray(invalidOutput?.riskSignals)) {
+    const description = String(input.job?.description || '');
+    invalidOutput = { ...invalidOutput, riskSignals: invalidOutput.riskSignals.map(item => {
+      const quote = String(item?.evidence || '');
+      if (quote.startsWith('JD：') && quote.length <= 120
+        && quote.length > 3 && description.includes(quote.slice(3))) return item;
+      const rebuilt = { ...item };
+      delete rebuilt.evidence;
+      return rebuilt;
+    }) };
+  }
   return {
     ...input,
     contractRepair: {
       ...input.contractRepair,
+      invalidOutput,
       instruction: [
         String(input.contractRepair.instruction || "").trim(),
         UNDERSTAND_EVIDENCE_REPAIR_INSTRUCTION

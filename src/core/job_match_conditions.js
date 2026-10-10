@@ -30,7 +30,7 @@ function inferSingleAtoms(label) {
     value: [cohort.dateWindow.minimum, cohort.dateWindow.maximum] }];
   if (cohort) return [{ kind: 'graduation_date', operator: 'cohort',
     value: cohort.years.length ? cohort.years : [cohort.minimum, cohort.maximum], range: !cohort.years.length }];
-  const degree = source.match(/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备)\s*)?(中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位|毕业|及以上|以上|$)/);
+  const degree = source.match(/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备)\s*)?(?:非?全日制\s*)?(中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位|毕业|及以上|以上|$)/);
   if (degree) return [{ kind: 'education_level', operator: 'at_least', value: degree[1] }];
   if (/(?:仅限|只招|必须|需为|面向).{0,8}(?:在校|在读)(?:生|学生)/.test(source)) {
     return [{ kind: 'student_status', operator: 'equals', value: 'in_school' }];
@@ -71,6 +71,9 @@ function normalizeJobConditions({ jobUnderstanding = {}, evidence = {} } = {}) {
       && branch.allOf.every(atom => yearsAtom(atom) || relaxedYearAtom(atom)));
     const expandYearQualification = atom => {
       if (!qualification || atom.kind !== 'semantic' || /或者|或/.test(text(atom.value))) return [atom];
+      if (/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备|必须)\s*)?(?:非?全日制\s*)?(?:中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位)?[。.]?$/.test(text(atom.value))) {
+        return inferredAtoms(atom.value);
+      }
       const parts = text(atom.value).split(/[，,；;。]|并且|同时|且|并具备|并拥有/).map(text).filter(Boolean);
       return parts.length > 1 && parts.some(value => yearsAtom({ kind: 'semantic', value }))
         && parts.every(value => inferredAtoms(value).length || yearsAtom({ kind: 'semantic', value }))
@@ -89,7 +92,8 @@ function normalizeJobConditions({ jobUnderstanding = {}, evidence = {} } = {}) {
       alternatives: expandCredentialAlternatives(rawAlternatives.map(branch => ({ allOf: (branch.allOf || [])
         .flatMap(expandYearQualification)
         .filter(atom => !qualification || yearsOnly || !yearsAtom(atom))
-        .map(atom => normalizeTypedAtom(atom, jdEvidence, rawAlternatives.length)) })), jdEvidence),
+        .map(atom => normalizeTypedAtom(atom, jdEvidence, rawAlternatives.length)) })), jdEvidence)
+        .map(branch => bindEducationMode(branch, jdEvidence)),
       foundation: item.foundation === true, central: item.central === true, indispensable: item.indispensable === true
     };
     const existing = conditions.find(condition => condition.id === normalized.id);
@@ -102,6 +106,34 @@ function normalizeJobConditions({ jobUnderstanding = {}, evidence = {} } = {}) {
   (jobUnderstanding.coreRequirements || []).forEach((item, i) => append(item, 'capability', i));
   (jobUnderstanding.bonusRequirements || []).forEach((item, i) => append(item, 'preference', i));
   return conditions;
+}
+
+function educationMode(value) {
+  const source = text(value);
+  if (/非全日制|非脱产|part[ _-]?time/i.test(source)) return 'part_time';
+  if (/全日制|脱产|full[ _-]?time/i.test(source)) return 'full_time';
+  return '';
+}
+
+function bindEducationMode(branch, jdEvidence) {
+  if (branch.allOf.some(atom => atom.kind === 'education_mode')) return branch;
+  const degrees = branch.allOf.filter(atom => atom.kind === 'education_level');
+  if (!degrees.length) return branch;
+  const groups = text(jdEvidence).split(/或者|或/);
+  const namesDegree = clause => degrees.some(atom => {
+    const named = clause.match(/(中专|高中|大专|专科|本科|学士|硕士|研究生|博士)/);
+    return named && educationRank(named[1]) === educationRank(atom.value);
+  });
+  const applicable = groups.flatMap(group => {
+    const clauses = group.split(/[，,；;。]/);
+    if (!clauses.some(namesDegree)) return [];
+    return clauses.filter(clause => namesDegree(clause)
+      || (!/中专|高中|大专|专科|本科|学士|硕士|研究生|博士/.test(clause)
+        && /必须|仅限|要求|须为|学制/.test(clause)));
+  });
+  const mandatory = applicable.filter(clause => !/优先|加分|可选|不限|不要求|不限制|不限定|无需/.test(clause));
+  const modes = [...new Set(mandatory.map(educationMode).filter(Boolean))];
+  return modes.length === 1 ? { allOf: [...branch.allOf, { kind: 'education_mode', operator: 'equals', value: modes[0] }] } : branch;
 }
 
 function normalizeTypedAtom(atom, jdEvidence, alternativeCount) {
@@ -169,13 +201,17 @@ function educationRecords(evidence) {
       if (/未取得|未获得|没有|不具备|计划|拟攻读/.test(source.slice(Math.max(0, degree.index - 8), degree.index))
         || /^(?:博士|硕士|本科|大专|专科).{0,12}(?:未取得|未获得|尚未取得)/.test(near)) continue;
       const graduation = near.match(/((?:19|20)\d{2})(?:(?:年|[-/.])(\d{1,2})(?:月)?)?[^。\n]{0,8}毕业/);
-      const facts = { degree: degree[1], ...(graduation ? {
+      const modeBefore = source.slice(Math.max(0, degree.index - 8), degree.index).match(/(非?全日制|非?脱产)\s*$/)?.[1];
+      const modeAfter = near.match(/^(?:博士|硕士|本科|大专|专科)(?:学历|学位)?\s*[（(]?(非?全日制|非?脱产)/)?.[1];
+      const modeField = near.split(/[。\n；;]/)[0].match(/学制\s*(?:为|是|[:：])?\s*(非?全日制|非?脱产)/)?.[1];
+      const mode = educationMode(modeBefore || modeAfter || modeField);
+      const facts = { degree: degree[1], ...(mode ? { studyMode: mode } : {}), ...(graduation ? {
         endDate: graduation[2] ? `${graduation[1]}-${graduation[2].padStart(2, '0')}` : graduation[1]
       } : {}), ...(/已毕业|\d(?:月)?毕业/.test(near) ? { status: '已毕业' } : /在读|在校/.test(near) ? { status: '在读' } : {}) };
       const matching = result.filter(record => educationRank(record.facts.degree || record.facts.level) === educationRank(facts.degree));
       if (!matching.length) result.push({ facts, refs: [entry.id] });
       else if (matching.length === 1) {
-        for (const key of ['endDate', 'status']) if (!matching[0].facts[key] && facts[key]) {
+        for (const key of ['endDate', 'status', 'studyMode']) if (!matching[0].facts[key] && facts[key]) {
           matching[0].facts[key] = facts[key]; matching[0].refs.push(entry.id);
         }
       }
@@ -196,6 +232,10 @@ function compareEducation(atom, record) {
     const required = educationRank(atom.value);
     if (!actual || !required || !['at_least', 'equals'].includes(atom.operator)) return 'unknown';
     return (atom.operator === 'equals' ? actual === required : actual >= required) ? 'satisfied' : 'conflict';
+  }
+  if (atom.kind === 'education_mode') {
+    const actual = educationMode([facts.studyMode, facts.educationType, facts.degree, facts.level].filter(Boolean).join(' '));
+    return !actual || atom.operator !== 'equals' ? 'unknown' : actual === atom.value ? 'satisfied' : 'conflict';
   }
   if (atom.kind === 'student_status') {
     const status = text(facts.status || facts.graduationStatus);
@@ -249,7 +289,7 @@ function compareCredential(atom, evidence) {
 
 function assessBranch(branch, evidence) {
   const atoms = branch.allOf || [];
-  const education = atoms.filter(atom => ['education_level', 'graduation_date', 'student_status'].includes(atom.kind));
+  const education = atoms.filter(atom => ['education_level', 'education_mode', 'graduation_date', 'student_status'].includes(atom.kind));
   const states = [], refs = [];
   if (education.length) {
     const records = educationRecords(evidence).filter(record => !education.some(atom => compareEducation(atom, record) === 'outside_scope'));
@@ -283,9 +323,13 @@ function assessJobConditions({ conditions = [], reportedResults = [], evidence =
     const jdValid = condition.jdEvidenceRefs.length > 0 && verifyJobMatchEvidence({ evidence,
       refs: condition.jdEvidenceRefs.map(id => ({ id, quote: condition.jdEvidence })), sourceKind: 'jd' }).valid
       && typedConditionsMatchJd(condition);
+    const requiresMode = condition.alternatives.some(branch => branch.allOf.some(atom => atom.kind === 'education_mode'));
+    const modeAllowsModel = !requiresMode || condition.alternatives.some(branch =>
+      assessBranch({ allOf: branch.allOf.filter(atom => atom.kind !== 'semantic') }, evidence).state === 'satisfied'
+      || branch.allOf.every(atom => atom.kind === 'semantic'));
     let state = 'unknown', basis = 'local_comparison';
     if (jdValid && condition.category === 'qualification' && localState !== 'unknown') state = localState;
-    else if (jdValid && hasRefs && grounding.valid && !unprovedMajorExclusion && allowed.has(reportedState)
+    else if (jdValid && modeAllowsModel && hasRefs && grounding.valid && !unprovedMajorExclusion && allowed.has(reportedState)
       && (condition.category !== 'qualification' || condition.alternatives.some(branch => branch.allOf.some(atom => atom.kind === 'semantic')))) {
       state = reportedState; basis = 'grounded_model';
       candidateEvidenceRefs.push(...(reported.candidateEvidenceRefs || []));
@@ -310,6 +354,8 @@ function typedConditionsMatchJd(condition) {
         .filter(level => source.includes(level)).map(educationRank);
       return ranks.includes(educationRank(atom.value));
     }
+    if (atom.kind === 'education_mode') return bindEducationMode({ allOf: branch.allOf.filter(item => item.kind !== 'education_mode') },
+      condition.jdEvidence || condition.label).allOf.some(item => item.kind === 'education_mode' && item.value === atom.value);
     if (atom.kind === 'credential') {
       const value = compact(atom.value);
       const suffix = ['驾驶证', '资格证', '执业证', '证书', '认证'].find(ending => value.endsWith(ending));

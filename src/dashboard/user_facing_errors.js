@@ -1,6 +1,11 @@
 "use strict";
 
 const ERROR_GUIDANCE = Object.freeze({
+  MODEL_CONTRACT_INVALID: {
+    title: "模型返回的分析暂时无法使用",
+    impact: "岗位资料已保存，本次没有生成可用的匹配结果。",
+    nextAction: "可重试分析；如果再次失败，到“运行诊断”查看记录。"
+  },
   MODEL_TIMEOUT: {
     title: "本次模型响应超时",
     impact: "这次请求没有完成；已有资料仍保留。",
