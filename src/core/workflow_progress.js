@@ -4,6 +4,7 @@ const { PRODUCT_POLICY } = require("./product_policy");
 const { workflowRunConsumesSlot } = require("./workflow_control");
 const { hasCompleteJobDescription } = require("./job_description_readiness");
 const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
+const { scanRuntimeBlock } = require("./communication_runtime");
 
 const WORKFLOW_STAGES = Object.freeze([
   "准备本轮",
@@ -62,6 +63,9 @@ function getWorkflowProgressSnapshot(db, {
   const controlling = ["pause_requested", "stop_requested"].includes(String(workflow.control_state || "none"));
   const status = String(workflow.status || "");
   const phaseKey = phaseKeyFor(workflow);
+  const runtimeBlock = ["preparing", "acquisition"].includes(phaseKey)
+    ? scanRuntimeBlock(db, { site: workflow.site || "boss", nowMs: Date.parse(clock) })
+    : null;
   const remainingWorkStatus = ["paused", "interrupted"].includes(status)
     ? ({ acquisition: "scanning", analysis: "analyzing", communication: "communicating", review: "review_required", preparing: "created" }[phaseKey] || status)
     : status;
@@ -134,7 +138,7 @@ function getWorkflowProgressSnapshot(db, {
     ? db.prepare("SELECT heartbeat_at FROM scan_runs WHERE id = ?").get(workflow.scan_run_id)?.heartbeat_at
     : null;
   const lastActivityAt = laterValidIso(workflow.last_activity_at, scanHeartbeat);
-  const scanWait = status === "scanning"
+  let scanWait = status === "scanning"
     && metrics.scanWait?.runId === workflow.scan_run_id
     && Date.parse(metrics.scanWait.retryAt) > Date.parse(clock)
     ? {
@@ -143,6 +147,10 @@ function getWorkflowProgressSnapshot(db, {
         delayMs: Math.max(0, Number(metrics.scanWait.delayMs || 0))
       }
     : null;
+  const blockedUntilMs = Date.parse(runtimeBlock?.blockedUntil || "");
+  if (blockedUntilMs > Date.parse(clock) && (!scanWait || blockedUntilMs >= Date.parse(scanWait.retryAt))) {
+    scanWait = { action: "runtime_block", retryAt: runtimeBlock.blockedUntil, delayMs: blockedUntilMs - Date.parse(clock) };
+  }
   const runForSlot = {
     status,
     platformAccessStartedAt: workflow.platform_access_started_at || null,
@@ -214,7 +222,8 @@ function getWorkflowProgressSnapshot(db, {
     },
     controls: {
       canPause: ["scanning", "analyzing"].includes(status) && !controlling,
-      canResume: status === "paused",
+      canResume: status === "paused" && !runtimeBlock,
+      runtimeBlocked: Boolean(runtimeBlock),
       canStop: !["completed", "failed", "stopped"].includes(status)
         && String(workflow.control_state || "none") !== "stop_requested",
       stopConsumesRunSlot: workflowRunConsumesSlot({ ...runForSlot, status: "stopped" })

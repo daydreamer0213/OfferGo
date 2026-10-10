@@ -153,6 +153,7 @@ function progressView(snapshot, progressJobs = []) {
       company: String(job.company || "")
     })),
     cooldown: cooldownView(source.scanWait), scanWaitLabel: scanWaitLabel(source.scanWait), etaLabel: etaLabel(source.eta),
+    runtimeBlocked: Boolean(snapshot?.controls?.runtimeBlocked),
     recentActivityLabel: (snapshot?.recentActivity || []).length ? snapshot.recentActivity.map(activityLabel).join("；") : "还没有新的分析活动。",
     staleEligible: ["created", "scanning", "analyzing"].includes(snapshot?.workflow?.status)
   };
@@ -189,6 +190,7 @@ function scanActivityLabel(scan = null, phaseKey = "") {
 }
 
 function overviewView({ workflow, progress, phase, controls, runtimeBlock }) {
+  if (["preparing", "acquisition", "analysis"].includes(progress?.phaseKey) && !progress.runtimeBlocked) runtimeBlock = null;
   const target = number(workflow.targetSuccessCount);
   const successful = number(workflow.successfulCount);
   const cooldown = progress?.cooldown || { active: false };
@@ -222,7 +224,7 @@ function overviewView({ workflow, progress, phase, controls, runtimeBlock }) {
 
 function blockerView({ workflow, cooldown, runtimeBlock, communicationError }) {
   if (communicationError) return { label: communicationError.title, detail: communicationError.impact, recovery: communicationError.nextAction };
-  if (cooldown.active) return { label: "安全冷却中", detail: cooldown.reason, recovery: "到达重试时间后等待本地状态刷新" };
+  if (cooldown.active) return { label: "安全冷却中", detail: cooldown.reason, recovery: cooldown.reason === "平台访问已安全暂停" ? "先检查平台提示，冷却结束后刷新本轮并手动继续" : "到达重试时间后等待本地状态刷新" };
   if (runtimeBlock) return { label: "运行环境已阻塞", detail: runtimeBlockLabel(runtimeBlock.reasonCode), recovery: "检查运行环境后再查看本轮状态" };
   if (workflow.status === "paused") {
     const issue = knownPauseGuidance(workflow);
@@ -239,6 +241,7 @@ function blockerView({ workflow, cooldown, runtimeBlock, communicationError }) {
 
 function nextActionLabel(phase, controls) {
   if (phase.communication?.error) return phase.communication.error.nextAction;
+  if (phase.resume?.blocked || controls.runtimeBlocked) return "先处理平台提示，再刷新本轮状态";
   if (phase.kind === "active") return controls.pausedVisible ? "检查暂停原因后继续本轮" : "系统正在继续处理，无需操作";
   return {
     review: "确认清单", confirmed: phase.communication?.actionLabel || phase.communication?.detailsLabel,
@@ -257,6 +260,7 @@ function controlView(snapshot, workflow, stopPreview) {
   const issue = knownPauseGuidance(workflow);
   return {
     canPause: Boolean(snapshot?.controls?.canPause), canResume: Boolean(snapshot?.controls?.canResume), canStop,
+    runtimeBlocked: Boolean(snapshot?.controls?.runtimeBlocked),
     runningVisible: ["created", "scanning", "analyzing"].includes(status) && !pauseRequested,
     pauseRequestedVisible: pauseRequested,
     pausedVisible: status === "paused",
@@ -294,7 +298,7 @@ function phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewC
     const communicationDetails = communication ? communicationView(communication, runtimeBlock) : null;
     const errorCode = String(workflow.errorCode || "WORKFLOW_INTERRUPTED");
     const errorMessage = String(workflow.errorMessage || "请检查诊断后继续。");
-    return { ...common, kind: "interrupted", errorCode, errorMessage, error: userFacingError(errorCode, errorMessage), communication: communicationDetails, communicationHref: communicationDetails?.detailsHref || (workflow.communicationBatchId ? `/communication?batchId=${encodeURIComponent(workflow.communicationBatchId)}` : ""), resume: workflow.communicationBatchId ? null : resumeView(workflow) };
+    return { ...common, kind: "interrupted", errorCode, errorMessage, error: userFacingError(errorCode, errorMessage), communication: communicationDetails, communicationHref: communicationDetails?.detailsHref || (workflow.communicationBatchId ? `/communication?batchId=${encodeURIComponent(workflow.communicationBatchId)}` : ""), resume: workflow.communicationBatchId ? null : resumeView(workflow, progress?.runtimeBlocked) };
   }
   return { ...common, kind: ["created", "scanning", "analyzing", "paused"].includes(status) ? "active" : "fallback", errorCode: String(workflow.errorCode || workflow.shortfallCode || "本轮已经结束。") };
 }
@@ -320,11 +324,11 @@ function communicationView(communication, runtimeBlock) {
   return { batchId: String(batch.id || ""), status, action, actionLabel: action === "resume" ? "继续沟通" : action === "start" ? "开始沟通" : "", executionEnabled: Boolean(action && communication?.calibration?.executionEnabled && !runtimeBlock), summary, error: communicationStopError(batch), runtimeBlock: runtimeBlock ? String(runtimeBlock.reasonCode || "") : "", detailsHref, detailsLabel: ambiguity.blocked ? (ambiguousItem ? "处理不明确结果" : "沟通记录不一致，请刷新") : "检查清单详情" };
 }
 
-function resumeView(workflow) {
+function resumeView(workflow, blocked = false) {
   const inherited = workflow.planner?.acquisitionMode === "inherited";
   const fixedAuthority = inherited || workflow.planner?.planSnapshotVersion === 2;
   const browserMode = reviewBrowserMode(workflow);
-  return { endpoint: "/api/workflow-run/resume", runId: String(workflow.id || ""), inherited, fixedAuthority, browserMode, cdpPort: inherited && browserMode === "portable" ? 9222 : null };
+  return { endpoint: "/api/workflow-run/resume", runId: String(workflow.id || ""), inherited, fixedAuthority, browserMode, blocked: Boolean(blocked), cdpPort: inherited && browserMode === "portable" ? 9222 : null };
 }
 
 function pollingView(status, workflow, communication, snapshot) {
@@ -339,10 +343,10 @@ function number(value) { const parsed = Number(value); return Number.isFinite(pa
 function safeExternalUrl(value) { try { const url = new URL(String(value || "")); return ["http:", "https:"].includes(url.protocol) ? url.toString() : ""; } catch { return ""; } }
 function workRegionLabel(policy = {}) { const location = policy.filters?.location || policy.filterSnapshot?.filters?.location || {}; if (location.mode === "nationwide") return "地点：全国"; const cities = (location.cities || []).map(localizedRegion).filter(Boolean); const districts = (location.districts || []).map(localizedRegion).filter(Boolean); if (!cities.length && !districts.length) return ""; return `地点：${[...cities, ...districts].join("、")}`; }
 function localizedRegion(value) { const text = String(value || "").trim(); return { Guangzhou: "广州", Shenzhen: "深圳", Shanghai: "上海", Beijing: "北京", Hangzhou: "杭州", Chengdu: "成都", Tianhe: "天河", Panyu: "番禺", Nanshan: "南山", Pudong: "浦东" }[text] || (/^[\u3400-\u9fff·]+$/.test(text) ? text : ""); }
-function cooldownView(scanWait = {}) { const retryAt = String(scanWait?.retryAt || ""); const retryMs = Date.parse(retryAt); if (!Number.isFinite(retryMs) || retryMs <= Date.now()) return { active: false }; return { active: true, reason: cooldownReason(scanWait.action), retryAt, retryAtLabel: new Date(retryMs).toLocaleString("zh-CN", { hour12: false }) }; }
-function cooldownReason(action) { return { detail_open: "正在读取岗位详情", pane_detail_read: "正在读取岗位详情", job_detail_fetch: "正在读取岗位详情", list_navigation: "正在切换岗位列表" }[String(action || "")] || "平台访问正在安全冷却"; }
-function runtimeBlockLabel(code) { return { BOSS_RISK_CONTROL: "平台风险控制仍在生效", BOSS_LOGIN_REQUIRED: "需要在浏览器中重新登录", BOSS_BROWSER_UNAVAILABLE: "浏览器连接不可用" }[String(code || "")] || "运行环境暂不可用"; }
-function scanWaitLabel(scanWait, now = Date.now()) { const retryAt = Date.parse(scanWait?.retryAt || ""); if (!Number.isFinite(retryAt) || retryAt <= now) return ""; return `安全冷却中，预计 ${Math.max(1, Math.ceil((retryAt - now) / 60000))} 分钟后继续（${new Date(retryAt).toLocaleTimeString("zh-CN", { hour12: false })}）`; }
+function cooldownView(scanWait = {}) { const retryAt = String(scanWait?.retryAt || ""); const retryMs = Date.parse(retryAt); if (!Number.isFinite(retryMs) || retryMs <= Date.now()) return { active: false }; return { active: true, reason: cooldownReason(scanWait.action), retryAt, retryAtLabel: new Date(retryMs).toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) }; }
+function cooldownReason(action) { return { runtime_block: "平台访问已安全暂停", detail_open: "正在读取岗位详情", pane_detail_read: "正在读取岗位详情", job_detail_fetch: "正在读取岗位详情", list_navigation: "正在切换岗位列表" }[String(action || "")] || "平台访问正在安全冷却"; }
+function runtimeBlockLabel(code) { return { BOSS_SEARCH_TAB_CHANGED: "BOSS 搜索页面状态已变化", BOSS_RISK_CONTROL: "平台风险控制仍在生效", BOSS_LOGIN_REQUIRED: "需要在浏览器中重新登录", BOSS_BROWSER_UNAVAILABLE: "浏览器连接不可用" }[String(code || "")] || "运行环境暂不可用"; }
+function scanWaitLabel(scanWait, now = Date.now()) { const retryAt = Date.parse(scanWait?.retryAt || ""); if (!Number.isFinite(retryAt) || retryAt <= now) return ""; return `安全冷却中，预计 ${Math.max(1, Math.ceil((retryAt - now) / 60000))} 分钟后继续（${new Date(retryAt).toLocaleTimeString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" })}）`; }
 function duration(seconds) { const value = Math.max(0, Math.ceil(number(seconds))); if (value < 60) return `${value} 秒`; if (value < 3600) return `${Math.ceil(value / 60)} 分钟`; const hours = Math.floor(value / 3600); const minutes = Math.ceil((value % 3600) / 60); return minutes ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`; }
 function etaLabel(eta = {}) { if (eta.status === "available") return `预计剩余 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（基于最近 ${number(eta.sampleSize)} 个完成岗位估算）`; if (eta.status === "paused") return eta.minSeconds == null || eta.maxSeconds == null ? "已暂停；样本不足，正在估算" : `已暂停；剩余区间冻结为 ${duration(eta.minSeconds)}～${duration(eta.maxSeconds)}（${number(eta.sampleSize)} 个样本）`; return eta.status === "estimating" ? "正在估算" : "当前阶段不估算剩余时间"; }
 function activityLabel(activity = {}) { const action = { analysis_started: "开始分析", analysis_succeeded: "已成功保存", analysis_failed: "分析失败", analysis_skipped: "已按本地规则处理", waiting_lease_expiry: "正在等待安全收尾", control_requested: "正在执行控制请求" }[activity.type] || "状态已更新"; return `任务 #${number(activity.taskId)} ${action}${activity.attempt ? `，第 ${number(activity.attempt)} 次尝试` : ""}${activity.modelRole === "backup" ? "，备用模型" : ""}${activity.errorCode ? `，${String(activity.errorCode)}` : ""}`; }

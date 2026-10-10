@@ -24,6 +24,7 @@ async function main() {
   await portableRecoveryKeepsFrozenAuthority();
   await invalidPortableRecoveryFailsClosed();
   await portableAnalysisControlKeepsAuthorityWithoutBrowserProbe();
+  await runtimeGatePrecedesBrowserRecovery();
   await scanScopeResumeContracts();
   await resumeControlAndStatusContracts();
   await dualPlatformDispatchReusesSinglePlatformStart();
@@ -335,6 +336,40 @@ async function portableAnalysisControlKeepsAuthorityWithoutBrowserProbe() {
   );
 }
 
+async function runtimeGatePrecedesBrowserRecovery() {
+  for (const kind of ["interrupted", "paused"]) {
+    for (const blockedAtCheck of [1, 2]) {
+      const events = [], launches = [];
+      const deps = scanScopeResumeDeps(events, {}, launches);
+      let checks = 0;
+      deps.scanAvailability = () => {
+        events.push("scan-availability");
+        if (++checks === blockedAtCheck) throw appError("BOSS_SEARCH_TAB_CHANGED", "saved runtime block", { statusCode: 409 });
+      };
+      let operation;
+      if (kind === "interrupted") {
+        operation = resumeWorkflow({ db: {}, input: { workflowRunId: "workflow-scope", scopeChoice: "original", scanRuns: new Map() }, deps });
+      } else {
+        const workflow = { ...deps.getWorkflowRun(), status: "paused", resumePhase: "scanning", controlState: "none" };
+        Object.assign(deps, {
+          getWorkflowRun: () => workflow,
+          exactActiveWorkflowRun: () => null,
+          exactPersistedWorkflowRunIsRunning: () => false,
+          batchModelReady: () => true,
+          resolveWorkflowControlBrowserAuthority: () => ({ browserMode: "edge", cdpPort: null }),
+          sameWorkflowControlSnapshot: () => true
+        });
+        operation = controlWorkflow({ db: {}, input: { workflowRunId: workflow.id, action: "resume", scanRuns: new Map() }, deps });
+      }
+      await assert.rejects(operation, error => error.code === "BOSS_SEARCH_TAB_CHANGED");
+      assert.equal(events.filter(event => event === "browser-probe").length, blockedAtCheck === 1 ? 0 : 1, `${kind}: a saved block must prevent even the first browser probe`);
+      assert.equal(launches.length, 0, `${kind}: a block appearing during the probe must still prevent launch`);
+      assert.equal(checks, blockedAtCheck);
+      if (blockedAtCheck === 1) assert.deepEqual(events, ["scan-availability"], "blocked recovery performs no live scope read or mutation");
+    }
+  }
+}
+
 async function activeWorkflowSkipsPreparation() {
   const events = [];
   const deps = startDeps(events);
@@ -411,7 +446,7 @@ async function scanScopeResumeContracts() {
   assert.strictEqual(readOnly.workflow.id, "workflow-scope");
   assert.strictEqual(readOnly.scopeChange.kind, "search_scope_changed");
   assert(readOnly.scopeChange.expectedScopeToken);
-  assert.deepStrictEqual(readOnlyEvents, ["browser-probe", "scope-read"]);
+  assert.deepStrictEqual(readOnlyEvents, ["scan-availability", "browser-probe", "scope-read"]);
 
   const replacementEvents = [];
   const replacementLaunches = [];
@@ -427,6 +462,7 @@ async function scanScopeResumeContracts() {
   });
   assert.strictEqual(replaced.scopeChange, null);
   assert.deepStrictEqual(replacementEvents, [
+    "scan-availability",
     "browser-probe",
     "scope-read",
     "scan-availability",
@@ -454,7 +490,7 @@ async function scanScopeResumeContracts() {
   });
   assert.strictEqual(changedAgain.scopeChange.kind, "search_scope_changed");
   assert.notStrictEqual(changedAgain.scopeChange.expectedScopeToken, readOnly.scopeChange.expectedScopeToken);
-  assert.deepStrictEqual(changedAgainEvents, ["browser-probe", "scope-read"]);
+  assert.deepStrictEqual(changedAgainEvents, ["scan-availability", "browser-probe", "scope-read"]);
 
   const originalEvents = [];
   const originalLaunches = [];
@@ -468,7 +504,7 @@ async function scanScopeResumeContracts() {
     deps: scanScopeResumeDeps(originalEvents, changedLiveContext, originalLaunches)
   });
   assert.strictEqual(original.scopeChange, null);
-  assert.deepStrictEqual(originalEvents, ["browser-probe", "scope-read", "scan-availability", "spawn"]);
+  assert.deepStrictEqual(originalEvents, ["scan-availability", "browser-probe", "scope-read", "scan-availability", "spawn"]);
   assert.strictEqual(originalLaunches[0].resumeBatchId, 91);
 
   const sameEvents = [];
@@ -487,7 +523,7 @@ async function scanScopeResumeContracts() {
     deps: scanScopeResumeDeps(sameEvents, sameLiveContext)
   });
   assert.strictEqual(same.scopeChange, null);
-  assert.deepStrictEqual(sameEvents, ["browser-probe", "scope-read", "scan-availability", "spawn"]);
+  assert.deepStrictEqual(sameEvents, ["scan-availability", "browser-probe", "scope-read", "scan-availability", "spawn"]);
 
   const keywordEvents = [];
   const keywordLiveContext = {
@@ -506,6 +542,7 @@ async function scanScopeResumeContracts() {
   });
   assert.strictEqual(keywordResult.workflow.keywords[0].word, "LLM应用");
   assert.deepStrictEqual(keywordEvents, [
+    "scan-availability",
     "browser-probe",
     "scope-read",
     "scan-availability",

@@ -388,13 +388,41 @@ async function assertClientContracts(vm) {
     }));
     const pages = new Map([["/review", reviewVm], ["/paused", pausedVm], ["/interrupted", interruptedVm]]);
     pages.set("/resume-check", resumableInterruptedVm);
+    const runtimeRetryAt = "2099-01-02T10:05:00.000Z";
+    const runtimeSnapshot = status => {
+      const snapshot = validSnapshot(status);
+      snapshot.progress.scanWait = { action: "runtime_block", retryAt: runtimeRetryAt, delayMs: 600000 };
+      snapshot.controls.canResume = false;
+      snapshot.controls.runtimeBlocked = true;
+      return snapshot;
+    };
+    for (const status of ["paused", "interrupted"]) {
+      pages.set(`/runtime-${status}`, buildWorkflowViewModel(fixture({
+        workflow: { status, communicationBatchId: null, errorCode: "BOSS_SEARCH_TAB_CHANGED" },
+        progressSnapshot: runtimeSnapshot(status),
+        runtimeBlock: { reasonCode: "BOSS_SEARCH_TAB_CHANGED", blockedUntil: runtimeRetryAt }
+      })));
+    }
+    for (const phaseKey of ["acquisition", "analysis"]) {
+      const snapshot = validSnapshot("paused");
+      snapshot.progress.phaseKey = phaseKey;
+      snapshot.controls.runtimeBlocked = false;
+      const unblockedVm = buildWorkflowViewModel(fixture({
+        workflow: { status: "paused" }, progressSnapshot: snapshot,
+        runtimeBlock: { reasonCode: "BOSS_SEARCH_TAB_CHANGED", blockedUntil: runtimeRetryAt }
+      }));
+      assert.equal(unblockedVm.controls.canResume, true);
+      assert.doesNotMatch(unblockedVm.overview.blocker.label, /阻塞|冷却/, `${phaseKey}: shared acquisition/local-analysis state must govern recovery guidance`);
+    }
+    let runtimePollingRequests = 0;
+    let runtimeCooldownExpired = false;
     let resumeRequests = 0;
     const resumeNavigations = [];
     let transitionPageLoads = 0;
     let transitionStatusRequests = 0;
     let pauseTransitionLoads = 0;
     let quotaPollingRequests = 0;
-    const reviewPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
+    const reviewPage = await browser.newPage({ viewport: { width: 375, height: 812 }, timezoneId: "UTC" });
     server.removeAllListeners("request");
     server.on("request", (req, res) => {
       if (req.url === "/api/workflow-run/resume") {
@@ -409,6 +437,10 @@ async function assertClientContracts(vm) {
       if (req.url === "/assets/workflow.js") return serve(res, "application/javascript", fs.readFileSync(asset));
       if (req.url === "/assets/roleflow.css") return serve(res, "text/css", fs.readFileSync(stylesheet));
       if (req.url?.startsWith("/api/workflow-status")) {
+        if (String(req.headers.referer || '').includes('/runtime-paused')) {
+          runtimePollingRequests += 1;
+          return json(res, runtimeCooldownExpired ? validSnapshot("paused") : runtimeSnapshot("paused"));
+        }
         if (String(req.headers.referer || '').includes('/paused')) quotaPollingRequests += 1;
         if (String(req.headers.referer || "").includes("/pause-transition")) return json(res, validSnapshot("paused"));
         if (String(req.headers.referer || "").includes("/transition")) {
@@ -428,6 +460,27 @@ async function assertClientContracts(vm) {
       if (pages.has(req.url)) return serve(res, "text/html", workflowDocument(pages.get(req.url)));
       res.writeHead(404); res.end();
     });
+    for (const status of ["interrupted", "paused"]) {
+      await reviewPage.goto(`${baseUrl}/runtime-${status}`, { waitUntil: "networkidle" });
+      const resume = reviewPage.getByRole("button", { name: "继续本轮", exact: true });
+      assert.equal(await resume.isDisabled(), true, `${status}: persisted runtime block disables the visible resume button`);
+      assert.equal(await reviewPage.locator("[data-cooldown]").isVisible(), true);
+      assert.equal(await reviewPage.locator("[data-cooldown-retry-time]").getAttribute("datetime"), runtimeRetryAt);
+      assert.match(await reviewPage.locator("[data-cooldown-retry-time]").textContent(), /18:05:00/, "cooldown must display Beijing time even when the browser uses UTC");
+      assert.match(await reviewPage.locator("[data-cooldown-reason]").textContent(), /平台访问已安全暂停/);
+      if (status === "paused") {
+        assert.equal(await waitFor(() => runtimePollingRequests >= 2, 5000), true, "paused recovery must keep the saved cooldown after repeated polling");
+        assert.equal(await resume.isDisabled(), true);
+        assert.equal(await reviewPage.locator("[data-cooldown]").isVisible(), true);
+        assert.equal(await reviewPage.locator("[data-cooldown-retry-time]").getAttribute("datetime"), runtimeRetryAt);
+        runtimeCooldownExpired = true;
+        await reviewPage.waitForFunction(() => !document.querySelector('[data-action="resume"]')?.disabled, null, { timeout: 5000 });
+        assert.equal(await reviewPage.locator("[data-cooldown]").isHidden(), true, "expired runtime cooldown is removed by polling");
+        assert.match(await reviewPage.locator("[data-overview-next-action]").textContent(), /检查暂停原因后继续本轮/, "the next action must update when runtime blocking expires");
+        assert.doesNotMatch(await reviewPage.locator("[data-overview-blocker-stable]").textContent(), /安全冷却中/, "expired cooldown must not reappear as the stable blocker");
+      }
+    }
+    assert.equal(resumeRequests, 0, "viewing blocked recovery pages must not submit a resume request");
     await reviewPage.goto(`${baseUrl}/transition`, { waitUntil: "networkidle" });
     assert.strictEqual(await waitFor(() => transitionPageLoads === 2, 4000), true, "same-phase interruption must reload the server-rendered workflow page");
     await reviewPage.waitForLoadState("networkidle");

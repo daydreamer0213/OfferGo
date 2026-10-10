@@ -12,6 +12,8 @@ const {
   recordWorkflowPlatformAccess,
   recordScanTargetResult,
   attachWorkflowCommunication,
+  setSiteRuntimeState,
+  clearSiteRuntimeState,
   upsertJob
 } = require("../src/core/storage");
 const {
@@ -32,6 +34,7 @@ const db = openDb(":memory:");
 
 try {
   testSnapshotRequiresExactRunId();
+  testPersistedRuntimeBlockDuringRecovery();
   testRecordWorkflowScanWait();
   testScanWaitAndHeartbeatActivity();
   testAggregateCountsMatchSqlAndInvariant();
@@ -94,6 +97,53 @@ function testSnapshotRequiresExactRunId() {
   );
   const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
   assert.strictEqual(snapshot.workflow.id, scenario.workflowId);
+}
+
+function testPersistedRuntimeBlockDuringRecovery() {
+  const now = "2030-01-01T00:00:00.000Z";
+  const retryAt = "2030-01-01T01:00:00.000Z";
+  let day = 1;
+  try {
+    for (const site of ["boss", "zhaopin"]) {
+      setSiteRuntimeState(db, site, { status: "blocked", reasonCode: `${site.toUpperCase()}_SEARCH_TAB_CHANGED`, details: { blockedUntil: retryAt } });
+      for (const status of ["paused", "interrupted"]) {
+        const scenario = seedWorkflow(db, { analyses: [{}], localDay: `2030-01-${String(day++).padStart(2, "0")}`, modelConfigRevision: "runtime-recovery" });
+        db.prepare("UPDATE workflow_runs SET site = ?, status = ?, resume_phase = 'scanning' WHERE id = ?").run(site, status, scenario.workflowId);
+        const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now });
+        assert.equal(snapshot.progress.scanWait?.retryAt, retryAt, "reopened acquisition retains the site's saved cooldown");
+        assert.equal(snapshot.progress.scanWait.action, "runtime_block");
+        assert.equal(snapshot.controls.canResume, false);
+        assert.equal(snapshot.controls.runtimeBlocked, true);
+        const expired = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now: retryAt });
+        assert.equal(expired.progress.scanWait, null);
+        assert.equal(expired.controls.runtimeBlocked, false);
+        assert.equal(expired.controls.canResume, status === "paused");
+
+        db.prepare("UPDATE workflow_runs SET status = 'paused', resume_phase = 'analyzing' WHERE id = ?").run(scenario.workflowId);
+        const localAnalysis = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now });
+        assert.equal(localAnalysis.controls.canResume, true, "platform blocking must not prevent local analysis");
+        assert.equal(localAnalysis.controls.runtimeBlocked, false);
+        assert.equal(localAnalysis.progress.scanWait, null);
+
+        db.prepare("UPDATE workflow_runs SET status = 'scanning', resume_phase = NULL, metrics_json = ? WHERE id = ?").run(JSON.stringify({ scanWait: { runId: scenario.scanRunId, action: "detail_open", retryAt: "2030-01-01T02:00:00.000Z", delayMs: 7200000 } }), scenario.workflowId);
+        const longerWait = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now });
+        assert.equal(longerWait.progress.scanWait.retryAt, "2030-01-01T02:00:00.000Z", "runtime state must not shorten an existing later wait");
+      }
+      clearSiteRuntimeState(db, site);
+    }
+    setSiteRuntimeState(db, "boss", { status: "blocked", reasonCode: "BOSS_RISK_CONTROL" });
+    const scenario = seedWorkflow(db, { analyses: [{}], localDay: "2030-01-05", modelConfigRevision: "runtime-recovery" });
+    transitionWorkflowRun(db, { id: scenario.workflowId, status: "paused", resumePhase: "scanning" });
+    const indefinite = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now });
+    assert.equal(indefinite.controls.canResume, false, "missing deadline does not clear a persisted block");
+    assert.equal(indefinite.controls.runtimeBlocked, true);
+    assert.equal(indefinite.progress.scanWait, null, "do not invent a deadline");
+    db.prepare("UPDATE workflow_runs SET site = 'zhaopin' WHERE id = ?").run(scenario.workflowId);
+    assert.equal(getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId, now }).controls.canResume, true, "BOSS block is not a Zhaopin block");
+  } finally {
+    clearSiteRuntimeState(db, "boss");
+    clearSiteRuntimeState(db, "zhaopin");
+  }
 }
 
 function testRecordWorkflowScanWait() {

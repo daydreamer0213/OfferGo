@@ -82,12 +82,12 @@
   const controls = (disabled) => nodes("[data-workflow-control]").forEach((button) => { button.disabled = Boolean(disabled); });
   const duration = (seconds) => { const value = Math.max(0, Math.ceil(number(seconds))); if (value < 60) return String(value) + " 秒"; if (value < 3600) return String(Math.ceil(value / 60)) + " 分钟"; const hours = Math.floor(value / 3600); const minutes = Math.ceil((value % 3600) / 60); return minutes ? String(hours) + " 小时 " + String(minutes) + " 分钟" : String(hours) + " 小时"; };
   const etaText = (eta = {}) => eta.status === "available" ? "预计剩余 " + duration(eta.minSeconds) + "～" + duration(eta.maxSeconds) + "（基于最近 " + number(eta.sampleSize) + " 个完成岗位估算）" : eta.status === "paused" ? (eta.minSeconds == null || eta.maxSeconds == null ? "已暂停；样本不足，正在估算" : "已暂停；剩余区间冻结为 " + duration(eta.minSeconds) + "～" + duration(eta.maxSeconds) + "（" + number(eta.sampleSize) + " 个样本）") : eta.status === "estimating" ? "正在估算" : "当前阶段不估算剩余时间";
-  const cooldownReasonText = (action) => ({ detail_open: "正在读取岗位详情", pane_detail_read: "正在读取岗位详情", job_detail_fetch: "正在读取岗位详情", list_navigation: "正在切换岗位列表" }[String(action || "")] || "平台访问正在安全冷却");
+  const cooldownReasonText = (action) => ({ runtime_block: "平台访问已安全暂停", detail_open: "正在读取岗位详情", pane_detail_read: "正在读取岗位详情", job_detail_fetch: "正在读取岗位详情", list_navigation: "正在切换岗位列表" }[String(action || "")] || "平台访问正在安全冷却");
   const activityText = (activity = {}) => { const action = { analysis_started: "开始分析", analysis_succeeded: "已成功保存", analysis_failed: "分析失败", analysis_skipped: "已按本地规则处理", waiting_lease_expiry: "正在等待安全收尾", control_requested: "正在执行控制请求" }[activity.type] || "状态已更新"; return ["任务 #", number(activity.taskId), " ", action, activity.attempt ? "，第 " + number(activity.attempt) + " 次尝试" : "", activity.modelRole === "backup" ? "，备用模型" : "", activity.errorCode ? "，" + String(activity.errorCode) : ""].join(""); };
   const validSnapshot = (snapshot) => Boolean(snapshot && snapshot.workflow && snapshot.progress && snapshot.progress.analysis && snapshot.progress.eta && snapshot.controls && Array.isArray(snapshot.recentActivity));
   const showError = (message = "无法读取任务状态") => { const error = node("[data-workflow-error]"); if (error) { error.textContent = message; error.hidden = false; } controls(true); };
   const clearError = () => { const error = node("[data-workflow-error]"); if (error) error.hidden = true; };
-  const scanWaitText = (scanWait) => { const retryAt = Date.parse(scanWait?.retryAt || ""); if (!Number.isFinite(retryAt) || retryAt <= Date.now()) return ""; return "安全冷却中，预计 " + Math.max(1, Math.ceil((retryAt - Date.now()) / 60000)) + " 分钟后继续（" + new Date(retryAt).toLocaleTimeString("zh-CN", { hour12: false }) + "）"; };
+  const scanWaitText = (scanWait) => { const retryAt = Date.parse(scanWait?.retryAt || ""); if (!Number.isFinite(retryAt) || retryAt <= Date.now()) return ""; return "安全冷却中，预计 " + Math.max(1, Math.ceil((retryAt - Date.now()) / 60000)) + " 分钟后继续（" + new Date(retryAt).toLocaleTimeString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) + "）"; };
 
   function stopCooldownTimer() {
     if (cooldownTimer) clearInterval(cooldownTimer);
@@ -134,18 +134,26 @@
     setText("[data-overview-acquisition]", "搜索目标 " + number(scanTargets.completed) + " / " + number(scanTargets.total) + " · 已获取 " + number(details.collected) + " 个岗位");
     setText("[data-overview-jd]", "已读取 " + number(details.read) + " / " + number(details.required) + " · 待补 " + number(details.pending));
     setText("[data-overview-remaining]", snapshot.progress.remainingWorkLabel || "本轮状态正在更新");
+    if (snapshot.workflow.status === "paused") {
+      setText("[data-overview-next-action]", snapshot.controls.runtimeBlocked ? "先处理平台提示，再刷新本轮状态" : "检查暂停原因后继续本轮");
+    }
     setText("[data-overview-eta]", snapshot.workflow.status === "paused" && (snapshot.workflow.errorCode || page.dataset.workflowErrorCode) === "MODEL_QUOTA_EXHAUSTED"
       ? "恢复模型连接后再估算剩余时间"
-      : Number.isFinite(retryAt) && retryAt > Date.now() ? "安全冷却至 " + new Date(retryAt).toLocaleString("zh-CN", { hour12: false }) : etaText(snapshot.progress.eta));
+      : Number.isFinite(retryAt) && retryAt > Date.now() ? "安全冷却至 " + new Date(retryAt).toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) : etaText(snapshot.progress.eta));
     if (Number.isFinite(retryAt) && retryAt > Date.now()) {
       if (stable) stable.hidden = true;
       if (cooldown) { cooldown.hidden = false; cooldown.dataset.retryAt = scanWait.retryAt; }
       if (countdown) countdown.dataset.retryAt = scanWait.retryAt;
       setText("[data-cooldown-reason]", cooldownReasonText(scanWait.action));
       const retry = node("[data-cooldown-retry-time]");
-      if (retry) { retry.dateTime = scanWait.retryAt; retry.textContent = new Date(retryAt).toLocaleString("zh-CN", { hour12: false }); }
+      if (retry) { retry.dateTime = scanWait.retryAt; retry.textContent = new Date(retryAt).toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }); }
     } else {
       if (stable) stable.hidden = false;
+      if (stable && snapshot.workflow.status === "paused") {
+        stable.textContent = snapshot.controls.runtimeBlocked
+          ? "平台访问已安全暂停；先检查平台提示，再刷新本轮状态"
+          : "本轮已暂停：" + (node("[data-pause-reason]")?.textContent || "检查暂停原因后再继续本轮");
+      }
       if (cooldown) { cooldown.hidden = true; cooldown.dataset.retryAt = ""; }
       if (countdown) countdown.dataset.retryAt = "";
     }

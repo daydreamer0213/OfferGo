@@ -1,6 +1,11 @@
 "use strict";
 
 const ERROR_GUIDANCE = Object.freeze({
+  BOSS_SEARCH_TAB_CHANGED: {
+    title: "BOSS 搜索页面状态已变化",
+    impact: "本轮已停止读取，已保存的岗位和剩余任务仍保留。",
+    nextAction: "检查现有 BOSS 页面；若有登录或验证提示，先手动处理。等本轮显示的冷却结束后，刷新页面再继续。"
+  },
   CANDIDATE_RESUME_EVIDENCE_UNAVAILABLE: {
     title: "匹配所用的简历原文暂时不可用",
     impact: "本轮已暂停分析，已读取的岗位和剩余任务都已保留。",

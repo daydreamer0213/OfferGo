@@ -279,6 +279,7 @@ async function resumeWorkflow({ db, input = {}, deps = {} }) {
   }
   const requiresBrowser = workflowResumeRequiresBrowser(db, workflow);
   if (requiresBrowser) {
+    scanAvailability(db, input.scanRuns, workflow.planId, logger, workflow.site || "boss");
     const readiness = publicBrowserReadinessSnapshot(await browserReadinessProbe({ browserMode, cdpPort, site: workflow.site || "boss" }));
     assertWorkflowResumeBrowserReady(readiness);
   }
@@ -462,6 +463,7 @@ async function controlWorkflow({ db, input = {}, deps = {} }) {
   const requiresBrowser = shouldLaunch && targetPhase === "scanning";
   let authority = null;
   if (requiresBrowser) {
+    scanAvailability(db, input.scanRuns, workflow.planId, logger, workflow.site || "boss");
     authority = resolveWorkflowControlBrowserAuthority(workflow, input);
     const readiness = publicBrowserReadinessSnapshot(await browserReadinessProbe({ ...authority, site: workflow.site || "boss" }));
     assertWorkflowResumeBrowserReady(readiness);
