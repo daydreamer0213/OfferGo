@@ -234,6 +234,30 @@ for(const submitForm of document.querySelectorAll('[data-resume-submit]'))submit
 });
 })();</script>`;
 
+function renderResumePrintBlocks(text) {
+  const blocks = [];
+  let current = null;
+  for (const line of String(text || "").replace(/\r\n?/g, "\n").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) { current = null; continue; }
+    const heading = /^(?:个人(?:信息|优势|总结|简介)|自我评价|求职意向|(?:专业|技术)?技能|技术栈|(?:工作|实习|项目|教育)经历|教育背景|资格证书|获奖经历|内容|业绩)[：:]?$/.test(trimmed)
+      || (!blocks.length && /^[\p{Script=Han}]{2,12}$/u.test(trimmed));
+    const entry = /\b(?:19|20)\d{2}(?:[./]\d{1,2})?\s*[-–—~至]\s*(?:(?:19|20)\d{2}(?:[./]\d{1,2})?|至?今)\s*$/.test(trimmed);
+    const item = /^(?:[●•▪◆▶*-]\s*|\d+[.)、]\s*)/.test(trimmed);
+    if (!current || heading || entry || item) {
+      current = { lines: [], heading, entry };
+      blocks.push(current);
+    }
+    current.lines.push(line);
+    if (heading || entry) current = null;
+  }
+  return blocks.map(block => {
+    const tag = block.heading ? "h2" : "p";
+    const className = block.heading ? "resume-heading" : block.entry ? "resume-entry" : "resume-paragraph";
+    return `<${tag} class="${className}">${escapeHtml(block.lines.join("\n"))}</${tag}>`;
+  }).join("");
+}
+
 function renderResumePrintPage(text) {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>简历</title><style>
     body{margin:0;color:#1b2530;background:#edf0f3;font-family:"Microsoft YaHei",sans-serif}
@@ -241,9 +265,13 @@ function renderResumePrintPage(text) {
     button{padding:10px 18px;border:0;border-radius:8px;background:#243747;color:white;cursor:pointer;font:inherit}
     main{max-width:760px;margin:20px auto;padding:40px;background:white;box-sizing:border-box}
     .resume-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.8}
+    .resume-text p,.resume-heading{margin:0 0 6px;break-inside:avoid;page-break-inside:avoid;orphans:2;widows:2}
+    .resume-heading{margin-top:16px;font-size:16px;line-height:1.4}
+    .resume-heading,.resume-entry{font-weight:700;break-after:avoid;page-break-after:avoid}
+    .resume-heading:first-child{margin-top:0}
     @page{size:A4;margin:18mm}
-    @media print{body{background:white}.toolbar{display:none}main{max-width:none;margin:0;padding:0}.resume-text{font-size:11pt;line-height:1.6}}
-  </style></head><body><div class="toolbar"><button type="button" onclick="window.print()">打印 / 保存 PDF</button><span>在打印窗口中选择“另存为 PDF”，保存后可上传给 HR。</span></div><main><div class="resume-text">${escapeHtml(text)}</div></main></body></html>`;
+    @media print{body{background:white}.toolbar{display:none}main{max-width:none;margin:0;padding:0}.resume-text{font-size:11pt;line-height:1.6}.resume-heading{font-size:12pt}}
+  </style></head><body><div class="toolbar"><button type="button" onclick="window.print()">打印 / 保存 PDF</button><span>在打印窗口中选择“另存为 PDF”，保存后可上传给 HR。</span></div><main><div class="resume-text">${renderResumePrintBlocks(text)}</div></main></body></html>`;
 }
 
 module.exports = { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues, renderResumePrintPage };

@@ -136,6 +136,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     });
     assert.equal(contrasts.length, 2);
     assert(contrasts.every(value => value >= 4.5), `dark interview text must remain readable: ${contrasts}`);
+    await resumePrintPaginationCheck(page);
     assert.deepEqual(errors, []);
     if (process.env.OFFERGO_UX_ARTIFACT_DIR) fs.writeFileSync(path.join(process.env.OFFERGO_UX_ARTIFACT_DIR, 'browser-results.json'), JSON.stringify({
       immediateLeave: 'passed', editWhileSaving: 'passed', failedSaveStaysInEditor: 'passed', reloadRecovery: 'passed',
@@ -149,3 +150,46 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     db.close();
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+async function resumePrintPaginationCheck(page) {
+  const { renderResumePrintPage } = require('../src/dashboard/pages/resume_optimization');
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const compact = value => value.replace(/\s/g, '');
+  async function printedPages(text) {
+    await page.setContent(renderResumePrintPage(text));
+    const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+    const task = getDocument({ data: new Uint8Array(pdf), disableWorker: true, useSystemFonts: true });
+    const document = await task.promise;
+    try {
+      const pages = [];
+      for (let index = 1; index <= document.numPages; index++) {
+        const content = await (await document.getPage(index)).getTextContent();
+        pages.push(compact(content.items.map(item => item.str || '').join('')));
+      }
+      assert.equal(pages.join(''), compact(text), 'printing must preserve all text in its original order');
+      return pages;
+    } finally { await document.destroy(); }
+  }
+  const endings = [
+    index => `保留原有续行 END${String(index + 1).padStart(2, '0')}`,
+    index => `${['壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖', '拾', '十一', '十二'][index]}号条目续句结束`,
+    index => `在2024-2025期间参与接口开发并处理异常 END${String(index + 1).padStart(2, '0')}`
+  ];
+  for (const ending of endings) {
+    const items = Array.from({ length: 12 }, (_, index) =>
+      `${index + 1}. START${String(index + 1).padStart(2, '0')} ${'参与订单接口实现、排查异常并核对结果。'.repeat(18)}\n${ending(index)}`);
+    const text = `合成候选人\n项目经历\n订单平台 2024-2025\n内容:\n${items.join('\n')}\n\n教育经历\n示例大学 本科 2020-2024`;
+    const pages = await printedPages(text);
+    assert(pages.length > 1, 'the fixture must exercise real page boundaries');
+    for (let index = 0; index < items.length; index++) {
+      const id = String(index + 1).padStart(2, '0');
+      assert.equal(pages.findIndex(text => text.includes(`START${id}`)), pages.findIndex(text => text.includes(compact(ending(index)))),
+        `normal-length item ${id} and its continuation must not split across printed pages`);
+    }
+    const titlePage = pages.findIndex(text => text.includes('教育经历'));
+    assert(pages[titlePage].includes('示例大学'), 'a section heading must stay with its following content');
+  }
+  const longPages = await printedPages(`项目经历\n• LONGSTART ${'长条目保留所有原文，允许正常跨页。'.repeat(300)} LONGEND\n\n说明:\n<script>bad()</script>`);
+  assert(longPages.length > 1, 'an oversized item must remain printable across multiple pages');
+  assert(!await page.locator('main script').count(), 'printing must escape source HTML');
+}
