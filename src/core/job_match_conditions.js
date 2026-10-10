@@ -62,7 +62,13 @@ function normalizeJobConditions({ jobUnderstanding = {}, evidence = {} } = {}) {
       && isExperienceYearsRequirement({ requirement: atom.value });
     const rawAlternatives = Array.isArray(item.alternatives) && item.alternatives.length ? item.alternatives
       : [{ allOf: atoms.length ? atoms : [{ kind: 'semantic', operator: 'meets', value: label }] }];
-    const yearsOnly = qualification && rawAlternatives.every(branch => branch.allOf?.length && branch.allOf.every(yearsAtom));
+    const relaxedYearAtom = atom => atom.kind === 'semantic'
+      && isExperienceYearsRequirement({ requirement: label, jdEvidence })
+      && /年限.{0,8}(?:放宽|不限|不要求)|(?:放宽|不限).{0,8}年限/.test(text(atom.value))
+      && !/必须|需(?:要|具备)|掌握|熟练|精通|证书|资格证|学历|本科|硕士|博士|毕业|在校/.test(text(atom.value))
+      && !inferredAtoms(atom.value).length;
+    const yearsOnly = qualification && rawAlternatives.every(branch => branch.allOf?.length
+      && branch.allOf.every(atom => yearsAtom(atom) || relaxedYearAtom(atom)));
     const expandYearQualification = atom => {
       if (!qualification || atom.kind !== 'semantic' || /或者|或/.test(text(atom.value))) return [atom];
       const parts = text(atom.value).split(/[，,；;。]|并且|同时|且|并具备|并拥有/).map(text).filter(Boolean);
@@ -265,7 +271,7 @@ function assessJobConditions({ conditions = [], reportedResults = [], evidence =
     const candidateEvidenceRefs = [...new Set(branches.flatMap(branch => branch.refs))];
     const localState = combineAny(branches.map(branch => branch.state));
     const allowed = condition.category === 'qualification' ? QUALIFICATION_STATES : CAPABILITY_STATES;
-    const grounding = verifyJobMatchEvidence({ evidence, refs: reported.candidateEvidenceRefs || [],
+    const grounding = verifyJobMatchEvidence({ evidence, refs: reported.candidateEvidenceRefs || [], state: reportedState,
       sourceKind: ['resume', 'profile_fact'], claim: reported.resumeEvidence });
     const hasRefs = (reported.candidateEvidenceRefs || []).length > 0;
     const openMajorScope = condition.category === 'qualification' && condition.alternatives.some(branch =>

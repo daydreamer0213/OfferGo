@@ -1,6 +1,7 @@
 "use strict";
 
 const { PRODUCT_POLICY } = require("./product_policy");
+const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
 const {
   getWorkflowRun,
   immediateTransaction,
@@ -36,11 +37,14 @@ const CONFIG_PAUSE_CODES = new Set([
   "MODEL_KEY_REQUIRED",
   "MODEL_AUTH_FAILED",
   "MODEL_ENDPOINT_OR_MODEL_NOT_FOUND",
-  "MODEL_CONFIGURATION_REQUIRED"
+  "MODEL_CONFIGURATION_REQUIRED",
+  "HTTP_402",
+  "MODEL_QUOTA_EXHAUSTED"
 ]);
 const WORKFLOW_PAUSE_CODES = new Set([
   "MODEL_AUTH_REQUIRED",
-  "MODEL_CONFIGURATION_REQUIRED"
+  "MODEL_CONFIGURATION_REQUIRED",
+  "MODEL_QUOTA_EXHAUSTED"
 ]);
 const LEASE_EXPIRED_ERROR_CODE = "LEASE_EXPIRED";
 const LEASE_EXPIRED_ERROR_STAGE = "execution";
@@ -101,7 +105,8 @@ function initializeWorkflowJobTasks(db, {
         status: entry.status,
         recoveryGeneration: Number(workflow.recoveryGeneration || 0),
         modelConfigRevision,
-        now
+        now,
+        reconcileStatus: true
       });
       inserted += Number(result.changes || 0);
     }
@@ -450,7 +455,7 @@ function commitWorkflowJobTaskFailure(db, {
   if (pauseReason && !WORKFLOW_PAUSE_CODES.has(pauseReason)) {
     throw workflowTaskError(
       "WORKFLOW_TASK_PAUSE_CODE_INVALID",
-      `pauseCode 只允许 MODEL_AUTH_REQUIRED / MODEL_CONFIGURATION_REQUIRED：${pauseReason}`
+      `pauseCode 不属于受支持的模型暂停原因：${pauseReason}`
     );
   }
   const stage = errorStage === undefined || errorStage === null
@@ -849,12 +854,14 @@ function latencyBetween(startedAt, finishedAt) {
 }
 
 function initialTaskStatus(analysis) {
+  analysis = projectAnalysisForCurrentPipeline(analysis);
   const semantic = String(analysis.semanticStatus || "");
   const source = String(analysis.decisionSource || "");
-  if (semantic === "complete" && source === "model") return "succeeded";
+  if (["pending", "partial", "stale", "failed"].includes(semantic)) return "pending";
   if (["local_rules", "hard_boundary"].includes(source) || ["rule_only", "blocked"].includes(semantic)) {
     return "skipped";
   }
+  if (semantic === "complete") return "succeeded";
   return "pending";
 }
 

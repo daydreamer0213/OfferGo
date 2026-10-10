@@ -173,16 +173,19 @@ function testRunScriptFromOutsideCwd() {
 
 async function testWorkspaceStartupFromSpacePath() {
   const recordPath = path.join(tempRoot, "workspace-start.jsonl");
+  const healthRecordPath = path.join(tempRoot, "workspace-health.jsonl");
   const result = runPowerShellUnicode([
     "-File", path.join(projectRoot, "scripts", "start-workspace.ps1"),
     "-Port", String(dashboardPort),
     "-NoBrowser"
   ], {
     cwd: outsideCwd,
-    env: fixtureEnv({ ROLEFLOW_STARTUP_RECORD: recordPath }),
+    env: fixtureEnv({ ROLEFLOW_STARTUP_RECORD: recordPath, ROLEFLOW_STARTUP_HEALTH_RECORD: healthRecordPath }),
     timeout: 30000
   });
   assert.strictEqual(result.status, 0, combinedOutput(result));
+  assert.equal(readJsonLines(healthRecordPath).length, 1,
+    "a successful startup identity check must not be immediately repeated; slow TCP providers otherwise double the startup wait");
   assert.match(combinedOutput(result), /浏览器：OfferGo 专用 Edge（推荐）/);
   const records = readJsonLines(recordPath);
   const dashboard = records.find((item) => item.command === "dashboard");
@@ -1265,6 +1268,7 @@ const port = Number(args[portIndex + 1]);
 const server = http.createServer((req, res) => {
   res.setHeader("content-type", "application/json");
   if (req.url === "/health") {
+    if (process.env.ROLEFLOW_STARTUP_HEALTH_RECORD) fs.appendFileSync(process.env.ROLEFLOW_STARTUP_HEALTH_RECORD, JSON.stringify({ pid: process.pid, at: Date.now() }) + "\n");
     res.end(JSON.stringify({ ok: true, projectRoot, pid: process.pid, browserAuthority: { browserMode, cdpPort, profilePath } }));
     return;
   }

@@ -10,6 +10,7 @@ const { scoreJob, decisionState } = require("../../core/scoring");
 const { createJobAnalysisRunner } = require("../../core/job_analysis");
 const { mapWithConcurrency } = require("../../core/async_pool");
 const { reconcilePlanWorkflowInventory } = require("../../core/workflow_inventory");
+const { classifyWorkflowAnalysisError } = require("../../core/workflow_analysis_executor");
 
 function retryOneJobAnalysis({ db, input = {}, deps = {} }) {
   return retryJobAnalyses({ db, input, deps, bulk: false });
@@ -38,9 +39,19 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
     });
   }
   const pool = listDecisionPool(db, { planId });
+  let retryIds = null;
+  if (bulk && input.jobIds !== undefined) {
+    const values = Array.isArray(input.jobIds) ? input.jobIds : String(input.jobIds).split(",");
+    const ids = values.map(value => Number(value));
+    if (!ids.length || ids.length > PRODUCT_POLICY.operations.modelAnalysis.maxRetryJobs
+      || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error("待分析岗位清单无效。");
+    const ownIds = new Set(pool.map(job => job.id));
+    if (ids.some(id => !ownIds.has(id))) throw new Error("岗位不属于当前筛选方案。");
+    retryIds = new Set(ids);
+  }
   const requestedJobId = Number(input.jobId);
   const jobs = bulk
-    ? pool.filter((job) => job.decisionBucket === "analysis_pending" && isJobAwaitingAction(job))
+    ? pool.filter((job) => (!retryIds || retryIds.has(job.id)) && job.decisionBucket === "analysis_pending" && isJobAwaitingAction(job))
       .slice(0, PRODUCT_POLICY.operations.modelAnalysis.maxRetryJobs)
     : pool.filter((job) => job.id === requestedJobId);
   if (!jobs.length) throw new Error(bulk ? "当前没有待重试的语义分析岗位。" : "岗位不存在或不属于当前筛选方案。");
@@ -58,15 +69,29 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
   });
   const concurrency = bulk ? PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency : 1;
   const needsMessageContext = !bulk && deps.messageContextAnalysis === true;
+  let configurationError = null;
+  const recordConfigurationError = error => {
+    const classified = classifyWorkflowAnalysisError(error);
+    if (classified.kind !== "configuration") return null;
+    configurationError ||= appError(classified.pauseCode === "MODEL_QUOTA_EXHAUSTED"
+      ? "MODEL_QUOTA_EXHAUSTED" : "MODEL_CONFIGURATION_REQUIRED", "模型连接需要恢复，已完成的分析已保存，剩余岗位仍待分析。", { statusCode: 409 });
+    return classified;
+  };
   const results = await mapWithConcurrency(jobs, concurrency, async (job) => {
+    if (configurationError) return null;
     const scored = scoreJob(job, configs);
     if (decisionState(scored) !== "ready" && !needsMessageContext) {
       return { job, scored, sourcePending: true, analysis: job.analysis };
     }
-    let analysis = await analyze(
-      { ...job, ...scored, greeting: job.greeting || "" },
-      { signal: deps.signal || null }
-    );
+    let analysis;
+    try {
+      analysis = await analyze({ ...job, ...scored, greeting: job.greeting || "" }, { signal: deps.signal || null });
+    } catch (error) {
+      const classified = recordConfigurationError(error);
+      if (!classified) throw error;
+      analysis = { semanticStatus: "failed", decisionSource: "analysis_pending", errorCode: classified.code, error: "模型服务暂不可用。" };
+    }
+    if (analysis.semanticStatus === "failed") recordConfigurationError({ code: analysis.errorCode, httpStatus: analysis.errorHttpStatus });
     throwIfAborted(deps.signal);
     if (needsMessageContext && job.source === "zhaopin") {
       const sourceAvailability = job.analysis?.sourceAvailability === "offline" ? "offline" : "unknown";
@@ -78,17 +103,20 @@ async function retryJobAnalyses({ db, input, deps, bulk }) {
   let completed = 0;
   let failed = 0;
   let sourcePending = 0;
-  for (const result of results) {
+  for (const result of results.filter(Boolean)) {
     throwIfAborted(deps.signal);
+    // Persist the current local boundary even when it prevents a model call.
+    // Otherwise the unchanged observation stays in the model retry queue.
+    upsertJob(db, { ...result.job, ...result.scored, analysis: result.analysis, greeting: result.job.greeting || "" }, batchId);
     if (result.sourcePending) {
       sourcePending += 1;
       continue;
     }
-    upsertJob(db, { ...result.job, ...result.scored, analysis: result.analysis, greeting: result.job.greeting || "" }, batchId);
     if (result.analysis.semanticStatus === "failed") failed += 1;
     else completed += 1;
   }
   reconcilePlanWorkflowInventory(db, planId);
+  if (configurationError) throw configurationError;
   return {
     kind: bulk ? "bulk" : "one",
     planId,

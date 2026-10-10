@@ -75,4 +75,51 @@ const unrelatedAbsence = buildJobMatchEvidence({ candidateProfile: { projects: [
 }] } });
 assert.equal(verifyJobMatchEvidence({ evidence: unrelatedAbsence, refs: unrelatedAbsence.entries.map(entry => entry.id),
   claim: '简历：未参与客户沟通' }).valid, false, '其他工具的明确缺口不能证明客户沟通缺口');
+const productionLimit = buildJobMatchEvidence({ candidateProfile: { projects: [{
+  avoidSaying: ['生产级异常降级', '生产级自动降级']
+}] } });
+assert.equal(verifyJobMatchEvidence({ evidence: productionLimit, refs: productionLimit.entries.map(entry => entry.id),
+  state: 'missing', claim: '简历：不主张生产级异常降级，未记录失败降级机制实现' }).valid, false,
+  '生产级表达边界与未记录不能证明普通失败降级能力明确不兼容');
+assert.equal(verifyJobMatchEvidence({ evidence: collaboration, refs: collaboration.entries.map(entry => entry.id),
+  state: 'transferable', claim: '简历：参与日志排查与基础测试，未独立负责客户项目管理' }).valid, true);
+const mixedLimit = buildJobMatchEvidence({ candidateProfile: { projects: [{
+  canSay: ['实现工具调用与条件路由'], avoidSaying: ['生产级异常降级']
+}] } });
+assert.equal(verifyJobMatchEvidence({ evidence: mixedLimit, refs: mixedLimit.entries.map(entry => entry.id),
+  state: 'missing', claim: '简历：不主张生产级异常降级，未记录失败降级机制实现' }).valid, false,
+  '增加真实正向引用不能让未记录变成能力不兼容');
+for (const limitation of ['未使用Kubernetes', '未实现失败降级']) {
+  const facts = buildJobMatchEvidence({ candidateProfile: { projects: [{
+    avoidSaying: ['不主张生产级异常降级'], limitation
+  }] } });
+  assert.equal(verifyJobMatchEvidence({ evidence: facts, refs: facts.entries.map(entry => entry.id),
+    state: 'missing', claim: '简历：不主张生产级异常降级，未记录失败降级机制实现' }).valid,
+    limitation === '未实现失败降级', '否定事实必须对应所判断的能力，不能用无关工具缺口背书');
+}
+const positiveOnly = buildJobMatchEvidence({ candidateProfile: { skills: ['Python', 'RAG'],
+  projects: [{ name: 'AI岗位工作台', canSay: ['保存岗位快照并诊断接口错误'] }] } });
+for (const claim of ['简历：无Android开发经历', '简历：未涉及Android框架原理',
+  '简历：无车载或手机端Android开发经验']) {
+  assert.equal(verifyJobMatchEvidence({ evidence: positiveOnly,
+    refs: positiveOnly.entries.map(entry => entry.id), state: 'missing', claim }).valid, false,
+  '正向技术与项目名单不能证明另一领域绝对没有经历');
+}
+const explicitAndroidAbsence = buildJobMatchEvidence({ candidateProfile: {
+  source: { resumeEvidenceText: '只做过Python接口，未参与Android开发。' }
+} });
+assert.equal(verifyJobMatchEvidence({ evidence: explicitAndroidAbsence,
+  refs: explicitAndroidAbsence.entries.map(entry => entry.id), state: 'missing',
+  claim: '简历：无Android开发经历' }).valid, true, '对应原文明确否定仍可使用');
+assert.equal(verifyJobMatchEvidence({ evidence: positiveOnly,
+  refs: positiveOnly.entries.map(entry => entry.id), state: 'missing',
+  claim: '简历：已做的是岗位信息保存与接口诊断，工作对象和交付不同' }).valid, true,
+'比较已有工作与目标工作不同不要求捏造绝对否定');
+for (const comparison of ['与目标的无序零件抓取工作对象不同', '与模型权重交付无关',
+  '无法作为模型权重训练交付']) {
+  assert.equal(verifyJobMatchEvidence({ evidence: positiveOnly,
+    refs: positiveOnly.entries.map(entry => entry.id), state: 'missing',
+    claim: `简历：岗位信息保存与接口诊断，${comparison}` }).valid, true,
+  '工作对象比较里的无序、无关和无法不是不存在经历的断言');
+}
 console.log('job_match_evidence_smoke ok');

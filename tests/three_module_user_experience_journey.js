@@ -11,6 +11,7 @@ const { ensureProgressCard } = require('../src/core/candidate_progress');
 const { runBossMessageDiscovery } = require('../src/application/message_discovery/run');
 const { safeDigest } = require('../src/adapters/sites/boss_message_dom');
 const { createDashboardServer } = require('../src/dashboard/server');
+const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
 
 (async () => {
   let chromium;
@@ -36,7 +37,7 @@ const { createDashboardServer } = require('../src/dashboard/server');
     const batch = storage.createBatch(db, 'boss', '产品经理', 'virtual UX', { profileId: owner.profileId, searchPlanId: owner.planId });
     const jobId = storage.upsertJob(db, { source: 'boss', sourceId: 'virtual-ux-job', title: '初级产品经理', company: '示例云服', salary: '8-12K', location: '广州',
       description: '负责客服工单需求梳理、业务规则与原型设计、研发协作和验收。要求有产品实习经历，能够讲清个人贡献。'.repeat(4),
-      analysis: { semanticStatus: 'complete', recommendation: 'apply', roleSummary: '梳理客服工单需求并协助交付。' } }, batch);
+      analysis: { semanticStatus: 'complete', revision: { pipelineVersions: PIPELINE_VERSIONS }, recommendation: 'apply', roleSummary: '梳理客服工单需求并协助交付。' } }, batch);
     const card = ensureProgressCard(db, { profileId: owner.profileId, planId: owner.planId, jobId, source: 'boss', stage: 'contact_started' });
     const conversationKey = safeDigest(['virtual', 'ux']);
     const messages = [];

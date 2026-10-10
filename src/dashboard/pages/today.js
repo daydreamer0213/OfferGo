@@ -392,6 +392,7 @@ function renderConditionSyncScript(vm) {
     button.addEventListener('click',()=>void refresh(true));
     window.addEventListener('focus',()=>void refresh());
     window.addEventListener('offergo:conditions',()=>void refresh(true));
+    window.addEventListener('offergo:workspace-ready',()=>void refresh());
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refresh()});
     document.querySelectorAll('input[name=acquisitionMode]').forEach(input=>input.addEventListener('change',()=>void refresh(true)));
     void refresh();

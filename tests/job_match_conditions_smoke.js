@@ -31,6 +31,12 @@ for (const [label, fact, expected] of [
 assert.equal(evaluate({ candidateProfile: { experiences: [{ durationMonths: 8, highlights: ['参与接口开发'] }] },
   label: '3-5年工作经验', alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '3-5年工作经验' }] }]
 }).summary.status, 'not_required', '模型把年限放入资格时也必须保留原有可冲政策');
+assert.equal(evaluate({ candidateProfile: { experiences: [{ durationMonths: 8 }] },
+  label: '3-5 年经验', alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '项目能力突出者，年限可适当放宽' }] }]
+}).summary.status, 'not_required', '模型把年限可放宽改写进替代分支，也不能重新变成资格硬门槛');
+assert.equal(evaluate({ candidateProfile: {}, label: '3-5 年经验', alternatives: [{ allOf: [
+  { kind: 'semantic', operator: 'meets', value: '必须掌握Java，年限可适当放宽' }
+] }] }).conditions[0].category, 'qualification', '同一分支中的独立技能前提不能因年限可放宽而消失');
 assert.equal(evaluate({ candidateProfile: {}, label: '必须熟练Java并具备3年经验',
   alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: '必须熟练Java并具备3年经验' }] }]
 }).conditions[0].category, 'qualification', '混合独立技能前提不能被年限政策整条抹掉');

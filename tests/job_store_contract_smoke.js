@@ -1,7 +1,7 @@
 const assert = require("node:assert");
 
 const JOB_EXPORTS = [
-  "upsertKeywordSource", "upsertJob", "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries",
+  "upsertKeywordSource", "upsertJob", "upsertScanCheckpointJob", "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries",
   "findLinkableInboundJob", "setZhaopinJobAvailability", "listReportJobs", "markApplication", "bindBatchToPlan",
   "rescorePlanObservations", "reassessBatchObservations", "addFollowUpNote", "recordCandidateJobEvent",
   "listCandidateJobEvents", "recordRecommendationFeedback", "markCandidateJob", "buildFeedbackSummary",
@@ -30,13 +30,13 @@ const candidateStore = require("../src/storage/candidate_store");
 const storage = require("../src/core/storage");
 process.removeListener("warning", onWarning);
 
-assert.strictEqual(JOB_EXPORTS.length, 35);
+assert.strictEqual(JOB_EXPORTS.length, 36);
 assert.strictEqual(CANDIDATE_EXPORTS.length, 32);
 assert.strictEqual(Object.keys(storage).length, 196);
 assert.deepStrictEqual(Object.keys(jobStore).sort(), JOB_EXPORTS);
 assert.deepStrictEqual(Object.keys(candidateStore).sort(), CANDIDATE_EXPORTS);
 for (const name of JOB_EXPORTS.filter((name) => ![
-  "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
+  "upsertScanCheckpointJob", "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
 ].includes(name))) assert.strictEqual(storage[name], jobStore[name], `${name} must be a direct facade reference`);
 for (const name of CANDIDATE_EXPORTS.filter((name) => ![
   "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"
@@ -131,7 +131,7 @@ try {
 
   const queueBatch = storage.createBatch(db, "boss", "queue", "queue", { profileId, searchPlanId: planId, filterSnapshot: { execution: {} } });
   for (const [sourceId, status] of [["queue-review", "review"], ["queue-pending", ""]]) {
-    const id = jobStore.upsertJob(db, { ...ready, source: "boss", sourceId, keyword: "AI", tags: [], matches: [], analysis: { semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2 } }, queueBatch);
+    const id = jobStore.upsertJob(db, { ...ready, source: "boss", sourceId, keyword: "AI", tags: [], matches: [], analysis: { semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2, revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } } }, queueBatch);
     if (status) jobStore.markCandidateJob(db, { profileId, jobId: id, planId, status, note: status });
   }
   assert.deepStrictEqual(jobStore.listDecisionQueue(db, { planId, limit: 1 }).map((row) => row.sourceId), ["queue-review"]);

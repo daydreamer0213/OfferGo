@@ -142,6 +142,7 @@ assert.deepStrictEqual(ambiguousNative.unresolvedSelections, [{ field: "jobType"
   await inheritedPageInspectionSmoke();
   await riskPreflightSmoke();
   await scrollSmoke();
+  await backgroundListRenderingSmoke();
   await cardGrowthCheckpointSmoke();
   await cardGrowthLimitCheckpointSmoke();
   await searchScopeDriftBeforeCardMergeSmoke();
@@ -468,6 +469,61 @@ async function scrollSmoke() {
   assert.strictEqual(result.status, "completed");
   assert.strictEqual(result.stopReason, "card_limit_reached");
   assert.strictEqual(page, 3);
+}
+
+async function backgroundListRenderingSmoke() {
+  const focus = [];
+  let rendering = false;
+  let visible = 15;
+  let cleanupFailure = null;
+  const browser = {
+    async cdp(_tabId, method, params) {
+      assert.equal(method, 'Emulation.setFocusEmulationEnabled', 'list rendering must not activate a browser tab');
+      rendering = params.enabled;
+      focus.push(rendering);
+      if (!params.enabled && cleanupFailure) throw cleanupFailure;
+    },
+    async evalValue(_tabId, expression) {
+      if (!expression.includes('__bossExtractCards')) return true;
+      return Array.from({ length: visible }, (_, index) => card(`background-${index}`));
+    }
+  };
+  const adapter = new BossSiteAdapter({ browser, sleepFn: async () => {} });
+  adapter.assertSearchPage = async () => ({ isSearchPage: true });
+  adapter.scrollList = async () => {
+    if (rendering) visible = Math.min(50, visible + 15);
+    return { moved: true, atBottom: true };
+  };
+  const result = await adapter.collectCards('tab', 50);
+  assert.equal(result.cards.length, 50, 'a hidden list must load beyond its initial cards without foreground activation');
+  assert.deepStrictEqual(focus, [true, false]);
+  assert.equal(rendering, false);
+
+  focus.length = 0;
+  await assert.rejects(() => adapter.collectCards('tab', 50, null, null, async () => {
+    throw new Error('checkpoint failed');
+  }), /checkpoint failed/);
+  assert.deepStrictEqual(focus, [true, false], 'failed checkpoints must release temporary rendering');
+  assert.equal(rendering, false);
+
+  const riskError = Object.assign(new Error('verification during collection'), { code: 'BOSS_RISK_CONTROL' });
+  cleanupFailure = Object.assign(new Error('cleanup disconnected'), { code: 'BROWSER_DISCONNECTED' });
+  focus.length = 0;
+  await assert.rejects(() => adapter.collectCards('tab', 50, null, null, async () => {
+    throw riskError;
+  }), error => error === riskError, 'cleanup must preserve the original risk signal');
+  assert.deepStrictEqual(focus, [true, false]);
+  assert.equal(rendering, false);
+  focus.length = 0;
+  await assert.rejects(() => adapter.collectCards('tab', 50), error => error === cleanupFailure,
+    'successful collection must still fail when rendering cleanup fails');
+  assert.deepStrictEqual(focus, [true, false]);
+  cleanupFailure = null;
+
+  focus.length = 0;
+  adapter.assertSearchPage = async () => { const error = new Error('verification required'); error.code = 'BOSS_RISK_CONTROL'; throw error; };
+  await assert.rejects(() => adapter.collectCards('tab', 50), error => error.code === 'BOSS_RISK_CONTROL');
+  assert.deepStrictEqual(focus, [], 'risk detection must stop before enabling background rendering');
 }
 
 async function cardGrowthCheckpointSmoke() {
@@ -2362,17 +2418,34 @@ async function detailSafetyLimitSmoke() {
     reads += 1;
     return { description: `standalone detail ${url} `.repeat(12), bossActiveText: "active" };
   };
+  const checkpoints = [];
   const jobs = await adapter.scanBrowser({
     tabId: activeBoss.id,
     keywords: ["safety"],
     cityScopes: [{ city: "广州", cityCode: "101280100" }],
     maxCards: 20,
-    maxDetailTotal: 2
+    maxDetailTotal: 2,
+    onTargetComplete: async result => checkpoints.push(result)
   });
   assert.strictEqual(reads, 2);
   assert.strictEqual(jobs.filter((job) => job.detailRequired).length, 5);
   assert.strictEqual(jobs.filter((job) => job.detailRead).length, 2);
   assert.strictEqual(jobs.filter((job) => job.detailErrorCode === "BOSS_DETAIL_SAFETY_LIMIT").length, 3);
+  assert.strictEqual(checkpoints[0].status, 'partial', '卡片读完但详情仍待补时必须保留可继续目标');
+  const cached = new Map(jobs.filter(job => job.detailRead).map(job => [job.sourceId, job]));
+  for (let round = 0; round < 2; round += 1) {
+    const resumed = await adapter.scanBrowser({
+      tabId: activeBoss.id, keywords: ['safety'],
+      cityScopes: [{ city: '广州', cityCode: '101280100' }],
+      maxCards: 20, maxDetailTotal: 2, targetKeys: [checkpoints[0].targetKey],
+      getReusableDetail: job => cached.get(job.sourceId),
+      onTargetComplete: async result => checkpoints.push(result)
+    });
+    for (const job of resumed.filter(job => job.detailRead)) cached.set(job.sourceId, job);
+  }
+  assert.deepStrictEqual(checkpoints.map(result => result.status), ['partial', 'partial', 'completed']);
+  assert.strictEqual(reads, 5, '继续时复用已读详情，只读取剩下的岗位');
+  assert.strictEqual(cached.size, 5);
 }
 
 async function detailFailureDedupeSmoke() {

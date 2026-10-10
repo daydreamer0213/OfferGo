@@ -166,6 +166,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-OfferGoProgress -State "starting_service" -Message "正在启动 OfferGo 服务…"
 $DashboardWasRunning = Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $BrowserAuthority
+$DashboardReady = $DashboardWasRunning
 if (-not $DashboardWasRunning) {
   $DataPreparation = & (Join-Path $PSScriptRoot "prepare-user-data.ps1") `
     -InstallRoot $ProjectRoot `
@@ -189,10 +190,11 @@ if (-not $DashboardWasRunning) {
   $deadline = (Get-Date).AddSeconds(15)
   do {
     Start-Sleep -Milliseconds 300
-  } while (-not (Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $BrowserAuthority) -and (Get-Date) -lt $deadline)
+    $DashboardReady = Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $BrowserAuthority
+  } while (-not $DashboardReady -and (Get-Date) -lt $deadline)
 }
 
-if (-not (Test-Dashboard -DashboardPort $Port -ExpectedBrowserAuthority $BrowserAuthority)) {
+if (-not $DashboardReady) {
   throw "Dashboard failed to start on http://127.0.0.1:$Port. Check whether the port is occupied."
 }
 

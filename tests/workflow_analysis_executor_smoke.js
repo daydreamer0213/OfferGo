@@ -48,6 +48,7 @@ const {
   testPrimaryBackupSelection();
   testSelectionDoesNotMutatePrimaryRuntime();
   testProductPolicyModelAnalysisFixedValues();
+  testOldAnalysesBecomePending();
   await testRunWorkflowAnalysisPrimarySuccessNeverConstructsBackup();
   await testRunWorkflowAnalysisRetryUsesPrimaryOrVerifiedBackup();
   await testRunWorkflowAnalysisWorkflowFatalPreservesIncrementalResults();
@@ -73,6 +74,23 @@ const {
   process.exit(1);
 }
 })();
+
+function testOldAnalysesBecomePending() {
+  const db = openDb(':memory:');
+  try {
+    const versions = require('../src/core/analysis_revision').PIPELINE_VERSIONS;
+    const fixture = seedWorkflow(db, { localDay: '2026-10-10', analyses: [
+      { semanticStatus: 'complete', decisionSource: 'model', recommendation: 'primary',
+        revision: { pipelineVersions: { ...versions, matchJob: 'historical-matching' } } },
+      { semanticStatus: 'complete', decisionSource: 'model', recommendation: 'primary', revision: { pipelineVersions: versions } },
+      { semanticStatus: 'complete', decisionSource: 'model', recommendation: 'primary' }
+    ] });
+    initializeWorkflowJobTasks(db, { workflowRunId: fixture.workflowId, batchId: fixture.batchId,
+      jobs: observationEntries(db, fixture.batchId), modelConfigRevision: 'fixture-current', now: '2026-10-10T00:00:00Z' });
+    assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: fixture.workflowId }).map(task => task.status),
+      ['pending', 'succeeded', 'pending'], '旧规则或无版本结果必须进入重评队列，当前结果复用');
+  } finally { db.close(); }
+}
 
 function testErrorKindConstants() {
   assert.deepStrictEqual(WORKFLOW_ANALYSIS_ERROR_KINDS, {
@@ -210,7 +228,9 @@ function testConfigurationPauseMapping() {
   }
   const configPairs = [
     ["MODEL_ENDPOINT_OR_MODEL_NOT_FOUND", "MODEL_CONFIGURATION_REQUIRED"],
-    ["MODEL_CONFIGURATION_REQUIRED", "MODEL_CONFIGURATION_REQUIRED"]
+    ["MODEL_CONFIGURATION_REQUIRED", "MODEL_CONFIGURATION_REQUIRED"],
+    ["HTTP_402", "MODEL_QUOTA_EXHAUSTED"],
+    ["MODEL_QUOTA_EXHAUSTED", "MODEL_QUOTA_EXHAUSTED"]
   ];
   for (const [code, pauseCode] of configPairs) {
     const result = classifyWorkflowAnalysisError(Object.assign(new Error("config"), { code }));
@@ -219,6 +239,10 @@ function testConfigurationPauseMapping() {
     assert.strictEqual(result.retryable, false, code);
     assert.strictEqual(result.pauseCode, pauseCode, code);
   }
+  const payment = classifyWorkflowAnalysisError(Object.assign(new Error('payment required'), { status: 402 }));
+  assert.equal(payment.kind, WORKFLOW_ANALYSIS_ERROR_KINDS.CONFIGURATION);
+  assert.equal(payment.code, 'HTTP_402');
+  assert.equal(payment.pauseCode, 'MODEL_QUOTA_EXHAUSTED');
 }
 
 function testTerminalAndLocalInputMapping() {
@@ -931,6 +955,11 @@ async function testRunWorkflowAnalysisRetryCooldownCannotBeBypassed() {
 }
 
 async function testRunWorkflowAnalysisConfigurationPauseStopsClaiming() {
+  for (const [failureCode, pauseCode] of [
+    ['MODEL_AUTH_FAILED', 'MODEL_AUTH_REQUIRED'],
+    ['HTTP_402', 'MODEL_QUOTA_EXHAUSTED'],
+    ['MODEL_QUOTA_EXHAUSTED', 'MODEL_QUOTA_EXHAUSTED']
+  ]) {
   const db = openDb(":memory:");
   try {
     const scenario = seedWorkflow(db, {
@@ -953,7 +982,7 @@ async function testRunWorkflowAnalysisConfigurationPauseStopsClaiming() {
       backupRuntime: { ...backupRuntime(), connection: { status: "verified" } },
       createAnalyzeJob: () => async () => {
         calls += 1;
-        throw Object.assign(new Error("auth failed"), { code: "MODEL_AUTH_FAILED" });
+        throw Object.assign(new Error("model service unavailable"), { code: failureCode });
       },
       analyzeScannedJob: async (raw, { analyzeJob }) => analyzeJob(raw),
       logger: silentLogger(),
@@ -974,7 +1003,7 @@ async function testRunWorkflowAnalysisConfigurationPauseStopsClaiming() {
     const workflow = getWorkflowRun(db, scenario.workflowId);
     assert.strictEqual(workflow.status, "paused");
     assert.strictEqual(workflow.controlState, "pause_requested");
-    assert.strictEqual(workflow.errorCode, "MODEL_AUTH_REQUIRED");
+    assert.strictEqual(workflow.errorCode, pauseCode);
     assert.strictEqual(workflow.resumePhase, "analyzing");
     assert.strictEqual(workflow.recoveryGeneration, 0);
     assert.strictEqual(workflow.circuitTimeoutJobCount, 0);
@@ -985,9 +1014,10 @@ async function testRunWorkflowAnalysisConfigurationPauseStopsClaiming() {
       taskId: tasks[0].id
     });
     assert.strictEqual(attempts.length, 1);
-    assert.strictEqual(attempts[0].errorCode, "MODEL_AUTH_FAILED");
+    assert.strictEqual(attempts[0].errorCode, failureCode);
   } finally {
     db.close();
+  }
   }
 }
 

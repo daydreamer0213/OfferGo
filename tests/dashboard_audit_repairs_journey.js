@@ -5,6 +5,7 @@ const os = require('node:os');
 const storage = require('../src/core/storage');
 const { createLogger } = require('../src/core/observability');
 const { createDashboardServer } = require('../src/dashboard/server');
+const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
 
 (async () => {
   let chromium;
@@ -29,7 +30,7 @@ const { createDashboardServer } = require('../src/dashboard/server');
       const batch = storage.createBatch(db, source, 'audit', '测试找岗', { profileId: owner.profileId, searchPlanId: owner.planId });
       storage.upsertJob(db, { source, sourceId: 'audit-'+source, title: '后端开发工程师', company: '模拟公司', location: '广州',
         salary: '12-18K', description: '负责订单查询与退款接口开发，参与联调和测试。', keyword: '后端开发',
-        analysis: { semanticStatus: 'complete', recommendation: 'apply', recommendationSchemaVersion: 2, fitLevel: 'fit', confidence: .9, hardBlockers: [], evidence: { jd: [], resume: [] } } }, batch);
+        analysis: { semanticStatus: 'complete', revision: { pipelineVersions: PIPELINE_VERSIONS }, recommendation: 'apply', recommendationSchemaVersion: 2, fitLevel: 'fit', confidence: .9, hardBlockers: [], evidence: { jd: [], resume: [] } } }, batch);
     }
     const logger = createLogger({ root, component: 'audit-test' });
     logger.error('earlier_failure', { requestId: 'error-before-poll', errorCode: 'MODEL_TIMEOUT' });

@@ -280,6 +280,7 @@ function job(recommendation, keyword = "RAG 工程师", sourceSuffix = recommend
     description: BAIT.jd,
     analysis: {
       semanticStatus: pending ? "pending" : "complete",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: pending ? "" : recommendation,
       recommendationSchemaVersion,
       fitLevel: "fit",

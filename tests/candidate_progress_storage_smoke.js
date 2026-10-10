@@ -257,7 +257,7 @@ try {
     keyword: "message-old-complete",
     seenAt: "2026-07-23T08:05:00.000Z",
     description: "OLD_COMPLETE_JD ".repeat(12),
-    analysis: { semanticStatus: "complete", marker: "old-same-observation" },
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, marker: "old-same-observation" },
     tags: ["old-tag"],
     qualityTags: ["trusted-detail"],
     risks: ["地点非目标城市：测试城市"]
@@ -300,7 +300,7 @@ try {
   assert.strictEqual(contextCandidate.salary, "20-30K");
   assert.strictEqual(contextCandidate.observationId, oldComplete.observationId);
   assert.strictEqual(contextCandidate.description, "OLD_COMPLETE_JD ".repeat(12));
-  assert.deepStrictEqual(contextCandidate.analysis, { semanticStatus: "complete", marker: "old-same-observation" });
+  assert.deepStrictEqual(contextCandidate.analysis, { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, marker: "old-same-observation" });
   assert.deepStrictEqual(contextCandidate.tags, ["old-tag"]);
   assert.deepStrictEqual(contextCandidate.qualityTags, ["trusted-detail"]);
   assert.deepStrictEqual(contextCandidate.risks, ["地点非目标城市：测试城市"], "exclusion evidence must belong to the selected trusted observation, not the latest job row");
@@ -314,6 +314,24 @@ try {
     }),
     contextCandidate
   );
+
+  const legacyContextFixture = createFixture(db, 'legacy-context', now);
+  ensureProgressCard(db, { ...legacyContextFixture, source: 'boss', now });
+  const legacyBatchId = createBatch(db, 'boss', 'legacy-no-version', 'historical context', {
+    profileId: legacyContextFixture.profileId, searchPlanId: legacyContextFixture.planId
+  });
+  upsertJob(db, { source: 'boss', sourceId: 'job-legacy-context', title: '历史岗位',
+    description: '历史完整岗位职责。'.repeat(20), qualityTags: [],
+    analysis: { semanticStatus: 'complete', recommendation: 'primary', marker: 'historical-source' }
+  }, legacyBatchId);
+  const staleContext = findMessageDiscoveryJobContext(db, {
+    profileId: legacyContextFixture.profileId, planId: legacyContextFixture.planId,
+    sourceId: 'job-legacy-context'
+  });
+  assert.equal(staleContext.analysis.semanticStatus, 'stale');
+  assert.equal(staleContext.contextComplete, true, '过期判断仍保留归属明确的完整本地岗位资料');
+  assert.equal(JSON.parse(db.prepare('SELECT analysis_json FROM job_observations WHERE id = ?')
+    .get(staleContext.observationId).analysis_json).semanticStatus, 'complete', '历史原始分析保持不变');
 
   const zhaopinBatchId = createBatch(db, "zhaopin", "zhaopin-message-context", "zhaopin context fixture", {
     profileId: contextFixture.profileId,

@@ -26,6 +26,11 @@ const ERROR_GUIDANCE = Object.freeze({
     impact: "已经保存的岗位仍然保留，本轮已停止继续读取。",
     nextAction: "返回本轮检查状态；确认页面正常后再继续。"
   },
+  SCAN_TARGETS_PARTIAL: {
+    title: "本轮还有采集任务未完成",
+    impact: "已读取的岗位和分析结果都已保留，剩余任务会从原进度继续。",
+    nextAction: "点击“继续本轮”补齐剩余任务，无需重新开始。"
+  },
   BOSS_SEARCH_SCOPE_CHANGED: {
     title: "搜索条件已经变化",
     impact: "本轮已停止，旧结果不会与新结果混合。",
@@ -41,10 +46,30 @@ const ERROR_GUIDANCE = Object.freeze({
     impact: "需要浏览器的操作没有开始，当前本地进度不受影响。",
     nextAction: "检查固定的搜索页和消息页，再重新检查 BOSS 工作区。"
   },
+  WORKSPACE_DORMANT_PAGE_NOT_READY: {
+    title: "招聘平台页面还在恢复",
+    impact: "本次操作没有继续，已保存的岗位和进度仍然保留。",
+    nextAction: "稍后重新检查工作区；OfferGo 会核对原页面，不会重复创建页面。"
+  },
+  BOSS_OPERATOR_TABS_CHANGED: {
+    title: "BOSS 消息页面发生了变化",
+    impact: "本轮已停止继续操作，已读取的岗位资料和待办仍然保留。",
+    nextAction: "返回本轮查看进度；继续前 OfferGo 会重新核对浏览器页面。"
+  },
   MODEL_CONFIGURATION_REQUIRED: {
     title: "批量筛选模型还没有准备好",
     impact: "本轮没有继续分析，已保存进度仍然保留。",
     nextAction: "前往“模型与设置”完成连接测试后再继续。"
+  },
+  WORKFLOW_MODEL_RECHECK_REQUIRED: {
+    title: "继续前需要重新测试模型连接",
+    impact: "本轮仍然暂停，已经读取的岗位和分析进度都已保留。",
+    nextAction: "点击“模型与设置”，测试批量筛选模型连接；测试通过后回到这里点击“继续本轮”。"
+  },
+  MODEL_QUOTA_EXHAUSTED: {
+    title: "模型账户余额或额度不足",
+    impact: "本轮已暂停分析，已读取的岗位、已完成的分析和剩余任务都已保留。",
+    nextAction: "恢复模型账户额度，或到“模型与设置”换用可用模型并测试连接，然后返回原页面继续分析。"
   },
   BOSS_LOGIN_REQUIRED: {
     title: "BOSS 登录已经失效",

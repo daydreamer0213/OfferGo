@@ -546,7 +546,7 @@ async function resumedBatchClaimsOnlyPendingSmoke() {
     const scenario = seedWorkflow(db, {
       localDay: "2026-08-31",
       analyses: [
-        { semanticStatus: "complete", decisionSource: "model" },
+        { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" },
         { semanticStatus: "rule_only", decisionSource: "local_rules" },
         { semanticStatus: "pending", decisionSource: "analysis_pending" },
         { semanticStatus: "failed", decisionSource: "analysis_pending" }
@@ -978,7 +978,7 @@ function analyzedJob(job) {
       semanticStatus: "complete",
       decisionSource: "model",
       recommendation: "apply",
-      revision: "test-rev",
+      revision: { fixture: 'test-rev', pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       note: "ok"
     }
   };

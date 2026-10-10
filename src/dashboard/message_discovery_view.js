@@ -84,7 +84,8 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
   const resultPending = (result) => Boolean((result.drafts || []).some((draft) => Number(draft?.id) > 0)
     || (result.manualActions || []).length || result.missingFactKey || result.messageIntent === "manual_review");
   const allResults = status.results.filter((result) => result?.messageIntent !== "follow_up"
-    && result?.contextComplete === true);
+    && (result?.contextComplete === true || result?.legacyActionExpired === true
+      || Boolean(result?.legacyScheduledAt)));
   // Keep every durable result in the DOM so the unified inbox can preserve the
   // selected conversation without a server round trip.
   const displayResults = allResults;
@@ -143,7 +144,7 @@ function renderMessageDiscoveryPage({ db, searchParams, controller, replySendCon
       escapeHtml,
       escapeAttr,
       messageActions,
-      allowActions: !expired
+      allowActions: !expired && result.contextComplete === true
     });
     const inboundSection = timelineSection || (inboundMessages.length
       ? `<section class="message-inbound"><h3>HR 消息原文</h3>${inboundMessages.map((message) => `<p class="line">${escapeHtml(message.text)}</p>`).join("")}</section>`

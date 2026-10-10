@@ -50,7 +50,7 @@ process.once('beforeExit', () => {
       profileId: owner.profileId, searchPlanId: owner.planId
     });
     db.prepare("UPDATE jobs SET batch_id = ?, analysis_json = ? WHERE id = ?")
-      .run(unsuitableBatchId, JSON.stringify({ semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }), unsuitable.jobId);
+      .run(unsuitableBatchId, JSON.stringify({ semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "not_recommended", recommendationSchemaVersion: 2 }), unsuitable.jobId);
     assert.throws(
       () => service.confirmBatch({ profileId: owner.profileId,
         items: [{ draftId: unsuitable.draft.id, revision: unsuitable.draft.revision }] }),

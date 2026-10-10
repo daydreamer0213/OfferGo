@@ -655,7 +655,10 @@ function createDashboardServer({
   const resolveSerializedAcquisitionContext = (input) =>
     runBrowserRead(() => acquisitionContextResolver(input));
   const resolveSerializedInheritedPreview = (input) =>
-    runBrowserRead(() => inheritedPreviewResolver(input));
+    runBrowserRead(async () => {
+      await ensureManagedWorkspaceReady('search_conditions_preview', input.site || 'boss');
+      return inheritedPreviewResolver(input);
+    });
   const resolveSerializedCurrentSearchContext = (input) =>
     runBrowserRead(() => input.site === 'zhaopin' ? resolveLiveZhaopinContext({ ...input, requireSaved: false, browserFactory }) : currentSearchContextResolver(input));
   const assertBrowserRuntimeReady = () => {
@@ -1466,7 +1469,10 @@ function createDashboardServer({
           logger,
           requestId,
           inheritedPreviewResolver: site === 'zhaopin'
-            ? (input) => runBrowserRead(() => resolveLiveZhaopinContext({ ...input, requireSaved: false, browserFactory }))
+            ? (input) => runBrowserRead(async () => {
+              await ensureManagedWorkspaceReady('search_conditions_preview', site);
+              return resolveLiveZhaopinContext({ ...input, requireSaved: false, browserFactory });
+            })
             : resolveSerializedInheritedPreview,
           browserAuthority: authority,
           assertBrowserRuntimeReady
@@ -1768,9 +1774,14 @@ async function handleResumePreview(req, res, { root, dataRoot = root, logger, re
 
 async function handleJobAnalysisRetry(req, res, { db, root, modelConfig, modelReady, logger, requestId, bulk = false, analysisRetryRunnerFactory = null }) {
   let planId = 0;
+  let queueContext = "";
   try {
     const params = parseBody(await readBody(req), req.headers["content-type"] || "");
     planId = Number(params.planId);
+    const context = new URLSearchParams();
+    if (["boss", "zhaopin", "all"].includes(params.site)) context.set("site", params.site);
+    if (["new", "repeated", "backlog"].includes(params.scope)) context.set("scope", params.scope);
+    queueContext = context.size ? `&${context}` : "";
     const result = await (bulk ? retryPendingJobAnalyses : retryOneJobAnalysis)({
       db,
       input: params,
@@ -1793,11 +1804,11 @@ async function handleJobAnalysisRetry(req, res, { db, root, modelConfig, modelRe
       error.code = analysis.errorCode || "MODEL_ANALYSIS_FAILED";
       throw error;
     }
-    redirect(res, `/queue?planId=${planId}${result.failed || result.sourcePending ? "&pool=analysis_pending" : ""}`);
+    redirect(res, `/queue?planId=${planId}${queueContext}${result.failed || result.sourcePending ? "&pool=analysis_pending" : ""}`);
   } catch (error) {
     respondUiError(res, error, modelSettingsBack(
       error,
-      planId ? `/queue?planId=${planId}&pool=analysis_pending` : "/"
+      planId ? `/queue?planId=${planId}${queueContext}&pool=analysis_pending` : "/"
     ), { logger, requestId, event: "job_analysis_retry_failed", fallbackCode: "JOB_ANALYSIS_RETRY_FAILED" });
   }
 }
@@ -2470,6 +2481,7 @@ function buildWorkflowDashboardState(
       .map((item) => String(item.word || item)));
     keywordStats = new Map();
     for (const job of listDecisionPool(db, { planId: planRecord.id, site })) {
+      if (job.analysis?.semanticStatus === 'stale') continue;
       const word = String(job.keyword || "").trim();
       if (!word) continue;
       const stats = keywordStats.get(word) || {
@@ -5705,11 +5717,12 @@ function renderErrorPage(message, back, { code = "", requestId = "", site = "bos
       nextAction: "请返回上一页，按页面提示重新进入。"
     };
   const diagnostic = code ? `<details class="error-technical"><summary>技术信息</summary><p>错误编号：${escapeHtml(code)}${requestId ? ` · 请求编号：${escapeHtml(requestId)}` : ""}</p>${message ? `<p>${escapeHtml(message)}</p>` : ""}<p class="hint">可在“诊断”页面查看对应日志。</p></details>` : "";
-  return renderPage(issue.title, `<main><nav>${navLinks({})}</nav><h1>${escapeHtml(issue.title)}</h1><section class="panel"><p class="risk-text">${escapeHtml(issue.impact)}</p><p>${escapeHtml(issue.nextAction)}</p>${diagnostic}<p><a href="${escapeAttr(back)}">返回</a></p></section></main>`);
+  const backLabel = String(back || "").startsWith("/settings#model-profile-") ? "前往模型与设置" : "返回";
+  return renderPage(issue.title, `<main><nav>${navLinks({})}</nav><h1>${escapeHtml(issue.title)}</h1><section class="panel"><p class="risk-text">${escapeHtml(issue.impact)}</p><p>${escapeHtml(issue.nextAction)}</p>${diagnostic}<p><a href="${escapeAttr(back)}">${backLabel}</a></p></section></main>`);
 }
 
 function modelSettingsBack(error, fallback) {
-  return error?.code === "MODEL_CONFIGURATION_REQUIRED"
+  return ["MODEL_CONFIGURATION_REQUIRED", "MODEL_QUOTA_EXHAUSTED"].includes(error?.code)
     ? "/settings#model-profile-batch_screening"
     : fallback;
 }
@@ -6184,7 +6197,8 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
       : progressPools.has(pool)
         ? "进展操作只更新本地记录；回复、投递、面试确认仍由你在平台上手动完成。"
         : "查看本轮找到的岗位，也可切换到历史未处理岗位。",
-    queue: { site: source, pool, counts, scope, scopeCounts, total: filtered.length, page, pageSize, totalPages, latestMainBatchId, profileId: plan.profileId },
+    queue: { site: source, pool, counts, scope, scopeCounts, total: filtered.length, page, pageSize, totalPages, latestMainBatchId, profileId: plan.profileId,
+      analysisRetryJobIds: pool === "analysis_pending" ? filtered.slice(0, PRODUCT_POLICY.operations.modelAnalysis.maxRetryJobs).map(job => job.id) : [] },
     outcomeAnalyticsPanel: site === 'zhaopin' ? '' : outcomeAnalyticsPanel
   });
 }
@@ -6432,8 +6446,12 @@ function renderCompactDashboard(data) {
   const exportControls = queue ? "" : renderCompactJobExportControls(filters);
   const exportScript = queue ? "" : `(()=>{const boxes=[...document.querySelectorAll('[data-job-export]')];const button=document.querySelector('[data-job-export-submit]');const refresh=()=>{if(button)button.disabled=!boxes.some((box)=>box.checked)};boxes.forEach((box)=>box.addEventListener('change',refresh));refresh()})();`;
   const analysisRetry = queue?.pool === "analysis_pending" && Number(queue.counts.analysis_pending || 0) > 0
-    ? `<section class="panel"><form method="post" action="/api/analyze-jobs"><input type="hidden" name="planId" value="${escapeAttr(filters.planId)}"><button class="apply">批量重试全部待分析岗位（${queue.counts.analysis_pending}）</button></form><p class="line">仅使用已保存的岗位详情，模型并发固定为 ${PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency}，不会访问招聘网站。</p></section>`
+    ? `<section class="panel"><form method="post" action="/api/analyze-jobs"><input type="hidden" name="planId" value="${escapeAttr(filters.planId)}"><input type="hidden" name="jobIds" value="${escapeAttr(queue.analysisRetryJobIds.join(','))}"><input type="hidden" name="site" value="${escapeAttr(queue.site)}"><input type="hidden" name="scope" value="${escapeAttr(queue.scope)}"><button class="apply">${queue.analysisRetryJobIds.length === queue.counts.analysis_pending ? '批量重试全部待分析岗位' : '批量重试待分析岗位'}（${queue.analysisRetryJobIds.length}）</button></form><p class="line">用已保存的岗位信息更新匹配结果。${queue.analysisRetryJobIds.length < queue.counts.analysis_pending ? `本次处理 ${queue.analysisRetryJobIds.length} 个，剩余岗位保留，完成后可继续。` : ''}</p></section>`
     : "";
+  const savedAnalysisPending = !queue && filters.site === "zhaopin"
+    ? jobs.filter(job => !job.archived && job.decisionBucket === "analysis_pending" && compactAwaitingAction(job)).length : 0;
+  const savedAnalysisRecovery = savedAnalysisPending
+    ? `<section class="panel"><p>当前列表还有 ${savedAnalysisPending} 个岗位分析尚未完成，已读取的岗位资料仍然保留。</p><a class="button-link" href="/queue?planId=${escapeAttr(filters.planId)}&amp;site=zhaopin&amp;pool=analysis_pending">继续分析已有岗位</a><p class="line">使用已保存的岗位详情更新匹配结果，无需再到平台重新找一轮。</p></section>` : "";
   return renderLegacyDashboardPage({ title, currentPath, todayPath, planId: filters.planId, stage: "岗位", body: `<style>
 .offergo-jobs{max-width:1100px;margin:0 auto;padding:22px 18px 48px;color:var(--rf-ink)}
 .offergo-jobs a{color:var(--rf-teal)}.offergo-jobs h1{font-size:24px;margin:0 0 7px}.offergo-jobs .hint{color:var(--rf-ink-soft);margin:0 0 16px}
@@ -6464,8 +6482,8 @@ function renderCompactDashboard(data) {
 .offergo-jobs textarea{width:100%;min-height:52px;margin-top:8px}.offergo-jobs .job-statistics{margin-top:20px;padding:12px 14px;border:1px solid var(--rf-rule);border-radius:8px}
 @media(max-width:760px){.offergo-jobs .filters{grid-template-columns:1fr 1fr}.offergo-jobs .job-top{display:block}.offergo-jobs .job-side{justify-items:start;margin-top:8px}.offergo-jobs .decision{margin-top:7px}}</style><main id="main-content" class="offergo-jobs">
 <h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(hint)}</p>
-  ${queue ? renderCompactPoolTabs(queue, filters.planId, queue.profileId) : renderCompactFilters(filters)}${exportControls}${analysisRetry}
-<section class="job-ledger" aria-label="岗位记录">${jobs.map((job) => renderCompactJob(job, { ...filters, exportEnabled: !queue && filters.exportEnabled })).join("") || "<section class=\"panel\">这个分组目前没有岗位。</section>"}</section>${queue ? renderCompactPager(queue, filters.planId) : ""}${outcomeAnalyticsPanel || latestBatchId ? `<details class="job-statistics"><summary>${outcomeAnalyticsPanel ? "查看岗位与沟通统计" : "查看运行详情"}</summary>${outcomeAnalyticsPanel}${latestBatchId ? `<p class="hint">本轮任务编号：#${escapeHtml(latestBatchId)}</p>` : ""}</details>` : ""}</main><script>async function copyGreeting(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}${exportScript}</script>` });
+  ${queue ? renderCompactPoolTabs(queue, filters.planId, queue.profileId) : renderCompactFilters(filters)}${exportControls}${analysisRetry}${savedAnalysisRecovery}
+<section class="job-ledger" aria-label="岗位记录">${jobs.map((job) => renderCompactJob(job, { ...filters, exportEnabled: !queue && filters.exportEnabled })).join("") || "<section class=\"panel\">这个分组目前没有岗位。</section>"}</section>${queue ? renderCompactPager(queue, filters.planId) : ""}${outcomeAnalyticsPanel || latestBatchId ? `<details class="job-statistics"><summary>${outcomeAnalyticsPanel ? "查看岗位与沟通统计" : "查看运行详情"}</summary>${outcomeAnalyticsPanel}${latestBatchId ? `<p class="hint">本轮任务编号：#${escapeHtml(latestBatchId)}</p>` : ""}</details>` : ""}</main><script>async function copyGreeting(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}${exportScript}</script><script src="/assets/workflow.js"></script>` });
 }
 
 function renderCompactJobExportControls(filters) {
@@ -6566,11 +6584,12 @@ function compactJobNarrative(job, { salaryLabel, risk }) {
   const company = String(job.clientCompany || job.company || "这家公司").trim();
   const businessScenario = meaningfulJobContext(analysis.businessScenario);
   const industryContext = meaningfulJobContext(analysis.industryContext);
+  const roleSentence = role.replace(/[。.!！?？；;\s]+$/u, "");
   const companyOpportunity = businessScenario
-    ? `${company}的岗位资料显示业务场景与${businessScenario}相关；这个机会的核心是${role}。`
+    ? `${company}的岗位资料显示业务场景与${businessScenario}相关；这个机会的核心是${roleSentence}。`
     : industryContext
-      ? `${company}所在方向为${industryContext}；这个机会的核心是${role}。`
-      : `${company}的具体业务在当前岗位资料中没有展开；可以确认的机会重点是${role}。`;
+      ? `${company}所在方向为${industryContext}；这个机会的核心是${roleSentence}。`
+      : `${company}的具体业务在当前岗位资料中没有展开；可以确认的机会重点是${roleSentence}。`;
   const fit = evidenceFitReasons(analysis)
     .map((item) => String(item || "").trim())
     .filter(Boolean)
@@ -6684,7 +6703,14 @@ function compactSeenLabel(job, latestMainBatchId) {
 
 function compactDateTime(value) {
   const text = String(value || "");
-  return text ? text.replace("T", " ").slice(0, 16) : "未知";
+  if (!text) return "未知";
+  const date = new Date(text);
+  if (!Number.isFinite(date.getTime())) return "未知";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 function compactDecisionLabel(bucket) {

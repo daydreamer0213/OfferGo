@@ -372,7 +372,7 @@ function createFixture() {
   ) VALUES ('boss', 'learning-job', 'AI 应用专员', '测试公司', '15-25K', ?, ?, ?, ?)`)
     .run(
       "负责完整 AI 应用落地流程、业务需求梳理、方案实现、质量验证和跨团队协作，并持续跟踪上线效果与改进建议。".repeat(3),
-      JSON.stringify({ semanticStatus: "complete", provider: "fixture-model", recommendation: "consider" }),
+      JSON.stringify({ semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, provider: "fixture-model", recommendation: "consider" }),
       now,
       now
     ).lastInsertRowid);

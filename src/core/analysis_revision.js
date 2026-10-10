@@ -4,7 +4,7 @@ const { normalizeThinkingMode, normalizeReasoningEffort } = require("./model_set
 
 const PIPELINE_VERSIONS = Object.freeze({
   understandJob: "job-understanding-v21-conditions",
-  matchJob: "match-decision-v51-grounded-conditions",
+  matchJob: "match-decision-v55-grounded-conditions",
   decisionRules: "four-tier-weighted-v4.9-screening-v2-effect-conditions-v1",
   communication: "communication-v3-candidate-speaker"
 });
@@ -135,11 +135,21 @@ function sortValue(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
 }
 
+function projectAnalysisForCurrentPipeline(analysis = {}) {
+  if (analysis.semanticStatus !== 'complete') return analysis;
+  // A history read has no current profile/plan. Compare only known pipeline
+  // revisions, preserving the original recommendation and stored JSON.
+  const reasons = analysisStaleReasons(analysis, analysis.revision || {});
+  return reasons.length ? { ...analysis, semanticStatus: 'stale',
+    decisionStatus: 'needs_retry', staleReasons: reasons } : analysis;
+}
+
 module.exports = {
   PIPELINE_VERSIONS,
   stableHash,
   modelInferenceVersion,
   runtimeAnalysisContext,
   buildAnalysisRevision,
-  analysisStaleReasons
+  analysisStaleReasons,
+  projectAnalysisForCurrentPipeline
 };

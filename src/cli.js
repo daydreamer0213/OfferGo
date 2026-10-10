@@ -1421,6 +1421,12 @@ async function scan(
     assertScanActive(signal);
     try {
       const jobs = (result.jobs || []).map((raw) => checkpointScannedJob(raw, configs));
+      const savedJobs = new Map(listReportJobs(db, { batchId, limit: 10000 }).map(job => [job.sourceId, job]));
+      for (const job of jobs) savedJobs.set(job.sourceId, job);
+      if (result.status === 'completed' && remainingTargetKeys(executionSnapshot, [result],
+        [...savedJobs.values()]).includes(result.targetKey)) {
+        result = { ...result, status: 'partial' };
+      }
       const now = new Date().toISOString();
       checkpointScanTarget(db, {
         runId: execution.runId,
@@ -1611,7 +1617,7 @@ async function scan(
     jobsToAnalyze = [...analysisCandidates.values()];
   }
   const targetSummary = executionSnapshot
-    ? summarizeResumePlan(executionSnapshot, listLatestScanTargetResults(db, batchId))
+    ? summarizeResumePlan(executionSnapshot, listLatestScanTargetResults(db, batchId), listReportJobs(db, { batchId, limit: 10000 }))
     : null;
   const finalStatus = resolveScanTerminalStatus({ targetSummary, scanSummary });
   const defaultStopCode = finalStatus === "partial"
@@ -1690,7 +1696,7 @@ async function scan(
         id: workflowRun.id,
         status: "interrupted",
         inventoryCount,
-        ...(site === 'zhaopin' ? { resumePhase: 'scanning' } : {}),
+        resumePhase: 'scanning',
         metrics,
         errorCode: scanSummary?.fatalErrorCode || defaultStopCode || "SCAN_INCOMPLETE",
         errorMessage: scanSummary?.fatalErrorMessage || "scan did not complete all planned targets"
@@ -2502,10 +2508,11 @@ function resolveResumeBatch(db, { resumeBatchId, site, planId, executionSnapshot
   });
   assertScanSnapshotCompatible(storedSnapshot, executionSnapshot);
   const latestResults = listLatestScanTargetResults(db, resumeBatchId);
+  const savedJobs = listReportJobs(db, { batchId: resumeBatchId, limit: 10000 });
   return {
     batchId: resumeBatchId,
-    targetKeys: remainingTargetKeys(storedSnapshot, latestResults),
-    progress: summarizeResumePlan(storedSnapshot, latestResults)
+    targetKeys: remainingTargetKeys(storedSnapshot, latestResults, savedJobs),
+    progress: summarizeResumePlan(storedSnapshot, latestResults, savedJobs)
   };
 }
 

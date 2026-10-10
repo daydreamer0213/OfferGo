@@ -103,7 +103,7 @@ function seedScope(db, suffix, definitions) {
     url: `https://example.test/${definition.sourceId}`,
     description: "负责内容运营、增长实验和复盘。".repeat(10),
     analysis: {
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: definition.recommendation,
       recommendationSchemaVersion: 2,
       businessScenario: "内容增长",

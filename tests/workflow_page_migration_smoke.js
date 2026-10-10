@@ -159,6 +159,14 @@ function assertRendererContracts(vm) {
   assertSinglePrimary(paused, "paused", "继续本轮");
   assert.match(paused, /data-workflow-primary="true"[^>]*>继续本轮/);
   assertPrimaryBeforeDetails(paused, "paused");
+  const quotaPaused = renderWorkflowPage(buildWorkflowViewModel(fixture({
+    workflow: { status: 'paused', errorCode: 'MODEL_QUOTA_EXHAUSTED' },
+    progressSnapshot: validSnapshot('paused')
+  })));
+  assert.match(quotaPaused, /data-pause-reason[^>]*>模型账户余额或额度不足/);
+  assert.match(quotaPaused, /已读取的岗位、已完成的分析和剩余任务都已保留/);
+  assert.match(quotaPaused, /恢复模型账户额度/);
+  assert.match(quotaPaused, /data-overview-eta[^>]*>恢复模型连接后再估算剩余时间/);
 
   const pauseRequested = renderWorkflowPage(buildWorkflowViewModel(fixture({
     progressSnapshot: {
@@ -209,6 +217,20 @@ function assertRendererContracts(vm) {
   const completed = renderWorkflowPage(buildWorkflowViewModel(fixture({ workflow: { status: "completed", successfulCount: 35 }, progressSnapshot: null })));
   assertSinglePrimary(completed, "completed", "返回今日任务");
   assert.match(completed, /本轮已完成/);
+  const failedAnalysis = validSnapshot('completed');
+  failedAnalysis.progress.analysis.pending = 0;
+  failedAnalysis.progress.analysis.succeeded = 0;
+  failedAnalysis.progress.analysis.failed = 2;
+  failedAnalysis.progress.analysis.unresolvedFailed = 2;
+  failedAnalysis.progress.tracks.analysis = { value: 2, max: 2, indeterminate: false };
+  const collectedVm = buildWorkflowViewModel(fixture({
+    workflow: { site: 'zhaopin', status: 'completed' }, progressSnapshot: failedAnalysis
+  }));
+  assert.equal(collectedVm.progress.tracks.analysis.value, 0, 'failed tasks cannot appear as successfully analyzed');
+  const collectedOnly = renderWorkflowPage(collectedVm);
+  assert.match(collectedOnly, /岗位已采集，分析待完成/);
+  assert.match(collectedOnly, /还有 2 个岗位分析尚未完成/);
+  assert.doesNotMatch(collectedOnly, /完整 JD 和分析已保存/);
 
   const interrupted = renderWorkflowPage(buildWorkflowViewModel(fixture({ workflow: { status: "interrupted", communicationBatchId: 41, errorCode: "SAFE_STOP" }, progressSnapshot: progressSnapshotFor("interrupted") })));
   assertSinglePrimary(interrupted, "interrupted", "检查沟通中断项");
@@ -285,7 +307,7 @@ async function assertClientContracts(vm) {
     console.log("workflow_page_migration_smoke browser checks skipped: Playwright unavailable in NODE_PATH");
     return;
   }
-  let responses = [liveScanSnapshot(2, "partial"), liveScanSnapshot(3, "completed"), { malformed: true }];
+  let response = liveScanSnapshot(2, "partial");
   let requests = 0;
   let inFlight = 0;
   let maxInFlight = 0;
@@ -298,7 +320,7 @@ async function assertClientContracts(vm) {
       maxInFlight = Math.max(maxInFlight, inFlight);
       await delay(80);
       inFlight -= 1;
-      return json(res, responses.shift() || validSnapshot("scanning"));
+      return json(res, response);
     }
     if (req.url === "/workflow") return serve(res, "text/html", workflowDocument(vm));
     res.writeHead(404); res.end();
@@ -320,9 +342,10 @@ async function assertClientContracts(vm) {
     await assertNoViewportPrimary(page);
     assert.strictEqual(await page.locator('[data-action="pause"]').isVisible(), true, "pause must remain available while scanning");
     assert.match(await page.locator('[data-action="pause"]').getAttribute("class"), /\bsecondary\b/, "pause must use the secondary treatment");
-    await page.waitForFunction(() => document.querySelector('[data-overview-acquisition]')?.textContent === "搜索目标 2 / 3 · 已获取 12 个岗位", null, { timeout: 4000 });
+    await page.waitForFunction(() => document.querySelector('[data-overview-acquisition]')?.textContent === "搜索目标 2 / 3 · 已获取 12 个岗位", null, { timeout: 8000 });
     assert.strictEqual(await page.locator('[data-overview-acquisition]').textContent(), "搜索目标 2 / 3 · 已获取 12 个岗位", "live overview must use completed targets while a partial target remains");
-    await page.waitForFunction(() => document.querySelector('[data-overview-acquisition]')?.textContent === "搜索目标 3 / 3 · 已获取 12 个岗位", null, { timeout: 4000 });
+    response = liveScanSnapshot(3, "completed");
+    await page.waitForFunction(() => document.querySelector('[data-overview-acquisition]')?.textContent === "搜索目标 3 / 3 · 已获取 12 个岗位", null, { timeout: 8000 });
     assert.strictEqual(await page.locator('[data-overview-acquisition]').textContent(), "搜索目标 3 / 3 · 已获取 12 个岗位", "live overview must clear the target remainder when the newest result completes it");
     const state = async () => page.evaluate(() => {
       const preview = document.querySelector('[data-action="stop-preview"]'); const confirm = document.querySelector('[data-stop-confirmation]');
@@ -334,12 +357,16 @@ async function assertClientContracts(vm) {
     try { assert.strictEqual(await page.locator('[data-action="stop-confirm"]').isVisible(), true, "stop preview must reveal the confirmation control"); } catch (error) { process.stderr.write(`workflow diagnostic: ${JSON.stringify({ before, after, diagnostics })}\n`); throw error; }
     await page.locator('[data-action="stop-cancel"]').click();
     assert.strictEqual(await page.locator("[data-stop-confirmation]").isHidden(), true, "stop cancellation must hide confirmation");
+    response = { malformed: true };
     await page.waitForFunction(() => {
       const error = document.querySelector("[data-workflow-error]");
       return Boolean(error && !error.hidden);
-    }, null, { timeout: 4000 });
+    }, null, { timeout: 8000 });
     assert.strictEqual(await page.locator("[data-workflow-error]").isVisible(), true, "malformed polling data must fail closed");
     assert.strictEqual(await page.locator('[data-action="pause"]').isDisabled(), true, "failed polling must disable control submission");
+    response = validSnapshot('scanning');
+    await page.waitForFunction(() => !document.querySelector('[data-action="pause"]')?.disabled
+      && document.querySelector('[data-workflow-error]')?.hidden, null, { timeout: 8000 });
     assert.ok(maxInFlight <= 1, "polling requests must remain serialized");
     await waitFor(() => requests >= 3, 5000);
     assert.ok(requests >= 3, "polling must recover after a malformed response");
@@ -348,7 +375,7 @@ async function assertClientContracts(vm) {
 
     const reviewVm = buildWorkflowViewModel(fixture({ workflow: { status: "review_required" }, progressSnapshot: null, reviewCandidates: [{ id: 1, url: "https://example.test/one", title: "一", company: "甲", analysis: {}, workflowTier: "primary", defaultChecked: true }, { id: 2, url: "https://example.test/two", title: "二", company: "乙", analysis: {}, workflowTier: "apply", defaultChecked: false }], quota: { remaining: 1 } }));
     const pausedVm = buildWorkflowViewModel(fixture({
-      workflow: { status: "paused", errorCode: "SAFE_PAUSE" },
+      workflow: { status: "paused", errorCode: "MODEL_QUOTA_EXHAUSTED" },
       progressSnapshot: validSnapshot("paused")
     }));
     const interruptedVm = buildWorkflowViewModel(fixture({ workflow: { status: "interrupted", communicationBatchId: 41, errorCode: "SAFE_STOP" }, progressSnapshot: null }));
@@ -366,6 +393,7 @@ async function assertClientContracts(vm) {
     let transitionPageLoads = 0;
     let transitionStatusRequests = 0;
     let pauseTransitionLoads = 0;
+    let quotaPollingRequests = 0;
     const reviewPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
     server.removeAllListeners("request");
     server.on("request", (req, res) => {
@@ -381,6 +409,7 @@ async function assertClientContracts(vm) {
       if (req.url === "/assets/workflow.js") return serve(res, "application/javascript", fs.readFileSync(asset));
       if (req.url === "/assets/roleflow.css") return serve(res, "text/css", fs.readFileSync(stylesheet));
       if (req.url?.startsWith("/api/workflow-status")) {
+        if (String(req.headers.referer || '').includes('/paused')) quotaPollingRequests += 1;
         if (String(req.headers.referer || "").includes("/pause-transition")) return json(res, validSnapshot("paused"));
         if (String(req.headers.referer || "").includes("/transition")) {
           transitionStatusRequests += 1;
@@ -443,6 +472,12 @@ async function assertClientContracts(vm) {
       const phasePage = await browser.newPage({ viewport: { width: 375, height: 812 } });
       await phasePage.goto(`${baseUrl}${url}`, { waitUntil: "networkidle" });
       if (url === "/paused") {
+        assert.equal(await waitFor(() => quotaPollingRequests > 0, 8000), true);
+        await delay(150);
+        assert.match(await phasePage.locator('[data-pause-reason]').innerText(), /模型账户余额或额度不足/,
+          'polling must retain the readable pause explanation');
+        assert.match(await phasePage.locator('[data-pause-reason]').innerText(), /恢复模型账户额度/);
+        assert.equal(await phasePage.locator('[data-overview-eta]').innerText(), '恢复模型连接后再估算剩余时间', 'polling must not promise a short completion time while the model is unavailable');
         const hierarchy = await phasePage.evaluate(() => {
           const primary = document.querySelector('[data-workflow-primary="true"]');
           const secondary = [...document.querySelectorAll('[data-control-group="paused"] .button-link')];

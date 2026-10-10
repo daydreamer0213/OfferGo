@@ -72,4 +72,87 @@ assert(markdown.includes("可投"));
 assert(!markdown.includes("|apply|"),
   "面向用户的报告必须显示中文四档，而不是内部枚举");
 
-console.log("four_tier_product_surface_smoke ok");
+persistedDecisionJourney().then(() => console.log("four_tier_product_surface_smoke ok")).catch(error => {
+  console.error(error.stack || error.message); process.exitCode = 1;
+});
+
+async function persistedDecisionJourney() {
+  const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+  const storage = require('../src/core/storage');
+  const { getJob } = require('../src/storage/job_store');
+  const { createJobAnalysisRunner } = require('../src/core/job_analysis');
+  const { runtimeAnalysisContext } = require('../src/core/analysis_revision');
+  const { isClearlyUnmatchedMessageJob } = require('../src/core/message_routing_policy');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'offergo-match-persistence-'));
+  const databasePath = path.join(folder, 'jobs.sqlite');
+  let db = storage.openDb(databasePath);
+  const saved = [];
+  try {
+    const version = db.prepare('PRAGMA user_version').get().user_version;
+    for (const [state, credential, expected] of [
+      ['conflict', [{ name: 'C1驾驶证', held: false }], 'not_recommended'],
+      ['unknown', [], 'caution'], ['satisfied', [{ name: 'C1驾驶证', held: true }], 'primary']
+    ]) {
+      const profile = { candidate: { name: `Synthetic ${state}`, targetTitles: ['查询开发工程师'] },
+        education: [{ degree: '本科' }], credentials: credential,
+        projects: [{ name: '查询系统', canSay: ['编写查询接口，并优化慢查询。'] }] };
+      const searchPlan = { name: 'Synthetic plan', cities: ['广州'], directions: ['查询开发工程师'],
+        keywords: [{ word: '查询开发工程师', priority: 'A' }] };
+      const candidate = storage.saveProfileAnalysis(db, { profile, searchPlan,
+        document: { originalFileName: `${state}.txt`, format: 'text', contentHash: state, text: '本科。编写查询接口，并优化慢查询。', diagnostics: {} } });
+      const batchId = storage.createBatch(db, 'boss', '查询开发工程师', 'synthetic persistence', {
+        profileId: candidate.profileId, searchPlanId: candidate.planId
+      });
+      const rawJob = { ...job(null), sourceId: `persistence-${state}`, title: '查询开发工程师', company: 'Synthetic Corp',
+        location: '广州', salary: '面议', experience: '不限', education: '本科', tags: [],
+        description: '必须持有C1驾驶证。负责查询接口开发；优化慢查询。'.repeat(8), detailRead: true, detailRequired: true };
+      const configs = { model: { provider: 'openai_compatible', providers: { openai_compatible: { model: 'synthetic' } } },
+        candidateProfile: profile, searchPlan, analysisContext: runtimeAnalysisContext(profile, searchPlan), scoring: {} };
+      let calls = 0;
+      const runner = createJobAnalysisRunner(configs, [], { db, analyzer: {
+        understandJob: async () => { calls++; return { industryContext: '合成验收', hiringTracks: [{ id: 'T1', label: '查询开发', roleSummary: '查询开发',
+          responsibilityEvidence: ['JD：负责查询接口开发', 'JD：优化慢查询'] }],
+        requirements: [{ label: '查询接口开发', trackIds: ['T1'], central: true, foundation: true, indispensable: false,
+          evidence: 'JD：负责查询接口开发' }], eligibility: [{ label: '必须持有C1驾驶证', evidence: 'JD：必须持有C1驾驶证',
+          trackIds: [], alternatives: [{ allOf: [{ kind: 'credential', operator: 'has', value: 'C1驾驶证' }] }] }], riskSignals: [] }; },
+        matchJob: async input => { calls++; const refs = [input.matchEvidence.entries.find(entry => entry.sourcePath === 'projects[0].canSay[0]').id];
+          return { selectedTrackId: 'T1', roleAlignment: 'aligned', roleResumeEvidence: ['简历：编写查询接口，并优化慢查询。'], roleGaps: [],
+            responsibilityMatches: ['D1', 'D2'].map(id => ({ id, state: 'matched', resumeEvidence: '简历：编写查询接口，并优化慢查询。', candidateEvidenceRefs: refs })),
+            matches: [{ id: 'R1', state: 'matched', resumeEvidence: '简历：编写查询接口，并优化慢查询。', candidateEvidenceRefs: refs }], eligibility: [] }; }
+      } });
+      const analysis = await runner(rawJob);
+      assert.equal(analysis.recommendation, expected, `${state}: ${analysis.error || analysis.fitReasons?.join('；')}`);
+      assert.equal(analysis.qualificationStatus, state);
+      assert.equal(calls, 2);
+      const jobId = storage.upsertJob(db, { ...rawJob, analysis }, batchId);
+      saved.push({ jobId, batchId, planId: candidate.planId, expected, state, analysis });
+    }
+    db.close(); db = storage.openDb(databasePath);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, version, '新判定不改变数据库版本');
+    for (const item of saved) {
+      const restored = getJob(db, item.jobId);
+      assert.deepEqual(restored.analysis.conditions, item.analysis.conditions);
+      assert.deepEqual(restored.analysis.conditionResults, item.analysis.conditionResults);
+      assert.deepEqual(restored.analysis.decisionReasons, item.analysis.decisionReasons);
+      assert.equal(storage.decisionBucket(restored), item.expected);
+      assert.equal(storage.listDecisionPool(db, { planId: item.planId })[0].decisionBucket, item.expected);
+      assert.equal(workflowEligibility(restored, { now: new Date().toISOString() }).eligible, item.expected === 'primary');
+      assert.equal(isClearlyUnmatchedMessageJob(restored), item.expected === 'not_recommended');
+    }
+    const old = saved.at(-1), original = getJob(db, old.jobId);
+    const historical = { ...original.analysis, revision: { ...original.analysis.revision,
+      pipelineVersions: { ...original.analysis.revision.pipelineVersions, matchJob: 'match-decision-v45-graduation-window' } } };
+    const historicalId = storage.upsertJob(db, { ...original, sourceId: 'historical-decision', analysis: historical }, old.batchId);
+    const before = db.prepare('SELECT analysis_json FROM jobs WHERE id = ?').get(historicalId).analysis_json;
+    const read = getJob(db, historicalId);
+    assert.equal(read.analysis.semanticStatus, 'stale', '旧匹配版本不能直接进入当前活动池');
+    assert.equal(read.analysis.recommendation, 'primary', '旧判断保留用于历史展示');
+    assert.equal(storage.decisionBucket(read), 'analysis_pending');
+    assert.equal(workflowEligibility(read, { now: new Date().toISOString() }).eligible, false);
+    assert.equal(db.prepare('SELECT analysis_json FROM jobs WHERE id = ?').get(historicalId).analysis_json, before, '读取不能改写历史 JSON');
+    const unversioned = { ...original.analysis }; delete unversioned.revision;
+    const unversionedId = storage.upsertJob(db, { ...original, sourceId: 'unversioned-decision', analysis: unversioned }, old.batchId);
+    assert.equal(getJob(db, unversionedId).analysis.semanticStatus, 'stale', '无版本历史分析不能直接进入当前活动池');
+    assert.equal(getJob(db, unversionedId).analysis.recommendation, 'primary');
+  } finally { db.close(); fs.rmSync(folder, { recursive: true, force: true }); }
+}

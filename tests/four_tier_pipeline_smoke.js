@@ -234,7 +234,7 @@ assert.deepEqual(compact.responsibilityMatches, [{
   resumeEvidence: "Resume: primary delivery evidence"
 }], "compact analysis must preserve responsibility evidence for the production decision path");
 
-assert.equal(PIPELINE_VERSIONS.matchJob, "match-decision-v51-grounded-conditions");
+assert.equal(PIPELINE_VERSIONS.matchJob, "match-decision-v55-grounded-conditions");
 assert.equal(PIPELINE_VERSIONS.decisionRules, "four-tier-weighted-v4.9-screening-v2-effect-conditions-v1");
 
 const capabilityConditions = [

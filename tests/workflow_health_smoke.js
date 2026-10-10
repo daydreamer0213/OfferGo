@@ -38,7 +38,7 @@ const snapshot = {
       applicationStatus: "pending",
       reviewAt: "",
       qualityTags: [],
-      analysis: { semanticStatus: "complete", recommendation: "apply" }
+      analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
     },
     {
       id: 12,
@@ -119,7 +119,7 @@ const healthy = buildWorkflowHealthReport({
     applicationStatus: "pending",
     reviewAt: "",
     qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "apply" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
   }],
   workflowRuns: [],
   candidateEvents: [],
@@ -171,7 +171,7 @@ const duplicateOnly = buildWorkflowHealthReport({
     applicationStatus: "pending",
     reviewAt: "",
     qualityTags: ["possible_duplicate"],
-    analysis: { semanticStatus: "complete", recommendation: "apply" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
   }],
   workflowRuns: [],
   candidateEvents: [],
@@ -195,7 +195,7 @@ const displayTruncation = buildWorkflowHealthReport({
     applicationStatus: "pending",
     reviewAt: "",
     qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "apply" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
   })),
   workflowRuns: [],
   candidateEvents: Array.from({ length: 21 }, (_, index) => ({
@@ -472,7 +472,7 @@ function resolvedFailureHealthRegression(database, saved) {
   upsertJob(database, {
     ...originalJob,
     analysis: {
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionStatus: "decided",
       decisionSource: "model",
       recommendation: "apply"

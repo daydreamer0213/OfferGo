@@ -63,6 +63,36 @@ function browserFixture(initialTabs, created = [], { onListTabs = null } = {}) {
   assert.deepStrictEqual(sleeping.state.createCalls, [], "workspace recovery must reuse dormant tabs rather than duplicate them");
   assert.deepStrictEqual(sleeping.state.frontCalls, []);
 
+  let restoredListing = 0;
+  let restorationStarted = false;
+  const delayedSleeping = browserFixture([dashboard, sleepingTabs[0]], [
+    { id: 'duplicate-chat', windowId: 7, active: false }
+  ], { onListTabs(state) {
+    if (restorationStarted && ++restoredListing === 3) state.tabs.push(sleepingTabs[1]);
+  } });
+  delayedSleeping.restoreDormantTabs = async () => {
+    restorationStarted = true;
+    return [sleepingTabs[1].id];
+  };
+  const restorationWaits = [];
+  const delayedResult = await preparePlatformWorkspaceTabs({ browser: delayedSleeping,
+    dashboardUrl: dashboard.url, enabledPlatforms: ['boss'],
+    settleDelay: async ms => restorationWaits.push(ms) });
+  assert.equal(delayedResult.communicationTabId, sleepingTabs[1].id,
+    'a restored message page must settle before deciding it is missing');
+  assert.deepStrictEqual(delayedSleeping.state.createCalls, [], 'restoration must not create a replacement message page');
+  assert.deepStrictEqual(delayedSleeping.state.frontCalls, []);
+  assert(restorationWaits.length > 0);
+
+  const unsettledSleeping = browserFixture([dashboard, sleepingTabs[0]], [
+    { id: 'unconfirmed-replacement', windowId: 7, active: false }
+  ]);
+  unsettledSleeping.restoreDormantTabs = async () => [sleepingTabs[1].id];
+  await assert.rejects(() => preparePlatformWorkspaceTabs({ browser: unsettledSleeping,
+    dashboardUrl: dashboard.url, enabledPlatforms: ['boss'], settleDelay: async () => {} }),
+  error => error.code === 'WORKSPACE_DORMANT_PAGE_NOT_READY');
+  assert.deepStrictEqual(unsettledSleeping.state.createCalls, [], 'an unconfirmed restore must stay pending rather than duplicate tabs');
+
   const sleepingFiltered = browserFixture([dashboard,
     { id: "zhaopin-default-search", url: "https://www.zhaopin.com/jobs/?pageMode=search", windowId: 7, active: false },
     { id: "zhaopin-chat", url: "https://i.zhaopin.com/im", windowId: 7, active: false }

@@ -555,7 +555,11 @@ async function assertCommunicationClient() {
   assert.match(plan.body, new RegExp(`/communication/new\\?planId=${fixture.planId}`));
   assert.match(queue.body, /批量沟通清单/);
   assert.match(queue.body, /薪资与目标贴合/);
+  db.prepare("UPDATE job_observations SET seen_at = ? WHERE job_id = ?")
+    .run("2026-10-09T23:15:25.000Z", fixture.eligibilityReviewId);
   const eligibilityQueue = await getText(baseUrl, `/queue?planId=${fixture.planId}&pool=primary`);
+  assert.match(eligibilityQueue.body, /首次 2026-10-10 07:15 · 最近 2026-10-10 07:15/,
+    "job discovery timestamps must show China local time, including midnight rollover");
   assert.match(eligibilityQueue.body, /资格条件待确认/);
   assert.doesNotMatch(eligibilityQueue.body, />eligibility_review</);
   assert.match(plan.body, /沟通清单与记录/);
@@ -1247,7 +1251,7 @@ function job(sourceId, overrides = {}) {
 }
 
 function completeAnalysis(recommendation = "primary") {
-  return { semanticStatus: "complete", recommendation, recommendationSchemaVersion: 2, fitLevel: recommendation === "primary" ? "fit" : "mostly_fit", confidence: 0.9, evidence: { jd: ["Python"], resume: ["Python"] } };
+  return { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation, recommendationSchemaVersion: 2, fitLevel: recommendation === "primary" ? "fit" : "mostly_fit", confidence: 0.9, evidence: { jd: ["Python"], resume: ["Python"] } };
 }
 
 function clickAudit(item) {

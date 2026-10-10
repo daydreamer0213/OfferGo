@@ -551,7 +551,7 @@ function checkpointScanTarget(db, input = {}) {
     if (!lease || lease.owner !== owner || !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.parse(checkpointedAt)) {
       throw scanRunError("SCAN_LEASE_LOST", "scan lease was lost before the checkpoint could be saved");
     }
-    const jobIds = input.jobs.map((job) => jobStore.upsertJob(db, job, batchId));
+    const jobIds = input.jobs.map((job) => jobStore.upsertScanCheckpointJob(db, job, batchId));
     updateBatchRuntimeSnapshot(db, batch, input.runtime);
     checkpointSharedPacing(db, run.site, input.runtime, checkpointedAt);
     const target = input.target && typeof input.target === "object" ? { ...input.target, ...input } : input;
@@ -602,7 +602,7 @@ function checkpointScanProgress(db, input = {}) {
     if (!lease || lease.owner !== owner || !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.parse(checkpointedAt)) {
       throw scanRunError("SCAN_LEASE_LOST", "scan lease was lost before the checkpoint could be saved");
     }
-    const jobIds = input.jobs.map((job) => jobStore.upsertJob(db, job, batchId));
+    const jobIds = input.jobs.map((job) => jobStore.upsertScanCheckpointJob(db, job, batchId));
     updateBatchRuntimeSnapshot(db, batch, input.runtime);
     checkpointSharedPacing(db, run.site, input.runtime, checkpointedAt);
     db.prepare("UPDATE scan_runs SET heartbeat_at = ? WHERE id = ?").run(checkpointedAt, runId);

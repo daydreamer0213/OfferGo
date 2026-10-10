@@ -348,7 +348,7 @@ function job(sourceId, overrides = {}) {
 
 function completeAnalysis(recommendation = "primary") {
   return {
-    semanticStatus: "complete",
+    semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
     recommendation,
     recommendationSchemaVersion: 2,
     fitLevel: recommendation === "primary" ? "fit" : "mostly_fit",

@@ -41,18 +41,14 @@ function createMessageDiscoveryJobContextResolver({
     const jobTarget = trustedJobTarget(await messageReader.readSelectedJobTarget(selected, signal));
     const localSourceId = canonicalBossJobSourceId(jobTarget.jobId);
     await messageReader.assertActiveBindings();
-    const known = candidateMatches(candidate, {
-      profileId: normalizedProfileId,
-      planId: plan.id,
-      sourceId: localSourceId
-    })
-      ? candidate
-      : findMessageDiscoveryJobContext(db, {
+    // The discovery queue freezes candidates once. Read the latest checkpoint
+    // so a second message cannot replay analysis using that old snapshot.
+    const known = findMessageDiscoveryJobContext(db, {
         profileId: normalizedProfileId,
         planId: plan.id,
         sourceId: localSourceId
       });
-    if (known?.contextComplete && known.analysis?.semanticStatus === "complete") {
+    if (known?.contextComplete) {
       const analyzed = await ensureAnalyzedContext(plan, known, signal);
       return bindContext(analyzed, target?.conversationKey, "local_cache", now());
     }
@@ -174,13 +170,6 @@ function createMessageDiscoveryJobContextResolver({
     if (!context?.contextComplete) throw contextError("MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE", "removed job context is unavailable");
     return context;
   }
-}
-
-function candidateMatches(candidate, expected) {
-  return candidate?.contextComplete === true
-    && Number(candidate.profileId) === expected.profileId
-    && Number(candidate.planId) === expected.planId
-    && String(candidate.sourceId || "") === expected.sourceId;
 }
 
 function trustedJobTarget(value) {

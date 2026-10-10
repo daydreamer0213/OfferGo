@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { immediateTransaction } = require("../storage/storage_shared");
 const { ensureFunnelEntry } = require("../storage/funnel_store");
+const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
 
 const PROGRESS_STAGES = new Set([
   "contact_started",
@@ -1155,7 +1156,7 @@ function mapDiscoveryCandidate(row) {
     description: contextComplete ? row.context_description || "" : "",
     qualityTags: contextComplete ? parseJson(row.context_quality_tags_json, []) : [],
     risks: contextComplete ? parseJson(row.context_risks_json, []) : [],
-    analysis: contextComplete ? parseJson(row.context_analysis_json, {}) : {},
+    analysis: contextComplete ? projectAnalysisForCurrentPipeline(parseJson(row.context_analysis_json, {})) : {},
     contextComplete,
     contextSource: contextComplete ? "local_cache" : ""
   };

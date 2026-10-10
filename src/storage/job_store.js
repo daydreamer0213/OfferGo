@@ -6,11 +6,12 @@ const { scoreJob, decisionState } = require("../core/scoring");
 const { parseBossActivityText } = require("../core/activity_status");
 const { mergeJobMetadata } = require("../core/job_metadata");
 const { NEGATIVE_FEEDBACK_STATUSES, normalizeFeedbackReason } = require("../core/feedback");
-const { buildAnalysisRevision, analysisStaleReasons } = require("../core/analysis_revision");
+const { buildAnalysisRevision, analysisStaleReasons, projectAnalysisForCurrentPipeline } = require("../core/analysis_revision");
 const { decisionHardBlockers } = require("../core/model_contract");
 const { RECOMMENDATION_SCHEMA_VERSION, normalizeRecommendationTier } = require("../core/decision_policy");
 const { buildOutcomeAnalytics } = require("../core/outcome_analytics");
 const { profileToRuntimeConfigs } = require('../core/search_plan');
+const { hasCompleteJobDescription } = require('../core/job_description_readiness');
 
 const VALID_CANDIDATE_STATUSES = new Set(OUTCOME_STATUSES);
 
@@ -172,6 +173,39 @@ function upsertJob(db, job, batchId) {
   const id = Number(result.lastInsertRowid);
   if (batchId) recordJobObservation(db, id, batchId, job, now);
   return id;
+}
+
+function upsertScanCheckpointJob(db, incoming, batchId) {
+  const row = db.prepare(`SELECT o.*, j.source, j.source_id
+    FROM job_observations o JOIN jobs j ON j.id = o.job_id
+    WHERE o.batch_id = ? AND j.source = ? AND j.source_id = ?`)
+    .get(batchId, incoming.source, incoming.sourceId);
+  if (!row) return upsertJob(db, incoming, batchId);
+  const previous = rowToJob(row);
+  const retainedDetail = incoming.detailRead !== true && hasCompleteJobDescription(previous);
+  const job = retainedDetail ? {
+    ...incoming,
+    description: previous.description,
+    salary: incoming.salary || previous.salary,
+    experience: incoming.experience || previous.experience,
+    education: incoming.education || previous.education,
+    tags: incoming.tags?.length ? incoming.tags : previous.tags,
+    qualityTags: (incoming.qualityTags || []).filter(tag => tag !== "detail_unverified")
+  } : { ...incoming };
+  const hash = sourceContentHash(job);
+  const analysis = projectAnalysisForCurrentPipeline(parseJson(row.analysis_json, {}));
+  const reusable = ["complete", "partial"].includes(analysis?.semanticStatus)
+    && !["local_rules", "hard_boundary"].includes(analysis.decisionSource)
+    && !analysisStaleReasons(analysis, { ...analysis.revision, sourceContentHash: hash }).length
+    && decisionState(job) === "ready";
+  if (reusable) {
+    Object.assign(job, { analysis, score: previous.score, level: previous.level,
+      matches: previous.matches, risks: previous.risks, greeting: previous.greeting });
+  } else if (retainedDetail && decisionState(job) === "ready" && !["complete", "partial"].includes(incoming.analysis?.semanticStatus)) {
+    job.analysis = { provider: "scan-checkpoint", semanticStatus: "pending", decisionSource: "analysis_pending",
+      recommendation: null, decisionStatus: "needs_retry" };
+  }
+  return upsertJob(db, job, batchId);
 }
 
 function getJob(db, jobId) {
@@ -768,6 +802,7 @@ function recommendationTierForAnalysis(analysis = {}) {
 
 function normalizeAnalysisForRead(analysis = {}) {
   if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) return {};
+  analysis = projectAnalysisForCurrentPipeline(analysis);
   const recommendation = recommendationTierForAnalysis(analysis);
   if (!recommendation) return { ...analysis, recommendation: null };
   if (Number(analysis.recommendationSchemaVersion || 0) >= RECOMMENDATION_SCHEMA_VERSION) return { ...analysis, recommendation };
@@ -878,7 +913,7 @@ function queueRank(job) {
 }
 
 module.exports = {
-  upsertKeywordSource, upsertJob, getJob, getJobIdentity, listJobIdentities, listJobSummaries,
+  upsertKeywordSource, upsertJob, upsertScanCheckpointJob, getJob, getJobIdentity, listJobIdentities, listJobSummaries,
   findLinkableInboundJob, setZhaopinJobAvailability, listReportJobs, markApplication, bindBatchToPlan, rescorePlanObservations,
   reassessBatchObservations, addFollowUpNote, recordCandidateJobEvent, listCandidateJobEvents, recordRecommendationFeedback,
   markCandidateJob, buildFeedbackSummary, buildBatchSummary, getLatestBatchId, getLatestMainScanBatchId, listDecisionPool,

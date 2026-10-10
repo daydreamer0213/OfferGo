@@ -265,7 +265,7 @@ function createFixture(db) {
   ) VALUES ('boss', '运营', ?, '', ?, ?, '{}', 'completed', ?, NULL, NULL)`)
     .run("2026-08-25T06:00:00.000Z", profileId, planId, "2026-08-25T06:10:00.000Z").lastInsertRowid);
   const analysis = {
-    semanticStatus: "complete",
+    semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
     recommendation: "primary",
     recommendationSchemaVersion: 2,
     confidence: 0.9

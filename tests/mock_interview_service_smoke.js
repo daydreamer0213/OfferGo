@@ -29,7 +29,7 @@ function job(sourceId) {
     bossActiveDays: 0, url: `https://www.zhipin.com/job_detail/${sourceId}.html`, tags: ["Node.js", "知识库"],
     description: "负责 Node.js 企业知识库应用开发、检索评估和接口交付，要求具备完整项目经验。",
     score: 18, level: "可投", matches: ["Node.js"], risks: [], qualityTags: [],
-    analysis: { provider: "mock", model: "offline", semanticStatus: "complete", recommendation: "apply" }
+    analysis: { provider: "mock", model: "offline", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
   };
 }
 

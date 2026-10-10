@@ -46,7 +46,7 @@ function job(sourceId, overrides = {}) {
     analysis: {
       provider: "mock",
       model: "offline",
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "apply",
       evidence: { jd: ["JD：负责 Node.js 企业知识库应用开发"], resume: ["简历：参与企业知识库开发"] }
     },

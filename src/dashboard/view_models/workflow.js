@@ -22,18 +22,24 @@ function buildWorkflowViewModel({
   const status = String(workflow.status || "");
   const planner = workflow.planner || {};
   const progress = progressSnapshot ? progressView(progressSnapshot, progressJobs) : null;
-  if (progress) progress.site = workflow.site || 'boss';
-  const phase = phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewCandidates, quota });
+  if (progress) {
+    progress.site = workflow.site || 'boss';
+    if (status === 'paused' && workflow.errorCode === 'MODEL_QUOTA_EXHAUSTED') {
+      progress.etaLabel = '恢复模型连接后再估算剩余时间';
+    }
+  }
+  const phase = phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewCandidates, quota, progress });
   const controls = controlView(progressSnapshot, workflow, stopPreview);
   return {
     page: {
       title: "执行一轮", runId: String(workflow.id || ""), planId: String(plan.id || workflow.planId || ""),
       planHref: `/plan?planId=${encodeURIComponent(plan.id || workflow.planId || "")}${workflow.site === 'zhaopin' ? '&site=zhaopin' : ''}`,
       queueHref: `/queue?planId=${encodeURIComponent(plan.id || workflow.planId || "")}`,
-      currentPath: `/workflow?runId=${encodeURIComponent(workflow.id || "")}`
+      currentPath: `/workflow?runId=${encodeURIComponent(workflow.id || "")}`,
+      errorCode: String(workflow.errorCode || '')
     },
     header: {
-      statusLabel: phase.communication?.error ? "沟通已中断" : workflowStatusLabel(status), sequence: number(workflow.sequence), localDay: String(workflow.localDay || ""),
+      statusLabel: phase.communication?.error ? "沟通已中断" : phase.analysisUnresolved ? "岗位已采集，分析待完成" : workflowStatusLabel(status), sequence: number(workflow.sequence), localDay: String(workflow.localDay || ""),
       site: workflow.site || 'boss', targetSuccessCount: number(workflow.targetSuccessCount), successfulCount: number(workflow.successfulCount),
       todaySuccessful: number(daily.successfulToday), dailyTarget: number(daily.dailyTarget), inventoryCount: number(workflow.inventoryCount)
     },
@@ -130,7 +136,7 @@ function progressView(snapshot, progressJobs = []) {
     tracks: {
       scan: progressTrack(tracks.scan, "扫描岗位", "按本轮搜索词和平台条件查找岗位"),
       jd: progressTrack(tracks.jd, "完整 JD", "读取岗位职责和任职要求"),
-      analysis: progressTrack(tracks.analysis, "分析岗位", "结合你的简历判断岗位是否合适"),
+      analysis: progressTrack({ ...tracks.analysis, value: analyzed }, "分析岗位", "结合你的简历判断岗位是否合适"),
       communication: progressTrack(tracks.communication, "沟通岗位", "确认各个岗位的沟通结果")
     },
     currentActivityLabel: scanActivityLabel(source.scan, source.phaseKey),
@@ -191,7 +197,7 @@ function overviewView({ workflow, progress, phase, controls, runtimeBlock }) {
   return {
     site: workflow.site || 'boss', completed: workflow.status === 'completed',
     analysisProgress: `已分析 ${number(progress?.analysis?.succeeded) + number(progress?.analysis?.resolvedAfterFailure)} 个岗位`,
-    currentPhase: phase.communication?.error ? "沟通已中断" : workflowStatusLabel(workflow.status),
+    currentPhase: phase.communication?.error ? "沟通已中断" : phase.analysisUnresolved ? "岗位已采集，分析待完成" : workflowStatusLabel(workflow.status),
     overallProgress: progress?.visible
       ? `第 ${number(progress.stageIndex)} / ${number(progress.stageCount)} 阶段`
       : target ? `${successful} / ${target}` : "等待状态更新",
@@ -200,6 +206,8 @@ function overviewView({ workflow, progress, phase, controls, runtimeBlock }) {
     jdProgress: `已读取 ${number(details.read)} / ${number(details.required)} · 待补 ${number(details.pending)}`,
     remainingWork: phase.communication
       ? `还有 ${Math.max(0, phase.communication.summary.total - phase.communication.summary.terminal)} 个沟通条目待处理`
+      : phase.analysisUnresolved
+      ? `还有 ${phase.analysisUnresolved} 个岗位分析尚未完成，可在岗位列表继续分析`
       : progress?.visible
       ? progress.remainingWorkLabel
       : phase.kind === "review"
@@ -216,7 +224,12 @@ function blockerView({ workflow, cooldown, runtimeBlock, communicationError }) {
   if (communicationError) return { label: communicationError.title, detail: communicationError.impact, recovery: communicationError.nextAction };
   if (cooldown.active) return { label: "安全冷却中", detail: cooldown.reason, recovery: "到达重试时间后等待本地状态刷新" };
   if (runtimeBlock) return { label: "运行环境已阻塞", detail: runtimeBlockLabel(runtimeBlock.reasonCode), recovery: "检查运行环境后再查看本轮状态" };
-  if (workflow.status === "paused") return { label: "本轮已暂停", detail: String(workflow.errorCode || "安全暂停"), recovery: "检查原因后继续本轮" };
+  if (workflow.status === "paused") {
+    const issue = knownPauseGuidance(workflow);
+    return issue
+      ? { label: issue.title, detail: issue.impact, recovery: issue.nextAction }
+      : { label: "本轮已暂停", detail: String(workflow.errorCode || "安全暂停"), recovery: "检查原因后继续本轮" };
+  }
   if (["interrupted", "failed", "stopped"].includes(workflow.status)) {
     const issue = userFacingError(workflow.errorCode || workflow.shortfallCode, workflow.errorMessage);
     return { label: issue.title, detail: issue.impact, recovery: issue.nextAction };
@@ -241,18 +254,25 @@ function controlView(snapshot, workflow, stopPreview) {
     && controlState === "pause_requested";
   const canStop = Boolean(snapshot?.controls?.canStop);
   const access = stopPreview.access || {};
+  const issue = knownPauseGuidance(workflow);
   return {
     canPause: Boolean(snapshot?.controls?.canPause), canResume: Boolean(snapshot?.controls?.canResume), canStop,
     runningVisible: ["created", "scanning", "analyzing"].includes(status) && !pauseRequested,
     pauseRequestedVisible: pauseRequested,
     pausedVisible: status === "paused",
     stopOnlyVisible: canStop && !workflow.communicationBatchId && ["review_required", "interrupted"].includes(status),
-    pauseReason: String(workflow.errorCode || "本轮已安全暂停"), endpoint: "/api/workflow-control", runId: String(workflow.id || ""),
+    pauseReason: issue ? `${issue.title}：${issue.impact} ${issue.nextAction}` : String(workflow.errorCode || "本轮已安全暂停"), endpoint: "/api/workflow-control", runId: String(workflow.id || ""),
     stopPreview: { collected: number(stopPreview.collected), analyzed: number(stopPreview.analyzed), failed: number(stopPreview.failed), unfinished: number(stopPreview.unfinished), access: { details: number(access.details), pages: number(access.pages), scrolls: number(access.scrolls) }, consumesRunSlot: Boolean(stopPreview.consumesRunSlot) }
   };
 }
 
-function phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewCandidates, quota }) {
+function knownPauseGuidance(workflow) {
+  if (!workflow.errorCode) return null;
+  const issue = userFacingError(workflow.errorCode, workflow.errorMessage, { site: workflow.site });
+  return issue.title === '操作没有完成' ? null : issue;
+}
+
+function phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewCandidates, quota, progress }) {
   const status = String(workflow.status || "");
   const common = { site: workflow.site || 'boss', status, runId: String(workflow.id || ""), planId: String(plan.id || workflow.planId || ""), planHref: `/plan?planId=${encodeURIComponent(plan.id || workflow.planId || "")}`, queueHref: `/queue?planId=${encodeURIComponent(plan.id || workflow.planId || "")}` };
   if (workflow.site === 'zhaopin') {
@@ -267,7 +287,9 @@ function phaseView({ workflow, plan, daily, communication, runtimeBlock, reviewC
     return { ...common, kind: "review", targetSuccessCount: number(workflow.targetSuccessCount), review: { rows, defaultCount, quotaRemaining: remaining, runtimeBlock: runtimeBlock ? { reasonCode: String(runtimeBlock.reasonCode || ""), blockedUntil: String(runtimeBlock.blockedUntil || "") } : null, browserMode: reviewBrowserMode(workflow), blocked: Boolean(runtimeBlock) || defaultCount === 0 || defaultCount > remaining } };
   }
   if (status === "communicating") return { ...common, kind: "communicating", communication: communicationView(communication, runtimeBlock) };
-  if (status === "completed") return { ...common, kind: "completed", successfulCount: number(workflow.successfulCount), todaySuccessful: number(daily.successfulToday), dailyTarget: number(daily.dailyTarget), shortfall: shortfallText(workflow.shortfallCode) };
+  if (status === "completed") return { ...common, kind: "completed", analysisUnresolved: workflow.site === 'zhaopin'
+    ? number(progress?.analysis?.unresolvedFailed) + number(progress?.analysis?.remaining) : 0,
+    successfulCount: number(workflow.successfulCount), todaySuccessful: number(daily.successfulToday), dailyTarget: number(daily.dailyTarget), shortfall: shortfallText(workflow.shortfallCode) };
   if (status === "interrupted") {
     const communicationDetails = communication ? communicationView(communication, runtimeBlock) : null;
     const errorCode = String(workflow.errorCode || "WORKFLOW_INTERRUPTED");

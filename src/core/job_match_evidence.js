@@ -38,7 +38,7 @@ function buildJobMatchEvidence({ candidateProfile = {}, jobFacts = {} } = {}) {
   return { entries };
 }
 
-function verifyJobMatchEvidence({ evidence = {}, refs = [], sourceKind, claim = '' } = {}) {
+function verifyJobMatchEvidence({ evidence = {}, refs = [], sourceKind, claim = '', state = '' } = {}) {
   const byId = new Map((evidence.entries || []).map(entry => [entry.id, entry]));
   const invalidIds = [];
   const mismatches = [];
@@ -55,10 +55,21 @@ function verifyJobMatchEvidence({ evidence = {}, refs = [], sourceKind, claim = 
   if (claim && !invalidIds.length && !mismatches.length && refs.length) {
     const referenced = [...new Set(refs.map(ref => typeof ref === 'string' ? ref : ref.id))].map(id => byId.get(id));
     const support = referenced.map(entry => entry.quote).join('；');
+    const sourceAbsences = absenceAssertions(support);
+    const unrecorded = [...String(claim).matchAll(/(?:未(?:记录|证明|体现|提及)|没有(?:记录|提及))([^，,；;。]{1,40})/g)]
+      .map(match => match[1].replace(/\s/g, ''));
+    if (state === 'missing' && ((!sourceAbsences.length
+      && referenced.every(entry => /(?:avoidSaying\[\d+\]|roleBoundary)$/.test(entry.sourcePath)))
+      || unrecorded.some(object => !sourceAbsences.some(source => source.includes(object) || object.includes(source))))) {
+      mismatches.push({ claim, reason: 'unsupported_absence_from_expression_boundary' });
+    }
     const rawResume = (evidence.entries || []).find(entry => entry.sourceKind === 'resume')?.quote;
     const normalizedClaim = String(claim).normalize('NFKC');
     const claimedAbsences = absenceAssertions(normalizedClaim);
-    const sourceAbsences = absenceAssertions(support);
+    if (state === 'missing' && claimedAbsences.some(object =>
+      !sourceAbsences.some(source => source.includes(object) || object.includes(source)))) {
+      mismatches.push({ claim, reason: 'unsupported_explicit_absence' });
+    }
     if (claimedAbsences.length && /不主张|未(?:独立负责|主导|负责)|不负责|没有独立/.test(support)
       && claimedAbsences.some(object => !sourceAbsences.some(source => source.includes(object)))) {
       mismatches.push({ claim, reason: 'unsupported_absence_from_ownership_limit' });
@@ -123,7 +134,8 @@ function inferCandidateEvidenceRefs(evidence, claim) {
 
 function absenceAssertions(value) {
   return String(value).split(/[，,；;。]/).filter(clause => !/不代表|不意味着|不能说明|不能据此|并非没有/.test(clause))
-    .flatMap(clause => [...clause.matchAll(/(?:未(?:涉及|参与|接触|使用|做过)|没有)([^，,；;。]{1,40})/g)]
+    .flatMap(clause => [...clause.matchAll(/(?:未(?:涉及|参与|接触|使用|做过|实现|掌握|从事)|没有|不具备)([^，,；;。]{1,40})/g),
+      ...clause.matchAll(/(?:^|[:：]|候选人|本人|用户)无(?!法|关|序|监督|状态|线|人)([^，,；;。]{1,40})/g)]
       .flatMap(match => match[1].split(/或者|或/).map(object => object.replace(/(?:的)?(?:相关)?(?:经验|经历|实践)$/, '').replace(/\s/g, ''))));
 }
 

@@ -444,7 +444,7 @@ async function fetchedDetailWithoutFullAnalysisSmoke() {
         tags: JSON.parse(row.tags_json),
         description: row.description,
         qualityTags: JSON.parse(row.quality_tags_json),
-        analysis: { provider: "fixture", semanticStatus: "complete", recommendation: "primary" }
+        analysis: { provider: "fixture", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary" }
       }, batchId);
     },
     now: () => NOW
@@ -686,7 +686,7 @@ async function crossPlatformIdempotencySmoke() {
     source: "boss", sourceId: "boss:shared777", keyword: "boss-shared-id", title: "Shared Id Engineer",
     company: "Boss Fixture Co", location: "Shanghai", salary: "20-30K", experience: "3-5年", education: "本科",
     bossActiveText: "", url: "https://www.zhipin.com/job_detail/shared777.html", tags: [],
-    description: "可信 BOSS 职位描述。".repeat(20), qualityTags: [], analysis: { semanticStatus: "complete", recommendation: "primary" }
+    description: "可信 BOSS 职位描述。".repeat(20), qualityTags: [], analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary" }
   }, bossBatchId);
   ensureProgressCard(db, { profileId: fixture.profileId, planId: fixture.planId, jobId: bossJobId, source: "boss", now: NOW });
   const bossReader = {
@@ -738,7 +738,7 @@ async function resolverIsolationSmoke() {
 
 function seedCompleteContext({ profileId, planId, source, sourceId, key }) {
   const batchId = createBatch(db, source, `resolver-${key}`, `resolver ${key}`, { profileId, searchPlanId: planId });
-  return upsertJob(db, { source, sourceId, keyword: `resolver-${key}`, title: `Resolver ${key}`, company: "Resolver Co", location: "Shanghai", salary: "20-30K", experience: "3-5年", education: "本科", bossActiveText: "", url: `https://example.test/${key}`, tags: [], description: "可信职位描述。".repeat(20), qualityTags: [], analysis: { semanticStatus: "complete", recommendation: "primary" } }, batchId);
+  return upsertJob(db, { source, sourceId, keyword: `resolver-${key}`, title: `Resolver ${key}`, company: "Resolver Co", location: "Shanghai", salary: "20-30K", experience: "3-5年", education: "本科", bossActiveText: "", url: `https://example.test/${key}`, tags: [], description: "可信职位描述。".repeat(20), qualityTags: [], analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary" } }, batchId);
 }
 
 async function inboundTransactionRollbackSmoke() {
@@ -878,7 +878,7 @@ async function unresolvedDisplaySmoke() {
     title: "No cached JD", company: "Unknown Co", location: "Shanghai", salary: "20-30K",
     experience: "3-5年", education: "本科", bossActiveText: "",
     tags: [], description: "可信智联职位描述。".repeat(20), qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "primary" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary" }
   }, batchId);
   reader.openQueuedConversation = async () => ({ sourceJobId: "zhaopin:ZL999999", lastMessageId: "901001", positionName: "No cached JD", companyName: "Unknown Co", salary: "20-30K", city: "Shanghai", messages: [
     { direction: "friend", messageId: "901001", text: "请介绍项目经验。", contentKind: "text" }
@@ -919,7 +919,7 @@ function createFixture({ id = "ZL123456", title = "Zhaopin Engineer" } = {}) {
     tags: [],
     description: "完整可信的智联职位描述。".repeat(20),
     qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "primary" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary" }
   }, batchId);
   return { profileId, planId, jobId, title };
 }

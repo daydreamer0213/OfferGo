@@ -28,6 +28,7 @@ const {
   listWorkflowJobTasks
 } = require("../src/core/workflow_analysis_tasks");
 const { runWorkflowAnalysisPhase } = require("../src/core/job_analysis");
+const { PIPELINE_VERSIONS } = require("../src/core/analysis_revision");
 
 (async () => {
   const db = openDb(":memory:");
@@ -1189,7 +1190,7 @@ function analyzedJobFor(job) {
       fitLevel: "A",
       confidence: 0.9,
       evidence: { jd: ["Python RAG"], resume: ["Python RAG"] },
-      revision: "crash-rev"
+      revision: { pipelineVersions: PIPELINE_VERSIONS }
     }
   };
 }

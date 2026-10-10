@@ -19,12 +19,15 @@ const {
   listWorkflowJobTasks,
   listJobAnalysisAttempts
 } = require("../src/core/workflow_analysis_tasks");
+const { skipIncompleteWorkflowJobTasks } = require("../src/core/workflow_analysis_tasks");
 
 const db = openDb(":memory:");
 
 try {
   testInitializationAndIdempotency();
   testInitialTaskStatusDerivation();
+  testReinitializeInvalidatedSuccessfulTasks();
+  testInvalidatedResultCanRunAndRecoverAgain();
   testBatchAndWorkflowMismatchRejection();
   testAtomicClaimLifecycle();
   testIncompleteObservationCannotBeClaimed();
@@ -102,10 +105,17 @@ function testInitializationAndIdempotency() {
 function testInitialTaskStatusDerivation() {
   const scenario = seedWorkflow(db, {
     analyses: [
-      { semanticStatus: "complete", decisionSource: "model" },
+      { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" },
       { semanticStatus: "rule_only", decisionSource: "local_rules" },
       { semanticStatus: "blocked", decisionSource: "hard_boundary" },
-      { semanticStatus: "pending", decisionSource: "scan" }
+      { semanticStatus: "pending", decisionSource: "scan" },
+      ...["weighted_decision_matrix", "qualification_unknown", "qualification_conflict", "semantic_risk_guard"]
+        .map(decisionSource => ({ semanticStatus: "complete", decisionSource,
+          revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } })),
+      { semanticStatus: "complete", decisionSource: "hard_boundary",
+        revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } },
+      { semanticStatus: "complete", decisionSource: "hard_boundary",
+        revision: { pipelineVersions: { ...require('../src/core/analysis_revision').PIPELINE_VERSIONS, matchJob: "old-pipeline" } } }
     ],
     localDay: "2026-08-06",
     modelConfigRevision: "mrev-status"
@@ -118,8 +128,83 @@ function testInitialTaskStatusDerivation() {
     now: "2026-08-06T00:00:00.000Z"
   });
   const tasks = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
-  assert.deepStrictEqual(tasks.map((task) => task.status), ["succeeded", "skipped", "skipped", "pending"]);
+  assert.deepStrictEqual(tasks.map((task) => task.status), ["succeeded", "skipped", "skipped", "pending",
+    "succeeded", "succeeded", "succeeded", "succeeded", "skipped", "pending"]);
   assert.strictEqual(tasks[2].lastErrorCode, null);
+  initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId,
+    jobs: observationEntries(db, scenario.batchId), modelConfigRevision: "mrev-status", now: "2026-08-06T00:00:01.000Z" });
+  assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }), tasks, "unchanged local exclusions must retain their generation and completion time");
+  skipIncompleteWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, now: "2026-08-06T00:00:02.000Z" });
+  assert.equal(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }).at(-1).status, "pending", "executor preprocessing must not skip an obsolete local decision queued for reassessment");
+  for (const semanticStatus of ["pending", "partial", "stale", "failed"]) {
+    db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?").run(JSON.stringify({ semanticStatus, decisionSource: "hard_boundary" }), tasks.at(-1).observationId);
+    skipIncompleteWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, now: "2026-08-06T00:00:03.000Z" });
+    assert.equal(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }).at(-1).status, "pending", `${semanticStatus} local metadata cannot override pending reassessment`);
+  }
+  db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?").run(JSON.stringify({ semanticStatus: "blocked", decisionSource: "hard_boundary" }), tasks.at(-1).observationId);
+  skipIncompleteWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, now: "2026-08-06T00:00:04.000Z" });
+  assert.equal(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }).at(-1).status, "skipped", "a current explicit local blocker still settles before any model call");
+}
+
+function testReinitializeInvalidatedSuccessfulTasks() {
+  const complete = { semanticStatus: "complete", decisionSource: "model", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } };
+  const blocked = { semanticStatus: "blocked", decisionSource: "hard_boundary" };
+  const scenario = seedWorkflow(db, { analyses: [complete, complete, {}, {}, blocked, blocked], localDay: "2026-10-10", modelConfigRevision: "mrev-reinitialize" });
+  const input = { workflowRunId: scenario.workflowId, batchId: scenario.batchId, jobs: observationEntries(db, scenario.batchId), modelConfigRevision: "mrev-reinitialize", now: "2026-10-10T00:00:00.000Z" };
+  initializeWorkflowJobTasks(db, input);
+  const tasks = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
+  db.prepare("UPDATE workflow_job_tasks SET total_attempt_count = 2, attempt_count_in_generation = 2, finished_at = ? WHERE id = ?").run(input.now, tasks[0].id);
+  db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?").run(JSON.stringify({ provider: "scan-checkpoint", semanticStatus: "pending", decisionSource: "analysis_pending" }), tasks[0].observationId);
+  db.prepare("UPDATE workflow_job_tasks SET status = 'running', lease_owner = 'still-running', lease_expires_at = ? WHERE id = ?").run("2026-10-11T00:00:00.000Z", tasks[2].id);
+  db.prepare("UPDATE workflow_job_tasks SET status = 'failed', last_error_code = 'PERMANENT_FAILURE' WHERE id = ?").run(tasks[3].id);
+  for (const task of tasks.slice(4)) db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?").run(JSON.stringify({ provider: "scan-checkpoint", semanticStatus: "pending", decisionSource: "analysis_pending" }), task.observationId);
+  db.prepare("UPDATE workflow_job_tasks SET last_error_code = 'DETAIL_REQUIRED', attempt_count_in_generation = 2 WHERE id = ?").run(tasks[5].id);
+  assert.deepEqual(initializeWorkflowJobTasks(db, input), { inserted: 0, existing: 6, total: 6 });
+  const after = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
+  assert.deepEqual(after.map(task => task.status), ["pending", "succeeded", "running", "failed", "pending", "skipped"], "removed local blockers become pending, while exhausted detail attempts keep their existing recovery rules");
+  assert.equal(after[0].totalAttemptCount, 2, "previous attempts remain recorded");
+  assert.equal(after[0].attemptCountInGeneration, 0, "invalidated successful results receive a fresh bounded attempt allowance");
+  assert.equal(after[0].finishedAt, null);
+  assert.equal(after[2].leaseOwner, "still-running");
+  assert.equal(after[3].lastErrorCode, "PERMANENT_FAILURE");
+  initializeWorkflowJobTasks(db, input);
+  assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }), after, "repeated initialization does not reset a pending task again");
+  db.prepare("UPDATE workflow_job_tasks SET status = 'succeeded' WHERE id = ?").run(tasks[0].id);
+  db.prepare("UPDATE workflow_runs SET status = 'completed' WHERE id = ?").run(scenario.workflowId);
+  initializeWorkflowJobTasks(db, input);
+  assert.equal(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0].status, "succeeded", "initialization cannot reopen a completed parent workflow");
+}
+
+function testInvalidatedResultCanRunAndRecoverAgain() {
+  const { finalizeWorkflowControl, resumeWorkflowRun } = require('../src/core/workflow_control');
+  const scenario = seedWorkflow(db, { analyses: [{}], localDay: "2026-10-11", modelConfigRevision: "mrev-generation" });
+  const input = { workflowRunId: scenario.workflowId, batchId: scenario.batchId, jobs: observationEntries(db, scenario.batchId), modelConfigRevision: "mrev-generation", now: "2026-10-11T00:00:00.000Z" };
+  initializeWorkflowJobTasks(db, input);
+  const claim = now => claimWorkflowJobTask(db, { workflowRunId: scenario.workflowId, leaseOwner: "generation-worker", leaseTtlMs: 60_000, selectModelIdentity: modelIdentity, now });
+  const first = claim("2026-10-11T00:01:00.000Z");
+  commitWorkflowJobTaskSuccess(db, { taskId: first.task.id, leaseOwner: "generation-worker",
+    analyzedJob: { ...first.job, analysis: { semanticStatus: "complete", decisionSource: "model", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } } },
+    modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }), telemetry: { modelCallCount: 1 },
+    startedAt: first.attempt.startedAt, finishedAt: "2026-10-11T00:01:05.000Z" });
+  db.prepare("UPDATE job_observations SET analysis_json = '{}' WHERE id = ?").run(first.task.observationId);
+  initializeWorkflowJobTasks(db, { ...input, now: "2026-10-11T00:02:00.000Z" });
+  const second = claim("2026-10-11T00:03:00.000Z");
+  assert(second, "an invalidated successful result can be claimed without an attempt uniqueness collision");
+  assert.equal(second.task.recoveryGeneration, 1);
+  commitWorkflowJobTaskFailure(db, { taskId: second.task.id, leaseOwner: "generation-worker", errorCode: "HTTP_402", pauseCode: "MODEL_QUOTA_EXHAUSTED", retryable: false,
+    startedAt: second.attempt.startedAt, finishedAt: "2026-10-11T00:03:01.000Z", telemetry: { modelCallCount: 1 } });
+  finalizeWorkflowControl(db, { workflowRunId: scenario.workflowId, now: "2026-10-11T00:03:02.000Z" });
+  const resume = { workflowRunId: scenario.workflowId, batchModelRevision: "mrev-new", batchModelVerifiedAt: "2026-10-11T00:04:00.000Z", now: "2026-10-11T00:05:00.000Z" };
+  resumeWorkflowRun(db, resume);
+  const ready = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0];
+  assert.equal(ready.recoveryGeneration, 2, "configuration recovery advances the task's own newer generation");
+  assert.equal(ready.attemptCountInGeneration, 0);
+  resumeWorkflowRun(db, { ...resume, now: "2026-10-11T00:05:01.000Z" });
+  assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0], ready, "repeated resume cannot create another generation");
+  const third = claim("2026-10-11T00:06:00.000Z");
+  assert(third);
+  assert.equal(third.task.totalAttemptCount, 3);
+  assert.deepEqual(listJobAnalysisAttempts(db, { workflowRunId: scenario.workflowId, taskId: first.task.id }).map(attempt => attempt.recoveryGeneration).sort(), [0, 1, 2]);
 }
 
 function testBatchAndWorkflowMismatchRejection() {
@@ -474,7 +559,7 @@ function testExactObservationRebuild() {
     source: "boss",
     sourceId: scenario.sourceIds[0],
     title: "Mutated Title",
-    analysis: { semanticStatus: "complete", decisionSource: "model", note: "mutated" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", note: "mutated" }
   }, otherBatchId);
   assert.strictEqual(
     db.prepare("SELECT title FROM jobs WHERE id = ?").get(scenario.jobIds[0]).title,
@@ -605,7 +690,7 @@ function testAtomicSuccessCommit() {
   const analyzedJob = {
     ...claimed.job,
     analysis: {
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionSource: "model",
       recommendation: { tier: "apply", confidence: 0.9 },
       summary: "matched"
@@ -709,7 +794,7 @@ function testOwnerMismatchAndDuplicateRejected() {
   const finishedAt = "2026-08-14T00:01:05.000Z";
   const analyzedJob = {
     ...claimed.job,
-    analysis: { semanticStatus: "complete", decisionSource: "model" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" }
   };
   const base = {
     taskId: claimed.task.id,
@@ -806,7 +891,7 @@ function testRollbackOnObservationWriteFailure() {
         leaseOwner: "worker-rollback",
         analyzedJob: {
           ...claimed.job,
-          analysis: { semanticStatus: "complete", decisionSource: "model", summary: "must not persist" }
+          analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", summary: "must not persist" }
         },
         modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
         telemetry: { modelCallCount: 1 },
@@ -849,7 +934,7 @@ function testRollbackOnObservationWriteFailure() {
     leaseOwner: "worker-rollback",
     analyzedJob: {
       ...claimed.job,
-      analysis: { semanticStatus: "complete", decisionSource: "model", summary: "recovered" }
+      analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", summary: "recovered" }
     },
     modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
     telemetry: { modelCallCount: 1 },
@@ -981,7 +1066,7 @@ function testTelemetryWithAndWithoutUsage() {
   commitWorkflowJobTaskSuccess(db, {
     taskId: first.task.id,
     leaseOwner: "worker-t1",
-    analyzedJob: { ...first.job, analysis: { semanticStatus: "complete", decisionSource: "model" } },
+    analyzedJob: { ...first.job, analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" } },
     modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
     startedAt: "2026-08-17T00:01:00.000Z",
     finishedAt: "2026-08-17T00:01:03.000Z"
@@ -1007,7 +1092,7 @@ function testTelemetryWithAndWithoutUsage() {
   commitWorkflowJobTaskSuccess(db, {
     taskId: second.task.id,
     leaseOwner: "worker-t2",
-    analyzedJob: { ...second.job, analysis: { semanticStatus: "complete", decisionSource: "model" } },
+    analyzedJob: { ...second.job, analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" } },
     modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
     telemetry: { modelCallCount: 3, promptTokens: 100, completionTokens: 50, totalTokens: 150 },
     startedAt: "2026-08-17T00:02:00.000Z",
@@ -1051,7 +1136,7 @@ function testAnalyzedJobSourceMismatchRejected() {
   const mismatchedJob = {
     ...claimed.job,
     sourceId: "wrong-source-id",
-    analysis: { semanticStatus: "complete", decisionSource: "model", summary: "must not persist" }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", summary: "must not persist" }
   };
   const beforeTask = db.prepare("SELECT * FROM workflow_job_tasks WHERE id = ?").get(claimed.task.id);
   const beforeAttempt = db.prepare(
@@ -1128,7 +1213,7 @@ function testAnalyzedJobSourceMismatchRejected() {
     ...successArgs,
     analyzedJob: {
       ...claimed.job,
-      analysis: { semanticStatus: "complete", decisionSource: "model", summary: "recovered" }
+      analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", summary: "recovered" }
     }
   });
   assert.strictEqual(completed.task.status, "succeeded");
@@ -1160,7 +1245,7 @@ function testModelIdentityMismatchRejected() {
   const base = {
     taskId: claimed.task.id,
     leaseOwner: "worker-identity",
-    analyzedJob: { ...claimed.job, analysis: { semanticStatus: "complete", decisionSource: "model" } },
+    analyzedJob: { ...claimed.job, analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" } },
     telemetry: { modelCallCount: 1 },
     startedAt,
     finishedAt
@@ -1241,7 +1326,7 @@ function testStartedAtMismatchRejected() {
   const args = {
     taskId: claimed.task.id,
     leaseOwner: "worker-started",
-    analyzedJob: { ...claimed.job, analysis: { semanticStatus: "complete", decisionSource: "model" } },
+    analyzedJob: { ...claimed.job, analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" } },
     modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
     telemetry: { modelCallCount: 1 },
     startedAt: "2026-08-23T00:02:00.000Z",
@@ -2390,7 +2475,7 @@ function testRecoverySkipsTerminalAndRespectsGates() {
   commitWorkflowJobTaskSuccess(db, {
     taskId: succeeded.task.id,
     leaseOwner: "worker-rg-1",
-    analyzedJob: { ...succeeded.job, analysis: { semanticStatus: "complete", decisionSource: "model" } },
+    analyzedJob: { ...succeeded.job, analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model" } },
     modelIdentity: modelIdentity({ attemptInGeneration: 1, totalAttemptNumber: 1 }),
     startedAt: claimNow,
     finishedAt: "2026-08-28T00:00:03.000Z"

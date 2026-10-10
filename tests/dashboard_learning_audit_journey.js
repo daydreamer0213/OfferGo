@@ -7,6 +7,7 @@ const { recordCandidateFactValue } = require('../src/storage/message_learning_st
 const { createMessageReplyLearningService } = require('../src/application/message_learning');
 const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
 const { createDashboardServer } = require('../src/dashboard/server');
+const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
 
 (async () => {
   let chromium;
@@ -24,7 +25,7 @@ const { createDashboardServer } = require('../src/dashboard/server');
       searchPlan:{name:'隔离方案',directions:['后端开发'],cities:['杭州'],keywords:[{word:'后端开发',priority:'A'}]}});
     const profileId=owner.profileId;
     const jobId=Number(db.prepare("INSERT INTO jobs(source,source_id,title,company,description,analysis_json,first_seen_at,last_seen_at) VALUES ('boss','learning-audit','后端开发','隔离测试公司',?,'{}',?,?)").run('负责后端接口开发、联调和测试。'.repeat(20),now,now).lastInsertRowid);
-    db.prepare('UPDATE jobs SET analysis_json = ? WHERE id = ?').run(JSON.stringify({semanticStatus:'complete',provider:'fixture-model',recommendation:'consider'}),jobId);
+    db.prepare('UPDATE jobs SET analysis_json = ? WHERE id = ?').run(JSON.stringify({semanticStatus:'complete',provider:'fixture-model',revision:{pipelineVersions:PIPELINE_VERSIONS},recommendation:'consider'}),jobId);
     const cardId=Number(db.prepare("INSERT INTO candidate_progress_cards(profile_id,plan_id,job_id,source,stage,next_action,last_event_at,created_at,updated_at) VALUES (?,?,?,'boss','reply_ready','review',?,?,?)").run(profileId,owner.planId,jobId,now,now,now).lastInsertRowid);
     const draftFor=index=>storage.recordMessageReplyDrafts(db,{profileId,cardId,jobId,
       messageGroupKey:`sha256:${createHash('sha256').update(String(index)).digest('hex')}`,

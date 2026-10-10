@@ -609,7 +609,8 @@ async function main() {
       matches: ["Python"],
       risks: [],
       qualityTags: [],
-      analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply" }
+      analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply",
+        revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }
     }, zhaopinBatchId);
     ensureProgressCard(db, {
       profileId: fixture.profileId,
@@ -636,7 +637,8 @@ async function main() {
     matches: ["Python"],
     risks: [],
     qualityTags: [],
-    analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply" }
+    analysis: { provider: "mock", semanticStatus: "complete", recommendation: "apply",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }
   }, zhaopinBatchId);
   const zhaopinCard = ensureProgressCard(db, {
     profileId: fixture.profileId,
@@ -2002,6 +2004,7 @@ function createFixture(sourceId = "dashboard-message-job", database = db) {
       provider: "mock",
       model: "offline-structured-mock",
       semanticStatus: "complete",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionSource: "model",
       recommendation: "apply",
       fitLevel: "A",
@@ -2543,8 +2546,13 @@ function durableDraftRecoverySmoke() {
     upsertJob(durableDb, {
       source: "boss", sourceId: "durable-job", title: "持久化岗位", company: "持久化公司", salary: "6-8K", location: "广州番禺",
       description: "完整岗位职责与要求。".repeat(25), qualityTags: ["salary_out_of_range"], risks: ["薪资低于期望下限"],
-      analysis: { ...savedAnalysis, semanticStatus: "complete" }
+      analysis: { ...savedAnalysis, semanticStatus: "complete", revision: { pipelineVersions: {
+        ...require('../src/core/analysis_revision').PIPELINE_VERSIONS, matchJob: 'historical-matching'
+      } } }
     }, trustedBatchId);
+    const oldPage = controller.pageState(profileId);
+    assert.equal(oldPage.results[0].contextComplete, false, '旧分析不能通过 jobs 行回退伪装成当前有效分析');
+    assert.equal(oldPage.results[0].drafts[0].text, PRIVATE_DRAFT, '历史草稿继续保留');
     durableDb.prepare("UPDATE jobs SET salary = '99-100K', risks_json = '[]', quality_tags_json = '[]', analysis_json = ? WHERE id = ?")
       .run(JSON.stringify({ semanticStatus: "failed", recommendation: "analysis_pending" }), jobId);
     const recoveredJob = createMessageDiscoveryController({ db: durableDb, now: () => new Date(now) }).pageState(profileId).results[0].job;
@@ -2714,7 +2722,8 @@ function unmatchedStoredMessageViewSmoke() {
     actionGroup: "needs_action", actionCode: "reply", observedAt: now
   });
   localDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?")
-    .run(JSON.stringify({ semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }), fixture.jobId);
+    .run(JSON.stringify({ semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2,
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }), fixture.jobId);
   const controller = createMessageDiscoveryController({ db: localDb });
   const state = controller.pageState(fixture.profileId);
   assert.strictEqual(state.results.length, 0, "historical unsuitable drafts must not appear in results");
@@ -2756,7 +2765,8 @@ async function durableMissingFactRecoverySmoke() {
     ) VALUES ('boss', 'missing-fact-job', '产品经理助理', '示例公司', '10-15K', ?, ?, ?, ?)`)
       .run("完整岗位职责和任职要求。".repeat(30), JSON.stringify({
         semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
-        roleSummary: "协助产品需求与项目推进"
+        roleSummary: "协助产品需求与项目推进",
+        revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }
       }), now, now).lastInsertRowid);
     const card = ensureProgressCard(durableDb, {
       profileId, planId, jobId, source: "boss", stage: "contact_started", occurredAt: now
@@ -3045,7 +3055,8 @@ async function pendingDurableAnalysisRepairSmoke() {
       assert.deepStrictEqual(input, { planId, jobId });
       durableDb.prepare("UPDATE jobs SET analysis_json = ? WHERE id = ?").run(JSON.stringify({
         semanticStatus: "complete", recommendation: "apply", fitLevel: "fit",
-        roleSummary: "完成修复后的岗位理解"
+        roleSummary: "完成修复后的岗位理解",
+        revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }
       }), jobId);
       return { completed: 1, failed: 0 };
     });

@@ -1398,6 +1398,8 @@ class BossSiteAdapter {
             }
 
             targetJobs = targetEntries.map((entry) => candidates.get(bossSourceId(entry.job))?.job || entry.job);
+            const targetPartial = collection.status === "partial"
+              || targetJobs.some(job => job.detailRequired && !job.detailRead);
             if (typeof options.onTargetComplete === "function") {
               throwIfAborted(options.signal);
               await options.onTargetComplete({
@@ -1406,7 +1408,7 @@ class BossSiteAdapter {
                 cityCode: city.cityCode,
                 keyword,
                 laneId,
-                status: collection.status === "partial" ? "partial" : "completed",
+                status: targetPartial ? "partial" : "completed",
                 jobs: targetJobs,
                 jobCount: targetJobs.length,
                 targetPosition: frozenTargetPosition,
@@ -1426,7 +1428,7 @@ class BossSiteAdapter {
               });
             }
             successfulTargets += 1;
-            if (collection.status === "partial") partialTargets += 1;
+            if (targetPartial) partialTargets += 1;
             await this.waitWithPacing("target", { signal: options.signal, assertTabBindings: options.assertTabBindings });
           } catch (error) {
             if (["SCAN_CHECKPOINT_FAILED", "SCAN_LEASE_LOST", "SCAN_RUN_LEASE_MISMATCH"].includes(error?.code)) throw error;
@@ -1606,6 +1608,36 @@ class BossSiteAdapter {
   }
 
   async collectCards(tabId, maxCards, signal = null, assertTabBindings = null, onCards = null, expectedUrl = "") {
+    if (typeof this.browser.cdp !== 'function') {
+      return this.collectRenderedCards(tabId, maxCards, signal, assertTabBindings, onCards, expectedUrl);
+    }
+    throwIfAborted(signal);
+    await assertRuntimeTabBindings(assertTabBindings);
+    const state = await this.assertSearchPage(tabId);
+    assertBossSearchTarget(state?.url, expectedUrl);
+    let collectionError = null;
+    try {
+      // The same background rendering scope used by trusted-pane reads lets
+      // the platform's own lazy list load; it never activates the browser tab.
+      await this.browser.cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+      return await this.collectRenderedCards(tabId, maxCards, signal, assertTabBindings, onCards, expectedUrl);
+    } catch (error) {
+      collectionError = error;
+      throw error;
+    } finally {
+      try {
+        await this.browser.cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: false });
+      } catch (cleanupError) {
+        this.logger?.warn('boss_list_rendering_cleanup_failed', {
+          errorCode: cleanupError.code || 'BROWSER_CLEANUP_FAILED',
+          errorMessage: cleanupError.message,
+        });
+        if (!collectionError) throw cleanupError;
+      }
+    }
+  }
+
+  async collectRenderedCards(tabId, maxCards, signal = null, assertTabBindings = null, onCards = null, expectedUrl = "") {
     const found = new Map();
     let readinessAttempts = 0;
     while (!found.size && readinessAttempts < LIST_READY_ATTEMPTS) {

@@ -48,7 +48,7 @@ try {
 function contract01ExportsAndReferences() {
   assert.equal(Object.keys(storage).length, 196);
   assert.equal(Object.keys(candidateStore).length, 32);
-  assert.equal(Object.keys(jobStore).length, 35);
+  assert.equal(Object.keys(jobStore).length, 36);
   assert.deepEqual(Object.keys(scanStore).sort(), [...SCAN_OPERATIONS, "SCAN_RUN_STATUSES", "normalizeBossPacing"].sort());
   assert.equal(storage.SCAN_RUN_STATUSES, scanStore.SCAN_RUN_STATUSES);
   for (const name of ["upsertMessageEvents", "listMessageEvents", "latestMessageEvent"]) {
@@ -59,7 +59,7 @@ function contract01ExportsAndReferences() {
     "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"
   ].includes(name))) assert.equal(storage[name], candidateStore[name]);
   for (const name of Object.keys(jobStore).filter((name) => ![
-    "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
+    "upsertScanCheckpointJob", "getJob", "getJobIdentity", "listJobIdentities", "listJobSummaries", "findLinkableInboundJob", "setZhaopinJobAvailability"
   ].includes(name))) assert.equal(storage[name], jobStore[name]);
   assert.deepEqual(Object.keys(shared).sort(), [
     "OUTCOME_STATUSES", "immediateTransaction", "nowIso", "nullableText", "optionalInteger", "optionalPositiveInteger", "parseJson", "storageError", "validDate"
@@ -360,6 +360,36 @@ function contract08Checkpoints() {
     assert.deepEqual(success.transactions, ["BEGIN IMMEDIATE", "COMMIT"]);
   });
   for (const operation of ["checkpointScanProgress", "checkpointScanTarget"]) checkpointGates(operation);
+  for (const operation of ["checkpointScanProgress", "checkpointScanTarget"]) withDb((checkpointDb) => {
+    const fixture = checkpointFixture(checkpointDb, `${operation}-resume-analysis`);
+    const input = checkpointInput(fixture, operation === "checkpointScanTarget");
+    const original = { ...input.jobs[0], description: "Read and verified full job responsibilities. ".repeat(6), detailRead: true };
+    original.analysis = { provider: "test", semanticStatus: "complete", decisionSource: "weighted_decision_matrix", recommendation: "apply", recommendationSchemaVersion: 2,
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS, sourceContentHash: jobStore.sourceContentHash(original) } };
+    const jobId = jobStore.upsertJob(checkpointDb, original, fixture.batchId);
+    const observationId = checkpointDb.prepare("SELECT id FROM job_observations WHERE job_id = ? AND batch_id = ?").get(jobId, fixture.batchId).id;
+    const pending = { ...original, analysis: { provider: "scan-checkpoint", semanticStatus: "pending", decisionSource: "analysis_pending" }, greeting: "" };
+    storage[operation](checkpointDb, { ...input, jobs: [pending] });
+    assert.deepEqual(jobStore.getJob(checkpointDb, jobId).analysis, original.analysis, `${operation}: unchanged analysis survives a checkpoint`);
+    const missingDetail = { ...pending, description: "", detailRead: false, qualityTags: ["detail_unverified"] };
+    const snapshot = JSON.stringify(missingDetail);
+    storage[operation](checkpointDb, { ...input, jobs: [missingDetail] });
+    assert.equal(jobStore.getJob(checkpointDb, jobId).description, original.description, "list snapshots do not erase a verified JD");
+    assert.deepEqual(jobStore.getJob(checkpointDb, jobId).analysis, original.analysis);
+    assert.equal(JSON.stringify(missingDetail), snapshot, "checkpoint merging must not mutate the incoming object");
+    storage[operation](checkpointDb, { ...input, jobs: [{ ...pending, description: original.description + "Changed responsibility." }] });
+    assert.equal(jobStore.getJob(checkpointDb, jobId).analysis.semanticStatus, "pending", "a changed JD must be analyzed again");
+    assert.equal(checkpointDb.prepare("SELECT id FROM job_observations WHERE job_id = ? AND batch_id = ?").get(jobId, fixture.batchId).id, observationId);
+    jobStore.upsertJob(checkpointDb, original, fixture.batchId);
+    const freshBatch = storage.createBatch(checkpointDb, fixture.site, "fresh", "", { status: "running", searchPlanId: fixture.planId });
+    jobStore.upsertScanCheckpointJob(checkpointDb, pending, freshBatch);
+    assert.equal(JSON.parse(checkpointDb.prepare("SELECT analysis_json FROM job_observations WHERE job_id = ? AND batch_id = ?").get(jobId, freshBatch).analysis_json).semanticStatus, "pending", "another batch must not inherit candidate analysis from the global job row");
+    jobStore.upsertJob(checkpointDb, { ...original, bossActiveDays: 10, qualityTags: ["inactive_boss"],
+      analysis: { ...original.analysis, decisionSource: "hard_boundary", recommendation: "not_recommended" } }, fixture.batchId);
+    storage[operation](checkpointDb, { ...input, jobs: [{ ...missingDetail, bossActiveDays: 0, qualityTags: [] }] });
+    assert.equal(jobStore.getJob(checkpointDb, jobId).analysis.semanticStatus, "pending",
+      "a previously inactive job must lose its old local exclusion when the new activity snapshot is ready");
+  });
 }
 
 function checkpointGates(operation) {
@@ -611,6 +641,6 @@ function seedPlan(targetDb, label) {
 function job(sourceId, source = "boss") {
   return {
     source, sourceId, keyword: "contract", title: sourceId, company: "Contract Co", location: "GZ", salary: "10K", experience: "1-3", education: "Bachelor",
-    tags: [], description: "detail", score: 80, level: "A", matches: [], risks: [], qualityTags: [], analysis: { provider: "test", semanticStatus: "complete" }
+    tags: [], description: "detail", score: 80, level: "A", matches: [], risks: [], qualityTags: [], analysis: { provider: "test", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }
   };
 }

@@ -204,6 +204,7 @@ function testResumeManualPauseKeepsGenerationAndRevision() {
 }
 
 function testResumeModelRecheckGate() {
+  for (const pauseCode of ['MODEL_TIMEOUT_CIRCUIT_OPEN', 'MODEL_QUOTA_EXHAUSTED']) {
   const { profileId, planId } = seedPlan(db);
   const scenario = seedAnalyzingWorkflow(db, {
     profileId,
@@ -213,8 +214,8 @@ function testResumeModelRecheckGate() {
   });
   const workflowId = scenario.workflow.id;
   db.prepare(`UPDATE workflow_runs
-    SET error_code = 'MODEL_TIMEOUT_CIRCUIT_OPEN', circuit_timeout_job_count = 10, lifetime_timeout_job_count = 10
-    WHERE id = ?`).run(workflowId);
+    SET error_code = ?, circuit_timeout_job_count = 10, lifetime_timeout_job_count = 10
+    WHERE id = ?`).run(pauseCode, workflowId);
   requestWorkflowPause(db, { workflowRunId: workflowId, now: "2026-08-10T02:00:00.000Z" });
   const paused = finalizeWorkflowControl(db, { workflowRunId: workflowId, now: "2026-08-10T02:05:00.000Z" });
   assert.strictEqual(paused.status, "paused");
@@ -253,6 +254,7 @@ function testResumeModelRecheckGate() {
     now: "2026-08-10T03:00:01.000Z"
   });
   assert.strictEqual(again.recoveryGeneration, 1);
+  }
 }
 
 function testResumeRecoveryGenerationTaskMigration() {

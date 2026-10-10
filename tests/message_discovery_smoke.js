@@ -3479,7 +3479,8 @@ function createFixture({
     tags: ["Java"],
     description: "Deliver reliable backend systems with clear ownership, production diagnostics, testing, observability, collaboration, and measurable engineering outcomes. ".repeat(2),
     qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "primary", marker: suffix, ...analysis }
+    analysis: { semanticStatus: "complete", recommendation: "primary", marker: suffix,
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, ...analysis }
   }, batchId);
   const card = ensureProgressCard(db, { profileId, planId, jobId, source: "boss", now: NOW });
   return { profileId, planId, jobId, card, title, salary, city, company };

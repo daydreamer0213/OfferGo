@@ -3,6 +3,7 @@ const { createBossMessageReader } = require("../adapters/sites/boss_message_read
 const { createZhaopinMessageReader, isZhaopinMessageUrl } = require("../adapters/sites/zhaopin_message_reader");
 const { createZhaopinMessageJobContextResolver } = require("../application/message_discovery/zhaopin_job_context");
 const { findMessageDiscoveryJobContext } = require("../core/candidate_progress");
+const { projectAnalysisForCurrentPipeline } = require('../core/analysis_revision');
 const { createBossMessageDetailReader } = require("../adapters/sites/boss_message_detail_reader");
 const { createZhaopinMessageDetailReader } = require("../adapters/sites/zhaopin_message_detail_reader");
 const { BossSiteAdapter, inspectBossSessionState } = require("../adapters/sites/boss");
@@ -983,7 +984,7 @@ function createMessageDiscoveryController(deps = {}) {
     const activePlan = getActiveSearchPlan(db, profileId);
     const contextPlanId = row.source === "zhaopin" ? activePlan?.id : row.plan_id;
     const trusted = platform && contextPlanId ? findMessageDiscoveryJobContext(db, { profileId, planId: contextPlanId, sourceId: row.source_id, platform }) : null;
-    const rowAnalysis = parseObject(row.analysis_json);
+    const rowAnalysis = projectAnalysisForCurrentPipeline(parseObject(row.analysis_json));
     const contextComplete = hasPublishableMessageContext(trusted)
       || (row.source === "boss"
         && String(row.description || "").trim().length >= 120

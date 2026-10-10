@@ -165,6 +165,16 @@ async function main() {
   await controller.control(request('workflowRunId=zhaopin-existing&action=resume'), platformFailure);
   assert.match(JSON.parse(platformFailure.body).error, /智联页面响应较慢/);
   assert.doesNotMatch(JSON.parse(platformFailure.body).error, /BOSS/);
+  service.control = async () => { throw Object.assign(new Error('batch model must be verified after the pause'), { code: 'WORKFLOW_MODEL_RECHECK_REQUIRED' }); };
+  const modelRecheckFailure = responseRecorder();
+  await controller.control(request('workflowRunId=workflow-existing&action=resume'), modelRecheckFailure);
+  const modelRecheckBody = JSON.parse(modelRecheckFailure.body);
+  assert.equal(modelRecheckFailure.statusCode, 409);
+  assert.equal(modelRecheckBody.errorCode, 'WORKFLOW_MODEL_RECHECK_REQUIRED');
+  assert.equal(modelRecheckBody.settingsHref, '/settings#model-profile-batch_screening');
+  assert.match(modelRecheckBody.error, /测试.*连接/);
+  assert.match(modelRecheckBody.error, /保留/);
+  assert.doesNotMatch(modelRecheckBody.error, /操作没有完成/);
   assert.equal(errors.length, 0);
 
   console.log("dashboard_workflow_controller_smoke ok");

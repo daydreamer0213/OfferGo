@@ -117,7 +117,7 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
     risks: ["需要确认团队规模"],
     analysis: {
       provider: "mock",
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionStatus: "decided",
       decisionSource: "model",
       recommendation: "apply",
@@ -139,7 +139,7 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
     company: "资料有限公司",
     analysis: {
       provider: "mock",
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionStatus: "decided",
       decisionSource: "model",
       recommendation: "apply",
@@ -215,12 +215,12 @@ function contentHashSmoke({ profileId, planId }) {
   const first = createBatch(db, "boss", "hash", "hash-first", { profileId, searchPlanId: planId });
   const jobId = upsertJob(db, job("hash-stable", {
     score: 10,
-    analysis: { provider: "model-a", semanticStatus: "complete", recommendation: "caution", recommendationSchemaVersion: 2 }
+    analysis: { provider: "model-a", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "caution", recommendationSchemaVersion: 2 }
   }), first);
   const second = createBatch(db, "boss", "hash", "hash-model-change", { profileId, searchPlanId: planId });
   upsertJob(db, job("hash-stable", {
     score: 99,
-    analysis: { provider: "model-b", semanticStatus: "complete", recommendation: "apply", recommendationSchemaVersion: 2 }
+    analysis: { provider: "model-b", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply", recommendationSchemaVersion: 2 }
   }), second);
   let current = listReportJobs(db, { planId, limit: 1000 }).find((item) => item.id === jobId);
   assert.strictEqual(current.detailChanged, false, "仅模型结果或分数变化不得冒充 JD 变化");
@@ -229,7 +229,7 @@ function contentHashSmoke({ profileId, planId }) {
   upsertJob(db, job("hash-stable", {
     salary: "12-18K",
     score: 99,
-    analysis: { provider: "model-b", semanticStatus: "complete", recommendation: "apply", recommendationSchemaVersion: 2 }
+    analysis: { provider: "model-b", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply", recommendationSchemaVersion: 2 }
   }), third);
   current = listReportJobs(db, { planId, limit: 1000 }).find((item) => item.id === jobId);
   assert.strictEqual(current.detailChanged, true, "平台薪资或 JD 变化必须可见");
@@ -391,7 +391,7 @@ function job(sourceId, overrides = {}) {
     greeting: "",
     analysis: {
       provider: "mock",
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "apply",
       recommendationSchemaVersion: 2,
       hardBlockers: []

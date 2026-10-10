@@ -1366,7 +1366,10 @@ try {
     ORDER BY t.position
   `).all(v5WorkflowAnalyzingId);
   assert.strictEqual(durableBackfilled.length, 3);
-  assert.deepStrictEqual(durableBackfilled.map((row) => row.task_status), ["succeeded", "skipped", "pending"]);
+  assert.deepStrictEqual(durableBackfilled.map((row) => row.task_status), ["pending", "skipped", "pending"],
+    '无版本的旧模型结果不能冒充当前规则的分析成功');
+  assert.equal(JSON.parse(durableBackfilled[0].analysis_json).semanticStatus, 'complete',
+    '重评待办不能改写旧分析的原始历史记录');
   assert.strictEqual(
     db.prepare("SELECT COUNT(*) AS n FROM job_analysis_attempts").get().n,
     0,

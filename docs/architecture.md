@@ -1,6 +1,6 @@
 # OfferGo 当前架构
 
-核对日期：2026-10-09，功能基线为 v1.4.1（`19dd6b1`）。本文描述当前源码；后续改动应同步更新相关段落。2026-09-16 的[早期架构审查](superpowers/reports/2026-09-16-architecture-review.md)保留当时的判断和数字，不代表当前状态。
+核对日期：2026-10-10，正式发布基线仍为 v1.4.1；当前源码正在实施岗位筛选统一决策改造。本文描述当前源码；后续改动应同步更新相关段落。2026-09-16 的[早期架构审查](superpowers/reports/2026-09-16-architecture-review.md)保留当时的判断和数字，不代表当前状态。
 
 ## 先看整体
 
@@ -38,6 +38,10 @@ flowchart LR
 
 ## 数据和运行方式
 
+岗位分析由 `createJobAnalysisRunner` 调用现有模型适配器理解 JD、选择工作方向、核对要求。三个纯规则模块分别负责：`job_match_evidence` 整理事实来源，`job_match_conditions` 区分必须满足的资格、工作能力与加分项，`job_match_decision` 生成唯一的正式推荐。学历或证照满足不再增加能力分；明确资格不符优先排除，资料未知保留待确认，原能力矩阵和 70/30 权重保持。
+
+结构化结果仍保存在原有 `analysis_json`，没有新增数据库表或版本迁移。岗位清单、默认选择、消息上下文、分析队列、恢复进度与关键词统计检查同一管线版本；旧分析和草稿保留用于历史查看，但需重新分析后才能作为当前结果。已有完整本地 JD 时复用现有重评用例，后续 HR 消息复用有效分析，不重新生成用户画像或搜索方案。历史发送归因仍采用发送当时的记录。
+
 - Dashboard 是本地 HTTP 服务；较长的扫描可由它启动 CLI 子进程。扫描租约、心跳和检查点用于避免同一站点重复执行，并支持异常后的确定状态。
 - SQLite 连接在 `src/storage/database.js` 建立，使用 WAL、外键检查和写锁等待；有序迁移及迁移前备份已经分开。`src/core/storage.js` 仍是旧调用方使用的兼容门面，不能因为目录名不理想就直接删除。
 - Dashboard 和 application 当前均没有直接 `db.prepare`；查询通过 store 或兼容接口完成。跨表事务和状态负责人见[生命周期说明](lifecycle.md)。
@@ -45,9 +49,9 @@ flowchart LR
 
 ## 已有的护栏
 
-`architecture-boundaries.json` 和 `scripts/check-architecture-boundaries.js` 检查静态 CommonJS 引用、文件循环、新的跨层调用、已消失却未删除的例外，以及 Dashboard/application 中的直接 SQL。2026-10-09 的检查结果为 **655 条内部引用、无文件循环**。这是一道快速护栏，不代表它能证明所有运行时行为正确；功能仍需要离线回归测试。
+`architecture-boundaries.json` 和 `scripts/check-architecture-boundaries.js` 检查静态 CommonJS 引用、文件循环、新的跨层调用、已消失却未删除的例外，以及 Dashboard/application 中的直接 SQL。2026-10-10 的检查结果为 **685 条内部引用、无文件循环**。这是一道快速护栏，不代表它能证明所有运行时行为正确；功能仍需要离线回归测试。
 
-当前测试清单在 `tests/test_manifest.js` 注册 **195 项**，分成 fast 40、integration 150、package 5；完整门禁使用 `npm test`，发布门禁使用 `npm run test:release`。严格门禁需要独立的测试浏览器依赖；CI 与发布流程均已准备，并实际执行页面检查。这个数字属于本次核对时的清单，不应套用到后续提交。
+当前测试清单在 `tests/test_manifest.js` 注册 **197 项**，分成 fast 42、integration 150、package 5；完整门禁使用 `npm test`，发布门禁使用 `npm run test:release`。严格门禁需要独立的测试浏览器依赖；CI 与发布流程均已准备，并实际执行页面检查。这个数字属于本次核对时的清单，不应套用到后续提交。
 
 ### 43 条跨层例外如何理解
 

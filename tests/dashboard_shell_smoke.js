@@ -318,6 +318,7 @@ async function assertRuntimeClient(source, site = "boss") {
   };
   const documentHandlers = {};
   const windowHandlers = {};
+  let workspaceReadyEvents = 0;
   elements['[data-platform-selector]'] = { value: site };
   const pending = [];
   const fetchCalls = [];
@@ -330,7 +331,14 @@ async function assertRuntimeClient(source, site = "boss") {
   };
   const context = {
     document,
-    window: { addEventListener(type, handler) { windowHandlers[type] = handler; } },
+    Event,
+    window: {
+      addEventListener(type, handler) { windowHandlers[type] = handler; },
+      dispatchEvent(event) {
+        if (event.type === 'offergo:workspace-ready') workspaceReadyEvents++;
+        windowHandlers[event.type]?.(event);
+      }
+    },
     fetch(url, options = {}) {
       fetchCalls.push({ url, options });
       return new Promise((resolve) => pending.push(resolve));
@@ -412,6 +420,13 @@ async function assertRuntimeClient(source, site = "boss") {
   pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
   await settlePromises();
   assert.match(elements['[data-runtime-title]'].textContent, /BOSS.*智联.*已就绪/);
+  assert.equal(workspaceReadyEvents, 1, 'workspace readiness must notify the search preview after startup or recovery');
+  documentHandlers.visibilitychange();
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  pending.shift()({ ok: true, async json() { return { browser: { ready: true }, workspace: { status: 'ready' } }; } });
+  await settlePromises();
+  assert.equal(workspaceReadyEvents, 1, 'an unchanged ready poll must not trigger repeated browser reads');
   documentHandlers.visibilitychange();
   elements['[data-platform-selector]'].value = site;
   windowHandlers['offergo:conditions']();
@@ -455,7 +470,7 @@ function seedQueueFixture(database) {
   upsertJob(database, {
     source: "boss", sourceId: "dashboard-shell-queue-job", keyword: "RAG", title: "Queue Fixture Engineer", company: "Fixture Co", location: "广州", salary: "15-20K", experience: "1-3年", education: "本科", bossActiveText: "今日活跃", bossActiveDays: 0,
     url: "https://www.zhipin.com/job_detail/dashboard-shell-queue.html", tags: ["Python", "RAG"], description: "Build Python RAG applications and maintain production services. ".repeat(5), score: 20, level: "优先", matches: ["Python", "RAG"], risks: ["平台筛选参数未完全解析：multiBusinessDistrict", "需确认轮班"], qualityTags: [],
-    analysis: { provider: "mock", model: "offline", semanticStatus: "complete", decisionSource: "model", recommendation: "primary", fitLevel: "A", confidence: 0.9, fitReasons: ["Python RAG matches"], evidence: { jd: ["Python RAG"], resume: ["Python RAG"] } }
+    analysis: { provider: "mock", model: "offline", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model", recommendation: "primary", fitLevel: "A", confidence: 0.9, fitReasons: ["Python RAG matches"], evidence: { jd: ["Python RAG"], resume: ["Python RAG"] } }
   }, batchId);
   return saved;
 }

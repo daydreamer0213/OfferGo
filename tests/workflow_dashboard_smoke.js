@@ -1974,6 +1974,9 @@ async function testPortableDashboardBinding({ database, acquisitionContextResolv
   };
   const trackedPreviewResolver = async (input) => {
     previewResolutionCount += 1;
+    if (!workspaceCalls.some(call => call.reason === 'search_conditions_preview')) {
+      throw Object.assign(new Error('搜索标签绑定已失效'), { code: 'BOSS_TAB_REQUIRED', statusCode: 409 });
+    }
     return acquisitionContextResolver(input);
   };
   const portableServer = createDashboardServer({
@@ -2044,7 +2047,10 @@ async function testPortableDashboardBinding({ database, acquisitionContextResolv
     };
     const started = await postForm(portableBaseUrl, "/api/workflow-run", { planId: saved.planId, action: "start" });
     assert.strictEqual(started.status, 303, started.body);
-    assert.deepStrictEqual(workspaceCalls, [{ startupGuidance: false, reason: "workflow_start" }]);
+    assert.deepStrictEqual(workspaceCalls, [
+      { startupGuidance: false, reason: "search_conditions_preview" },
+      { startupGuidance: false, reason: "workflow_start" }
+    ]);
     const workflow = listWorkflowRuns(database, { planId: saved.planId })[0];
     assert.deepStrictEqual(
       { browserMode: workflow.planner.browserMode, cdpPort: workflow.planner.cdpPort },
@@ -2064,6 +2070,7 @@ async function testPortableDashboardBinding({ database, acquisitionContextResolv
     });
     assert.strictEqual(resumed.status, 303, resumed.body);
     assert.deepStrictEqual(workspaceCalls, [
+      { startupGuidance: false, reason: "search_conditions_preview" },
       { startupGuidance: false, reason: "workflow_start" },
       { startupGuidance: false, reason: "workflow_resume" }
     ]);
@@ -2144,6 +2151,7 @@ async function testPerJobWorkflowProgressPanel(baseUrl, database, saved) {
     description: "Complete local workflow progress JD. ".repeat(8),
     analysis: {
       semanticStatus: "complete",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       decisionStatus: "decided",
       decisionSource: "model",
       recommendation: "apply"
@@ -3169,6 +3177,7 @@ function job(index) {
     analysis: {
       provider: "openai_compatible",
       semanticStatus: "complete",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "primary",
       recommendationSchemaVersion: 2,
       fitLevel: "fit",

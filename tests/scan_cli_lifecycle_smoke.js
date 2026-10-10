@@ -532,6 +532,22 @@ function resumeBatchSmoke() {
     targetKeys: [snapshot.targets[1].targetKey]
   });
 
+  const pendingJob = { source: 'boss', sourceId: 'boss:resume-old-pending',
+    title: 'RAG开发', company: '测试公司', location: 'Guangzhou', keyword: 'RAG',
+    url: 'https://www.zhipin.com/job_detail/resume-old-pending.html',
+    description: '', qualityTags: ['detail_unverified'] };
+  const pendingId = upsertJob(db, pendingJob, batchId);
+  const changedListResume = resolveResumeBatch(db, { resumeBatchId: batchId, site: 'boss',
+    planId, executionSnapshot: snapshot });
+  assert.deepStrictEqual(changedListResume.targetKeys, snapshot.targets.map(target => target.targetKey),
+    '列表变动不能让已经保存但没有补齐详情的原岗位失去继续入口');
+  assert.strictEqual(changedListResume.progress.partial, 2);
+  upsertJob(db, { ...pendingJob, id: pendingId,
+    description: '完整的岗位职责和任职要求。'.repeat(20), qualityTags: [] }, batchId);
+  assert.deepStrictEqual(resolveResumeBatch(db, { resumeBatchId: batchId, site: 'boss',
+    planId, executionSnapshot: snapshot }).targetKeys, [snapshot.targets[1].targetKey],
+    '旧待办实际补齐后，不再强迫重复读取已完成的目标');
+
   assert.throws(() => resolveResumeBatch(db, {
     resumeBatchId: batchId,
     site: "boss",

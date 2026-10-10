@@ -1,5 +1,6 @@
 const { decisionBucket } = require("./storage");
 const { workflowEligibility } = require("./workflow_inventory");
+const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
 
 function listScopedKeywordStats(db, {
   profileId,
@@ -41,7 +42,7 @@ function listScopedKeywordStats(db, {
     const word = String(row.keyword || "").trim();
     if (!word) continue;
     const qualityTags = parseJson(row.quality_tags_json, []);
-    const analysis = parseJson(row.analysis_json, {});
+    const analysis = projectAnalysisForCurrentPipeline(parseJson(row.analysis_json, {}));
     const job = {
       source: row.source,
       sourceId: row.source_id,
@@ -61,8 +62,10 @@ function listScopedKeywordStats(db, {
       eligibleCount: 0,
       usedToday: usedToday.has(word)
     };
-    current.sampleSize += 1;
-    if (workflowEligibility(job, { now }).eligible) current.eligibleCount += 1;
+    if (analysis.semanticStatus !== 'stale') {
+      current.sampleSize += 1;
+      if (workflowEligibility(job, { now }).eligible) current.eligibleCount += 1;
+    }
     stats.set(word, current);
   }
   for (const word of usedToday) {

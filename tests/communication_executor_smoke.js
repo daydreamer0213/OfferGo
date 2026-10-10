@@ -1592,7 +1592,7 @@ function job(index) {
     risks: [],
     qualityTags: [],
     analysis: {
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "primary",
       recommendationSchemaVersion: 2,
       fitLevel: "fit",

@@ -265,7 +265,7 @@ function groundSplitCandidateEvidence(raw, evidence) {
     grounded[field] = raw[field].flatMap(row => {
       if (row.state === 'unknown') return [row];
       const refs = row.candidateEvidenceRefs || inferCandidateEvidenceRefs(evidence, row.resumeEvidence);
-      const verified = verifyJobMatchEvidence({ evidence, refs, sourceKind: ['resume', 'profile_fact'], claim: row.resumeEvidence });
+      const verified = verifyJobMatchEvidence({ evidence, refs, sourceKind: ['resume', 'profile_fact'], claim: row.resumeEvidence, state: row.state });
       if (!refs.length || !verified.valid) { invalidIds.push(row.id); return []; }
       return [{ ...row, candidateEvidenceRefs: refs }];
     });

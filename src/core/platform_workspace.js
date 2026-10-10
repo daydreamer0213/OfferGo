@@ -41,10 +41,23 @@ async function preparePlatformWorkspaceTabs({
   }
 
   if (typeof browser.restoreDormantTabs === "function") {
-    await browser.restoreDormantTabs({ windowIds: [dashboardTab.windowId],
+    const restoredIds = await browser.restoreDormantTabs({ windowIds: [dashboardTab.windowId],
       matchesUrl: url => enabled.some(site => matchesRole({ url }, site, "search")
         || matchesRole({ url }, site, "message")) });
     tabs = await browser.listTabs();
+    // A reload acknowledgement is not proof that the original page is listed yet.
+    // Preserve its identity instead of creating a second fixed platform page.
+    if (Array.isArray(restoredIds) && restoredIds.length) {
+      for (const delayMs of WORKSPACE_SETTLEMENT_DELAYS_MS) {
+        if (restoredIds.every(id => findById(tabs, id))) break;
+        await settleDelay(delayMs);
+        tabs = await browser.listTabs();
+      }
+      if (restoredIds.some(id => !findById(tabs, id))) {
+        throw workspaceError('WORKSPACE_DORMANT_PAGE_NOT_READY',
+          '原招聘平台页面仍在恢复，当前进度已保留，请稍后继续；不会重复创建页面。');
+      }
+    }
   }
 
   const platformTabs = {};

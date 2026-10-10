@@ -206,7 +206,7 @@ function addJob(db, owner, sourceId, title, { source = "zhaopin" } = {}) {
     url: source === "zhaopin" ? `https://www.zhaopin.com/jobdetail/${sourceId}.htm` : `https://www.zhipin.com/job_detail/${sourceId}.html`,
     description: "完整合成岗位职责、任职要求、交付边界和可核验技术背景。".repeat(8),
     score: 90, level: "优先", decisionBucket: "primary", qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2, fitLevel: "fit", confidence: 0.9, hardBlockers: [], fitReasons: ["合成匹配证据"], evidence: { jd: ["岗位证据"], resume: ["简历证据"] } }
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary", recommendationSchemaVersion: 2, fitLevel: "fit", confidence: 0.9, hardBlockers: [], fitReasons: ["合成匹配证据"], evidence: { jd: ["岗位证据"], resume: ["简历证据"] } }
   }, batchId);
 }
 

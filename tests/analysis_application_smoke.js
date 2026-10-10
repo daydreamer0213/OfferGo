@@ -13,6 +13,7 @@ const {
   listDecisionPool,
   listReportJobs,
   markCandidateJob,
+  archiveCandidateJob,
   createWorkflowRun,
   getWorkflowRun,
   isJobAwaitingAction
@@ -37,6 +38,10 @@ let server;
   try {
     await testDashboardContract();
     await testApplicationBoundary();
+    await testUnresolvedMatchCanActuallyRetry();
+    await testBulkRecoveryStopsOnQuotaFailure();
+    await testRecoveryPreservesInFlightSuccess();
+    await testProductionRecoveryStopsOnHttpConfigurationFailure();
     assert(!runtimeWarnings.some((warning) => /circular dependency/i.test(warning.message)), "analysis inventory core ownership must not introduce a circular dependency");
     console.log("analysis_application_smoke ok");
   } finally {
@@ -48,6 +53,46 @@ let server;
   console.error(error.stack || error.message);
   process.exitCode = 1;
 });
+
+async function testUnresolvedMatchCanActuallyRetry() {
+  const cacheDb = openDb(':memory:');
+  try {
+    const duties = ['整理客户订单信息并更新记录', '核对客户信息并交接异常订单'];
+    const configs = require('../src/config').loadConfigs(root);
+    configs.model = { provider: 'fixture', model: 'pending-retry' };
+    configs.semanticMatchingMode = 'split';
+    configs.candidateProfile = { projects: [{ name: '订单记录', canSay: duties }] };
+    let understands = 0, matches = 0;
+    const analyze = require('../src/core/job_analysis').createJobAnalysisRunner(configs, [], { db: cacheDb, analyzer: {
+      async understandJob() {
+        understands++;
+        return { industryContext: '客户服务', hiringTracks: [{ id: 'T1', label: '订单记录', roleSummary: duties[0],
+          responsibilityEvidence: duties.map(value => `JD：${value}`) }], requirements: [
+          { label: '订单记录', trackIds: ['T1'], foundation: true, central: true, indispensable: false, evidence: `JD：${duties[0]}` }
+        ], eligibility: [], riskSignals: [] };
+      },
+      async matchJob() {
+        matches++;
+        return matches === 1 ? { selectedTrackId: 'T1', roleAlignment: 'insufficient_evidence', roleResumeEvidence: [], roleGaps: ['订单核对职责尚无可判断的经历证据'],
+          responsibilityMatches: [], matches: [], eligibility: [] } : {
+          selectedTrackId: 'T1', roleAlignment: 'aligned', roleResumeEvidence: [`简历：${duties[0]}`], roleGaps: [],
+          responsibilityMatches: duties.map((value,index) => ({ id: 'D'+(index+1), state: 'matched', resumeEvidence: `简历：${value}` })),
+          matches: [{ id: 'R1', state: 'matched', resumeEvidence: `简历：${duties[0]}` }], eligibility: []
+        };
+      }
+    } });
+    const job = { source: 'boss', sourceId: 'pending-retry', title: '订单记录', location: '广州',
+      description: duties.join('。').repeat(8), qualityTags: [] };
+    assert.equal((await analyze(job)).decisionStatus, 'needs_retry');
+    const retried = await analyze(job);
+    assert.equal(retried.decisionStatus, 'decided', '明确重评必须重新执行未完成的匹配，不能永久返回缓存里的待分析结果');
+    assert.equal(retried.recommendation, 'primary');
+    assert.equal(understands, 1, '有效JD理解继续复用');
+    assert.equal(matches, 2, '只重新执行未完成匹配');
+    assert.equal((await analyze(job)).recommendation, 'primary');
+    assert.equal(matches, 2, '成功匹配仍继续缓存复用');
+  } finally { cacheDb.close(); }
+}
 
 async function testApplicationBoundary() {
   const legacy = seedPlan("legacy-resume-evidence");
@@ -182,11 +227,25 @@ async function testApplicationBoundary() {
   assert.strictEqual(bulk.concurrency, PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency);
   assert.strictEqual(mixedRunner.peak, PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency, "bulk must use the configured retry concurrency");
   assert(!mixedRunner.calls.includes("bulk-source-pending"), "source-pending jobs must not invoke the analyzer seam");
+  assert(!pendingIds(mixed.planId).includes(sourcePendingId),
+    "a newly detected local blocker must leave the analysis retry queue instead of retrying forever");
+  assert.strictEqual(job(db, mixed.planId, sourcePendingId).decisionBucket, "not_recommended");
   assert.strictEqual(job(db, mixed.planId, completeId).analysis.semanticStatus, "complete");
   assert.strictEqual(job(db, mixed.planId, partialId).analysis.semanticStatus, "partial");
   assert.strictEqual(job(db, mixed.planId, failedId).analysis.errorCode, "MODEL_TIMEOUT");
   assert.deepStrictEqual(job(db, mixed.planId, partialId).analysis.analysisRevision, { fixture: "bulk-partial", version: "analysis-retry-smoke" });
-  assert.strictEqual(db.prepare("SELECT COUNT(*) AS count FROM job_observations WHERE batch_id = ? AND job_id = ?").get(bulk.batchId, sourcePendingId).count, 0);
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS count FROM job_observations WHERE batch_id = ? AND job_id = ?").get(bulk.batchId, sourcePendingId).count, 1);
+  const scoped = seedPlan("scoped-retry");
+  const visibleId = seedFailedJob(scoped, "scoped-boss-complete");
+  const outsideId = seedFailedJob(scoped, "scoped-zhaopin-complete", { source: "zhaopin", url: "https://www.zhaopin.com/jobdetail/scoped.html" });
+  const scopedRunner = controlledRunner({ delayMs: 0 });
+  const scopedRetry = await retryPendingJobAnalyses({ db,
+    input: { planId: scoped.planId, jobIds: String(visibleId) }, deps: applicationDeps(scopedRunner) });
+  assert.deepStrictEqual(scopedRetry.jobIds, [visibleId], "a page's retry list must not include another platform or another scope");
+  assert(pendingIds(scoped.planId).includes(outsideId));
+  await rejects(() => retryPendingJobAnalyses({ db,
+    input: { planId: scoped.planId, jobIds: String(sourcePendingId) }, deps: applicationDeps(scopedRunner) }),
+    error => assert.match(error.message, /不属于/));
   assert.deepStrictEqual(batch(db, bulk.batchId).filterSnapshot.jobIds, expectedMixed);
 
   const capped = seedPlan("capped");
@@ -220,6 +279,77 @@ async function testApplicationBoundary() {
     assert.strictEqual(error.message, "当前没有待重试的语义分析岗位。");
   });
   assert.deepStrictEqual(errorRunner.calls, [], "validation failures must happen before analyzer execution");
+}
+
+async function testBulkRecoveryStopsOnQuotaFailure() {
+  const saved = seedPlan('quota-recovery');
+  const ids = Array.from({ length: 6 }, (_, i) => seedFailedJob(saved, `quota-recovery-${i}`, { source: 'zhaopin' }));
+  const before = ids.map(id => JSON.stringify(job(db, saved.planId, id).analysis));
+  const calls = [];
+  const deps = applicationDeps(controlledRunner(), {
+    createJobAnalysisRunner: () => async input => {
+      calls.push(input.id);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return { semanticStatus: 'failed', decisionSource: 'analysis_pending', errorCode: 'HTTP_402', error: 'Insufficient balance' };
+    }
+  });
+  await assert.rejects(retryPendingJobAnalyses({ db, input: { planId: saved.planId, jobIds: ids, site: 'zhaopin' }, deps }),
+    error => error.code === 'MODEL_QUOTA_EXHAUSTED' && error.statusCode === 409);
+  assert.equal(calls.length, PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency, 'quota failure stops new model calls after already running workers');
+  for (const id of ids.filter(id => !calls.includes(id))) {
+    assert.equal(JSON.stringify(job(db, saved.planId, id).analysis), before[ids.indexOf(id)], 'unstarted jobs retain their original pending results');
+  }
+  for (const id of calls) assert.equal(job(db, saved.planId, id).analysis.errorCode, 'HTTP_402', 'issued failures remain recorded');
+}
+
+async function testRecoveryPreservesInFlightSuccess() {
+  const saved = seedPlan('quota-in-flight');
+  const ids = Array.from({ length: 4 }, (_, i) => seedFailedJob(saved, `quota-in-flight-${i}`, { source: 'zhaopin' }));
+  const ordered = pendingIds(saved.planId);
+  const before = ids.map(id => JSON.stringify(job(db, saved.planId, id).analysis));
+  const calls = [];
+  const runner = controlledRunner({ delayMs: 0 });
+  const deps = applicationDeps(runner, {
+    createJobAnalysisRunner(configs) {
+      const complete = runner.create(configs);
+      return async input => {
+        calls.push(input.id);
+        await new Promise(resolve => setTimeout(resolve, input.id === ordered[0] ? 30 : 10));
+        if (input.id !== ordered[0]) throw Object.assign(new Error('balance exhausted'), { status: 402 });
+        return complete(input);
+      };
+    }
+  });
+  await assert.rejects(retryPendingJobAnalyses({ db, input: { planId: saved.planId, jobIds: ids, site: 'zhaopin' }, deps }),
+    error => error.code === 'MODEL_QUOTA_EXHAUSTED');
+  assert.deepEqual(calls, ordered.slice(0, 2), 'a raw HTTP configuration failure also prevents new requests');
+  assert.equal(job(db, saved.planId, ordered[0]).analysis.semanticStatus, 'complete', 'already running successful analysis must be saved before reporting the pause');
+  assert.equal(job(db, saved.planId, ordered[1]).analysis.errorCode, 'HTTP_402');
+  for (const id of ordered.slice(2)) assert.equal(JSON.stringify(job(db, saved.planId, id).analysis), before[ids.indexOf(id)]);
+}
+
+async function testProductionRecoveryStopsOnHttpConfigurationFailure() {
+  for (const [status, code] of [[402, 'MODEL_QUOTA_EXHAUSTED'], [401, 'MODEL_CONFIGURATION_REQUIRED']]) {
+    const saved = seedPlan(`transport-${status}`);
+    const ids = Array.from({ length: 6 }, (_, i) => seedFailedJob(saved, `transport-${status}-${i}`, { source: 'zhaopin' }));
+    let calls = 0;
+    const deps = applicationDeps(controlledRunner(), {
+      createJobAnalysisRunner(configs, keywords, options) {
+        configs.semanticMatchingMode = 'split';
+        return require('../src/core/job_analysis').createJobAnalysisRunner(configs, keywords, {
+          ...options,
+          analyzer: { async understandJob() {
+            calls++;
+            await new Promise(resolve => setTimeout(resolve, 10));
+            throw Object.assign(new Error('transport configuration error'), { status });
+          } }
+        });
+      }
+    });
+    await assert.rejects(retryPendingJobAnalyses({ db, input: { planId: saved.planId, jobIds: ids, site: 'zhaopin' }, deps }),
+      error => error.code === code && error.statusCode === 409);
+    assert.equal(calls, PRODUCT_POLICY.operations.modelAnalysis.retryConcurrency, 'production result-mode errors retain the HTTP status needed to stop new requests');
+  }
 }
 
 async function testDashboardContract() {
@@ -323,6 +453,84 @@ async function testDashboardContract() {
   assert(emptyBulkHtml.includes("JOB_ANALYSIS_RETRY_FAILED"));
   assert(emptyBulkHtml.includes("analysis-http-request"));
   assert(emptyBulkHtml.includes(`href="/queue?planId=${empty.planId}&amp;pool=analysis_pending"`));
+  await testAnalysisWaitingUi(base, http.planId, failedJobId);
+  const zhaopin = seedPlan("http-zhaopin-recovery");
+  const zhaopinJobId = seedFailedJob(zhaopin, "http-zhaopin-complete", { source: "zhaopin" });
+  const analysisHref = `/queue?planId=${zhaopin.planId}&site=zhaopin&pool=analysis_pending`;
+  const zhaopinPage = await (await fetch(`${base}/jobs?planId=${zhaopin.planId}&site=zhaopin`)).text();
+  assert(zhaopinPage.includes(`href="${analysisHref.replaceAll('&', '&amp;')}"`), "Zhaopin records must expose the existing saved-JD analysis queue");
+  const recoveryPage = await (await fetch(`${base}${analysisHref}`)).text();
+  assert(recoveryPage.includes('action="/api/analyze-jobs"'));
+  assert(recoveryPage.includes(`name="jobIds" value="${zhaopinJobId}"`));
+  const zhaopinRecovered = await post(base, "/api/analyze-jobs", { planId: zhaopin.planId, jobIds: String(zhaopinJobId), site: "zhaopin" });
+  assert.equal(zhaopinRecovered.status, 303);
+  assert.equal(job(db, zhaopin.planId, zhaopinJobId).analysis.semanticStatus, "complete");
+  assert.equal(db.prepare('SELECT site FROM batches WHERE id = ?').get(job(db, zhaopin.planId, zhaopinJobId).batchId).site, 'zhaopin');
+  assert.equal(httpRunner.calls.filter(id => id === 'http-zhaopin-complete').length, 1, "saved-JD recovery calls the existing analyzer once");
+  const recoveredPage = await (await fetch(`${base}/jobs?planId=${zhaopin.planId}&site=zhaopin&batch=all`)).text();
+  assert(!recoveredPage.includes('继续分析已有岗位'), "a fully resolved list must not retain a misleading recovery prompt");
+  const archived = seedPlan('http-zhaopin-archived');
+  const archivedId = seedFailedJob(archived, 'http-zhaopin-archived', { source: 'zhaopin' });
+  archiveCandidateJob(db, { profileId: archived.profileId, planId: archived.planId, jobId: archivedId });
+  const archivedPage = await (await fetch(`${base}/jobs?planId=${archived.planId}&site=zhaopin&archive=only`)).text();
+  assert(!archivedPage.includes('继续分析已有岗位'), 'archived jobs must not lead to an empty recovery queue');
+  const quota = seedPlan('http-quota');
+  const quotaId = seedFailedJob(quota, 'http-quota', { source: 'zhaopin' });
+  const quotaResponse = await post(base, '/api/analyze-jobs', { planId: quota.planId, jobIds: String(quotaId), site: 'zhaopin' });
+  assert.equal(quotaResponse.status, 409);
+  const quotaHtml = await quotaResponse.text();
+  assert(quotaHtml.includes('MODEL_QUOTA_EXHAUSTED'));
+  assert(quotaHtml.includes('href="/settings#model-profile-batch_screening"'), 'quota recovery directs the user to the existing model settings');
+}
+
+async function testAnalysisWaitingUi(base, planId, jobId) {
+  let chromium;
+  try { ({ chromium } = require("playwright")); }
+  catch (error) { if (process.env.ROLEFLOW_REQUIRE_PLAYWRIGHT === "1") throw error; return; }
+  const browser = await chromium.launch({ channel: "msedge", headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${base}/queue?planId=${planId}&pool=analysis_pending`);
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    let requests = 0;
+    let entered;
+    const routeEntered = new Promise(resolve => { entered = resolve; });
+    let posted;
+    await page.route("**/api/analyze-jobs", async route => {
+      requests += 1;
+      posted = new URLSearchParams(route.request().postData());
+      entered();
+      await held;
+      await route.fulfill({ status: 303, headers: { location: `/queue?planId=${planId}` } });
+    });
+    const bulk = page.locator('form[action="/api/analyze-jobs"]');
+    await bulk.locator("button").click({ noWaitAfter: true });
+    await page.waitForFunction(() => document.querySelector('[role="status"]')?.textContent.includes("正在分析"), null, { timeout: 2500 });
+    await routeEntered;
+    assert.strictEqual(posted.get("jobIds"), String(jobId), "the visible queue controls the actual retry snapshot");
+    assert.strictEqual(posted.get("site"), "boss");
+    assert.strictEqual(await bulk.locator("button").isDisabled(), true);
+    assert.strictEqual(await page.locator("main h1").innerText(), "当前待处理岗位", "the existing page remains readable while analysis is pending");
+    await bulk.evaluate(form => form.requestSubmit());
+    assert.strictEqual(requests, 1, "repeated submissions must not queue another analysis request");
+    release();
+    await page.waitForURL(`${base}/queue?planId=${planId}`);
+    await page.goto(`${base}/queue?planId=${planId}&pool=analysis_pending`);
+    const single = page.locator(`form[action="/api/analyze-job"]:has(input[name="jobId"][value="${jobId}"])`);
+    await page.route("**/api/analyze-job", route => route.fulfill({ status: 409, contentType: "text/html", body: '<main><p>模型尚未配置</p><a href="/settings">配置模型</a></main>' }));
+    await single.locator("button").click();
+    await page.waitForFunction(() => document.querySelector('[role="alert"]')?.textContent.includes("模型尚未配置"));
+    assert.strictEqual(await single.locator("button").isEnabled(), true);
+    assert.strictEqual(await page.locator('[role="alert"] a').getAttribute("href"), "/settings");
+    await page.unroute("**/api/analyze-job");
+    let failures = 0;
+    await page.route("**/api/analyze-job", route => { failures += 1; return route.abort(); });
+    await single.locator("button").click();
+    await page.waitForFunction(() => document.querySelector('[role="alert"]')?.textContent.includes("暂时无法确认"));
+    assert.strictEqual(failures, 1, "an uncertain response must not replay itself");
+    assert.strictEqual(await single.locator("button").isEnabled(), true);
+  } finally { await browser.close(); }
 }
 
 function seedPlan(label, { confirmCard = true } = {}) {
@@ -354,7 +562,7 @@ function seedPlan(label, { confirmCard = true } = {}) {
 }
 
 function seedFailedJob(saved, sourceId, overrides = {}) {
-  const batchId = createBatch(db, "boss", "seed", "analysis application smoke", {
+  const batchId = createBatch(db, overrides.source || "boss", "seed", "analysis application smoke", {
     profileId: saved.profileId,
     searchPlanId: saved.planId,
     filterSnapshot: { execution: { scanKind: "daily" } }
@@ -411,6 +619,7 @@ function controlledRunner({ delayMs = 10 } = {}) {
         state.peak = Math.max(state.peak, state.active);
         try {
           if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (jobInput.sourceId === 'http-quota') return { semanticStatus: 'failed', errorCode: 'HTTP_402', decisionSource: 'analysis_pending' };
           const semanticStatus = jobInput.sourceId.includes("partial") ? "partial"
             : jobInput.sourceId.includes("failed") ? "failed"
               : "complete";
@@ -418,6 +627,8 @@ function controlledRunner({ delayMs = 10 } = {}) {
             provider: "fixture",
             model: "offline-runner",
             semanticStatus,
+            revision: require('../src/core/analysis_revision').buildAnalysisRevision(configs,
+              require('../src/storage/job_store').sourceContentHash(jobInput)),
             decisionStatus: semanticStatus === "partial" ? "needs_retry" : "ready",
             recommendation: semanticStatus === "complete" ? "apply" : "review",
             fitLevel: semanticStatus === "complete" ? "A" : "C",

@@ -333,9 +333,12 @@ async function cachedModelCall({ db, configs, logger = null, kind, pipelineVersi
       try {
         const result = validateModelResult(kind, cached.result, validationContext);
         throwIfOperationAborted(signal);
-        logger?.info("model_cache_hit", { kind, provider, model, pipelineVersion });
-        logger?.info("model_call_completed", { kind, provider, model, cacheHit: true, latencyMs: 0, attempts: 0, httpStatus: null, usage: null, jsonModeFallback: false });
-        return result;
+        if (isReusableModelResult(kind, result)) {
+          logger?.info("model_cache_hit", { kind, provider, model, pipelineVersion });
+          logger?.info("model_call_completed", { kind, provider, model, cacheHit: true, latencyMs: 0, attempts: 0, httpStatus: null, usage: null, jsonModeFallback: false });
+          return result;
+        }
+        logger?.info("model_cache_unresolved", { kind, provider, model, pipelineVersion });
       } catch (error) {
         if (error?.code !== "MODEL_CONTRACT_INVALID") {
           error.modelStage = kind;
@@ -389,9 +392,16 @@ async function cachedModelCall({ db, configs, logger = null, kind, pipelineVersi
     }
   }
   throwIfOperationAborted(signal);
-  if (db) saveModelCache(db, { cacheKey, kind, provider, model, inputHash, result });
-  logger?.info("model_cache_saved", { kind, provider, model, pipelineVersion });
+  if (db && isReusableModelResult(kind, result)) {
+    saveModelCache(db, { cacheKey, kind, provider, model, inputHash, result });
+    logger?.info("model_cache_saved", { kind, provider, model, pipelineVersion });
+  }
   return result;
+}
+
+function isReusableModelResult(kind, result) {
+  return kind !== 'matchJob' || result.roleAlignment !== 'insufficient_evidence'
+    || result.qualificationStatus === 'conflict';
 }
 
 function throwIfOperationAborted(signal) {

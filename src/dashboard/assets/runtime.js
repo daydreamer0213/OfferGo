@@ -80,6 +80,7 @@
   }
 
   function applyView(view, site) {
+    const becameReady = view.state === 'ready' && region.dataset.state !== 'ready';
     region.dataset.state = view.state;
     title.textContent = view.title;
     message.textContent = view.message;
@@ -87,6 +88,7 @@
     actionSite = site;
     actionButton.textContent = view.button;
     actionButton.hidden = !view.button;
+    if (becameReady) window.dispatchEvent(new Event('offergo:workspace-ready'));
   }
 
   function schedulePoll() {

@@ -41,6 +41,7 @@ try {
   testPausedAcquisitionRemainderAcrossPlatforms();
   testTruthfulFourTrackReadModel();
   testFailedTaskResolutionUsesLatestPlanObservation();
+  testInvalidatedSuccessfulResultIsNotDisplayedAsComplete();
   testCommunicationProgressSeparatesAmbiguity();
   testStageMapping();
   testModelIdentityFromPlannerSnapshot();
@@ -61,6 +62,20 @@ try {
   console.log("workflow_progress_smoke ok");
 } finally {
   db.close();
+}
+
+function testInvalidatedSuccessfulResultIsNotDisplayedAsComplete() {
+  const scenario = seedWorkflow(db, { analyses: [{}], localDay: '2026-10-12', modelConfigRevision: 'mrev-invalidated' });
+  initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId, jobs: observationEntries(db, scenario.batchId), modelConfigRevision: 'mrev-invalidated', now: '2026-10-12T00:00:00.000Z' });
+  const task = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0];
+  db.prepare("UPDATE workflow_job_tasks SET status = 'succeeded' WHERE id = ?").run(task.id);
+  db.prepare('UPDATE job_observations SET analysis_json = ? WHERE id = ?').run(JSON.stringify({ provider: 'scan-checkpoint', semanticStatus: 'pending', decisionSource: 'analysis_pending' }), task.observationId);
+  transitionWorkflowRun(db, { id: scenario.workflowId, status: 'paused', resumePhase: 'analyzing' });
+  const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
+  assert.equal(snapshot.progress.analysis.succeeded, 0, 'the old successful task cannot stand in for a currently pending analysis');
+  assert.equal(snapshot.progress.analysis.pending, 1);
+  assert.equal(listWorkflowProgressJobs(db, scenario.workflowId)[0].status, 'pending');
+  assert.equal(db.prepare('SELECT status FROM workflow_job_tasks WHERE id = ?').get(task.id).status, 'succeeded', 'a read does not rewrite historical task state');
 }
 
 function testSnapshotRequiresExactRunId() {
@@ -575,6 +590,17 @@ function testFailedTaskResolutionUsesLatestPlanObservation() {
       recommendation: "apply"
     }
   }, retryBatchId);
+  const versions = require('../src/core/analysis_revision').PIPELINE_VERSIONS;
+  const retryAnalysis = JSON.parse(db.prepare('SELECT analysis_json FROM job_observations WHERE batch_id = ?').get(retryBatchId).analysis_json);
+  db.prepare('UPDATE job_observations SET analysis_json = ? WHERE batch_id = ?').run(JSON.stringify({
+    ...retryAnalysis, revision: { pipelineVersions: { ...versions, matchJob: 'historical-matching' } }
+  }), retryBatchId);
+  assert.equal(getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId,
+    now: '2026-08-24T00:02:00.000Z' }).progress.analysis.resolvedAfterFailure, 0,
+    '旧规则分析不算失败已恢复');
+  db.prepare('UPDATE job_observations SET analysis_json = ? WHERE batch_id = ?').run(JSON.stringify({
+    ...retryAnalysis, revision: { pipelineVersions: versions }
+  }), retryBatchId);
 
   const snapshot = getWorkflowProgressSnapshot(db, {
     workflowRunId: scenario.workflowId,
@@ -584,6 +610,11 @@ function testFailedTaskResolutionUsesLatestPlanObservation() {
   assert.strictEqual(snapshot.progress.analysis.historicalFailed, 2);
   assert.strictEqual(snapshot.progress.analysis.resolvedAfterFailure, 1);
   assert.strictEqual(snapshot.progress.analysis.unresolvedFailed, 1);
+  assert.match(snapshot.progress.remainingWorkLabel, /1 个岗位分析失败尚未解决/,
+    "remaining-work summary must include unresolved failures, without counting an already resolved historical failure");
+  transitionWorkflowRun(db, { id: scenario.workflowId, status: "paused", resumePhase: "analyzing" });
+  assert.match(getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId }).progress.remainingWorkLabel,
+    /1 个岗位分析失败尚未解决/, "paused analysis must retain the same unresolved-work warning");
   assert.deepStrictEqual(
     snapshot.progress.analysis.tasks.map((task) => task.resolvedAfterFailure),
     [true, false]

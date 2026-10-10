@@ -3,6 +3,7 @@
 const { PRODUCT_POLICY } = require("./product_policy");
 const { workflowRunConsumesSlot } = require("./workflow_control");
 const { hasCompleteJobDescription } = require("./job_description_readiness");
+const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
 
 const WORKFLOW_STAGES = Object.freeze([
   "准备本轮",
@@ -434,11 +435,14 @@ function readWorkflowTaskRows(db, workflowRunId, { includeDisplay = false } = {}
     WHERE t.workflow_run_id = ?
     ORDER BY t.position ASC, t.id ASC
   `).all(workflowRunId).map((row) => {
-    const currentAnalysisResolved = analysisIsComplete(parseJson(row.latest_analysis_json, {}));
+    const analysis = projectAnalysisForCurrentPipeline(parseJson(row.latest_analysis_json, {}));
+    const currentAnalysisResolved = analysisIsComplete(analysis);
+    const invalidatedSuccess = row.status === 'succeeded'
+      && ['pending', 'stale', 'partial', 'failed'].includes(analysis.semanticStatus);
     return {
       id: Number(row.id),
       position: Number(row.position),
-      status: String(row.status || ""),
+      status: invalidatedSuccess ? 'pending' : String(row.status || ""),
       lastErrorCode: row.last_error_code === "DETAIL_REQUIRED" ? "DETAIL_REQUIRED" : null,
       finishedAt: row.finished_at || null,
       modelConfigRevision: row.model_config_revision || null,
@@ -597,7 +601,9 @@ function workflowRemainingWorkLabel(status, progress) {
     const pending = progress.analysis.pending
       + progress.analysis.running
       + progress.analysis.retryPending;
-    return `还有 ${pending} 个岗位待分析；${progress.analysis.detailRequired} 个岗位待补详情`;
+    const failed = Number(progress.analysis.unresolvedFailed || 0);
+    const unresolved = failed ? `；另有 ${failed} 个岗位分析失败尚未解决` : "";
+    return `还有 ${pending} 个岗位待分析；${progress.analysis.detailRequired} 个岗位待补详情${unresolved}`;
   }
   if (status === "review_required") {
     return "岗位已准备完成，等待你确认清单";

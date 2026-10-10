@@ -12,7 +12,8 @@ const { completedWorkflowAnalysisCount } = require("./workflow_analysis_tasks");
 const MODEL_PAUSE_CODES = new Set([
   "MODEL_TIMEOUT_CIRCUIT_OPEN",
   "MODEL_AUTH_REQUIRED",
-  "MODEL_CONFIGURATION_REQUIRED"
+  "MODEL_CONFIGURATION_REQUIRED",
+  "MODEL_QUOTA_EXHAUSTED"
 ]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "stopped"]);
 const PAUSABLE_STATUSES = new Set(["analyzing", "scanning"]);
@@ -249,7 +250,7 @@ function migrateFinalTimeoutTasks(db, run, nextGeneration, revision, clock) {
   db.prepare(`
     UPDATE workflow_job_tasks SET
       status = 'retry_pending',
-      recovery_generation = ?,
+      recovery_generation = MAX(recovery_generation + 1, ?),
       attempt_count_in_generation = 0,
       priority = 10,
       available_at = NULL,
@@ -262,20 +263,18 @@ function migrateFinalTimeoutTasks(db, run, nextGeneration, revision, clock) {
     WHERE workflow_run_id = ?
       AND status = 'failed'
       AND last_error_code = 'MODEL_TIMEOUT'
-      AND recovery_generation = ?
   `).run(
     nextGeneration,
     revision,
     clock,
-    run.id,
-    run.recoveryGeneration
+    run.id
   );
 }
 
 function migrateConfigurationTriggerTasks(db, run, nextGeneration, revision, clock) {
   db.prepare(`
     UPDATE workflow_job_tasks SET
-      recovery_generation = ?,
+      recovery_generation = MAX(recovery_generation + 1, ?),
       attempt_count_in_generation = 0,
       priority = 10,
       available_at = NULL,
@@ -288,13 +287,11 @@ function migrateConfigurationTriggerTasks(db, run, nextGeneration, revision, clo
     WHERE workflow_run_id = ?
       AND status = 'retry_pending'
       AND last_error_kind = 'configuration'
-      AND recovery_generation = ?
   `).run(
     nextGeneration,
     revision,
     clock,
-    run.id,
-    run.recoveryGeneration
+    run.id
   );
 }
 

@@ -6,6 +6,7 @@ const evidenceStore = require('../src/storage/candidate_evidence_store');
 const { validateMessageReply } = require('../src/core/message_reply_contract');
 const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
 const { createResumeOptimizationService } = require('../src/application/resume_optimization');
+const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
 
 const db = storage.openDb(':memory:');
 const answer = '我参与企业知识库开发，主要做接口联调和检索测试，没有主导架构。';
@@ -60,7 +61,7 @@ class InterviewAdapter extends MockModelAdapter {
     await assert.rejects(() => unsafeService.createDraft({ ...context, sourceResumeVersionId: profile.resumeVersionId, mode: 'general' }), /职责边界/);
     assert.throws(() => resumeService.activateDraft({ ...context, draftId: generalDraft.id, finalText: generalDraft.finalText + '\n主导企业知识库架构' }), error => error.code === 'RESUME_ACTIVATION_INTEGRITY_FAILED');
     const batch = storage.createBatch(db, 'boss', '工程师', 'journey', { profileId: profile.profileId, searchPlanId: profile.planId });
-    const jobId = storage.upsertJob(db, { source: 'boss', sourceId: 'specific-job', title: '应用工程师', keyword: '工程师', company: '示例公司', description: '负责知识库的接口开发、联调与检索评估，需要 Node.js 项目实践。', analysis: { semanticStatus: 'complete', recommendation: 'apply' } }, batch);
+    const jobId = storage.upsertJob(db, { source: 'boss', sourceId: 'specific-job', title: '应用工程师', keyword: '工程师', company: '示例公司', description: '负责知识库的接口开发、联调与检索评估，需要 Node.js 项目实践。', analysis: { semanticStatus: 'complete', revision: { pipelineVersions: PIPELINE_VERSIONS }, recommendation: 'apply' } }, batch);
     const specific = await resumeService.createDraft({ ...context, sourceResumeVersionId: profile.resumeVersionId, mode: 'job_specific', jobId });
     assert.equal(specific.mode, 'job_specific');
     assert.deepEqual(specific.targetJobIds, [jobId]);

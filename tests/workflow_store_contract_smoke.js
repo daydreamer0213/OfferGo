@@ -24,7 +24,7 @@ const WORKFLOW_EXPORTS = [
 const MOVED_DEFINITIONS = [
   ...WORKFLOW_EXPORTS.filter((name) => ![
     "replaceWorkflowScanContext", "createWorkflowRun", "getWorkflowRun", "listWorkflowRuns", "transitionWorkflowRun",
-    "getWorkflowObservationJob", "claimWorkflowJobTaskRow", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
+    "getWorkflowObservationJob", "claimWorkflowJobTaskRow", "insertWorkflowJobTaskRow", "settleIncompleteWorkflowJobTaskRows", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
     "listWorkflowStateInvariantViolations"
   ].includes(name)),
   "nonNegativeInteger", "workflowRunError",
@@ -65,7 +65,7 @@ function contract01ExportsAndFacadeIdentity() {
   assert.deepEqual(Object.keys(workflowStore).sort(), WORKFLOW_EXPORTS);
   assert.equal(Object.keys(storage).length, 196);
   assert.equal(Object.keys(candidateStore).length, 32);
-  assert.equal(Object.keys(jobStore).length, 35);
+  assert.equal(Object.keys(jobStore).length, 36);
   assert.equal(Object.keys(scanStore).length, 39);
   assert.equal(Object.keys(communicationStore).length, 17);
   assert.equal(Object.keys(sharedStore).length, 9);
@@ -103,7 +103,7 @@ function contract02LoadGraphAndBodyInventory() {
   const edges = new Map(JSON.parse(graph.stdout));
   const workflowEdges = edges.get(path.join(ROOT, "src", "storage", "workflow_store.js"))
     .map((entry) => entry === "node:crypto" ? entry : path.basename(entry)).sort();
-  assert.deepEqual(workflowEdges, ["job_description_readiness.js", "node:crypto", "storage_shared.js"]);
+  assert.deepEqual(workflowEdges, ["analysis_revision.js", "job_description_readiness.js", "node:crypto", "storage_shared.js"]);
   const communicationEdges = edges.get(path.join(ROOT, "src", "storage", "communication_store.js"));
   assert(communicationEdges.includes(path.join(ROOT, "src", "storage", "workflow_store.js")));
   assert(!communicationEdges.includes(path.join(ROOT, "src", "core", "storage.js")));
@@ -369,7 +369,7 @@ function contract04DirectHealthSnapshot() {
       bossActiveDays: 0, url: `https://www.zhipin.com/job_detail/${sourceId}.html`,
       tags: ["Node.js"], description: "Complete health contract job description. ".repeat(4),
       score: 20, level: "recommended", matches: ["Node.js"], risks: [], qualityTags: [],
-      greeting: "", analysis: { semanticStatus: "complete", recommendation: "apply" }
+      greeting: "", analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "apply" }
     }, batchId));
     for (const jobId of jobIds) {
       storage.recordCandidateJobEvent(db, {

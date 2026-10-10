@@ -104,6 +104,27 @@ const db = openDb(path.join(tempRoot, "context.sqlite"));
     assert.equal(restored.contextSource, "local_cache", "cache-only injected operation remains available after restart");
     assert.equal(restored.job.availability, "unknown");
 
+    const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
+    db.prepare('UPDATE job_observations SET analysis_json = ? WHERE job_id = ?').run(JSON.stringify({
+      ...cached.job.analysis, revision: { pipelineVersions: { ...PIPELINE_VERSIONS, matchJob: 'historical-matching' } }
+    }), stored.id);
+    let refreshCalls = 0;
+    const refresh = createZhaopinMessageJobContextResolver({ db, profileId: fixture.profileId,
+      messageReader: messageReader([], selected, 'unknown'),
+      detailReader: { async readSelectedJobDetail() { throw new Error('old analysis must reuse full local JD'); } },
+      async analyzeJob(args) {
+        refreshCalls++; await completeAnalysis(fixture, [])(args);
+        const analysis = listReportJobs(db, { planId: fixture.planId, site: 'zhaopin', batch: 'all' })
+          .find(job => job.id === stored.id).analysis;
+        db.prepare('UPDATE job_observations SET analysis_json = ? WHERE job_id = ?').run(JSON.stringify({
+          ...analysis, revision: { pipelineVersions: PIPELINE_VERSIONS }
+        }), stored.id);
+      }, now: () => NOW
+    });
+    assert.equal((await refresh({ target, selected })).job.analysis.semanticStatus, 'complete');
+    await refresh({ target, selected });
+    assert.equal(refreshCalls, 1, 'reanalysis happens once, later HR messages reuse it');
+
     const other = seedPlan("other-user");
     const unavailable = createZhaopinMessageJobContextResolver({ db, profileId: other.profileId, now: () => NOW });
     await assert.rejects(() => unavailable({ target }), (error) => error.code === "MESSAGE_DISCOVERY_JOB_CONTEXT_UNAVAILABLE");
@@ -253,6 +274,7 @@ function completeAnalysis(fixture, calls) {
       analysis: {
         provider: "fixture-analysis",
         semanticStatus: "complete",
+        revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
         recommendation: "primary",
         sourceAvailability: JSON.parse(row.analysis_json || "{}").sourceAvailability || "unknown"
       }

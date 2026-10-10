@@ -113,7 +113,7 @@ function createWorkflowController({ service, logger, renderUiError } = {}) {
         error: `${guidance.title}：${guidance.impact} ${guidance.nextAction}`,
         errorCode: issue.code,
         requestId,
-        ...(issue.code === "MODEL_CONFIGURATION_REQUIRED"
+        ...(["MODEL_CONFIGURATION_REQUIRED", "WORKFLOW_MODEL_RECHECK_REQUIRED"].includes(issue.code)
           ? { settingsHref: "/settings#model-profile-batch_screening" }
           : {})
       });
@@ -183,7 +183,7 @@ function readBody(req) {
 }
 
 function modelSettingsBack(error, fallback) {
-  return error?.code === "MODEL_CONFIGURATION_REQUIRED"
+  return ["MODEL_CONFIGURATION_REQUIRED", "WORKFLOW_MODEL_RECHECK_REQUIRED", "MODEL_QUOTA_EXHAUSTED"].includes(error?.code)
     ? "/settings#model-profile-batch_screening"
     : fallback;
 }

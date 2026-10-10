@@ -21,6 +21,7 @@ const {
 } = require("../storage/schema");
 const { currentSchemaVersion } = require("../storage/migrations");
 const candidateStore = require("../storage/candidate_store");
+const { projectAnalysisForCurrentPipeline } = require('./analysis_revision');
 const jobStore = require("../storage/job_store");
 const { nowIso, parseJson, OUTCOME_STATUSES, storageError, optionalInteger, optionalPositiveInteger, nullableText, validDate, immediateTransaction } = require("../storage/storage_shared");
 const scanStore = require("../storage/scan_store");
@@ -1284,7 +1285,7 @@ function backfillWorkflowAnalysisTasks(db) {
     `);
     let position = 0;
     for (const row of rows) {
-      const analysis = parseJson(row.analysis_json, {});
+      const analysis = projectAnalysisForCurrentPipeline(parseJson(row.analysis_json, {}));
       const semantic = String(analysis.semanticStatus || "");
       const source = String(analysis.decisionSource || "");
       let status = "pending";

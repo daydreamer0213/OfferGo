@@ -32,7 +32,7 @@ assert.strictEqual(coreFacade, store, "core compatibility facade must export the
 for (const name of COMMUNICATION_EXPORTS) assert.strictEqual(coreFacade[name], store[name], `${name} must keep its direct reference`);
 assert.strictEqual(Object.keys(storage).length, 196);
 assert.strictEqual(Object.keys(candidateStore).length, 32);
-assert.strictEqual(Object.keys(jobStore).length, 35);
+assert.strictEqual(Object.keys(jobStore).length, 36);
 assert.strictEqual(Object.keys(scanStore).length, 39);
 assert.strictEqual(Object.keys(sharedStore).length, 9);
 assert.strictEqual(storage.getSearchPlan, candidateStore.getSearchPlan);
@@ -577,7 +577,7 @@ function job(sourceId, overrides = {}) {
     url: `https://www.zhipin.com/job_detail/${sourceId}.html`, tags: ["Node.js"],
     description: "Offline communication store contract fixture.", score: 20, level: "recommended",
     matches: ["Node.js"], risks: [], qualityTags: [],
-    analysis: { semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2, fitLevel: "fit", hardBlockers: [] },
+    analysis: { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary", recommendationSchemaVersion: 2, fitLevel: "fit", hardBlockers: [] },
     ...overrides
   };
 }

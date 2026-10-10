@@ -409,7 +409,7 @@ function seedDrafts(db, count, prefix = "dashboard-reply", complete = true) {
         ? "负责完整内容运营流程、业务需求梳理、内容策划、发布验证和跨团队协作，并持续跟踪上线效果与改进建议。".repeat(3)
         : "只有一小段岗位资料",
       JSON.stringify(complete
-        ? { semanticStatus: "complete", provider: "fixture-model", recommendation: "consider" }
+        ? { semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, provider: "fixture-model", recommendation: "consider" }
         : { semanticStatus: "pending", provider: "message-discovery-detail" }),
       NOW,
       NOW

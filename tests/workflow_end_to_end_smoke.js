@@ -344,7 +344,7 @@ function job(sourceId, keyword, overrides = {}) {
     qualityTags: ["salary_target_core"],
     analysis: {
       provider: "mock",
-      semanticStatus: "complete",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "apply",
       fitLevel: "A",
       confidence: 0.9,

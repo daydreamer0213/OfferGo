@@ -154,7 +154,7 @@ function outcomeSnapshotFixture() {
     risks_json, quality_tags_json, analysis_json, content_hash, seen_at
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     jobId, batchId, "Analytics", bait.title, bait.company, bait.url, "[]", bait.JD, 100, "[]",
-    "[]", "[]", JSON.stringify({ semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2 }), "fixture-hash", now
+    "[]", "[]", JSON.stringify({ semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, recommendation: "primary", recommendationSchemaVersion: 2 }), "fixture-hash", now
   );
   db.prepare(`INSERT INTO candidate_job_states(profile_id, job_id, plan_id, status, updated_at)
     VALUES (?, ?, ?, ?, ?)`).run(profileId, jobId, planId, "", now);

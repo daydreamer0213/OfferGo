@@ -59,6 +59,7 @@ function eligibleJob(sourceId, keyword, overrides = {}) {
     qualityTags: [],
     analysis: {
       semanticStatus: "complete",
+      revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
       recommendation: "apply",
       recommendationSchemaVersion: 2,
       hardBlockers: []
@@ -83,7 +84,8 @@ upsertJob(db, eligibleJob("same", "AI应用开发"), scopedBatch(scopeA, "AI应�
 upsertJob(db, eligibleJob("same", "AI应用开发"), scopedBatch(scopeA, "AI应用开发"));
 upsertJob(db, eligibleJob("same", "RAG开发"), scopedBatch(scopeA, "RAG开发"));
 upsertJob(db, eligibleJob("bad", "AI应用开发", {
-  analysis: { semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2 }
+  analysis: { semanticStatus: "complete", recommendation: "not_recommended", recommendationSchemaVersion: 2,
+    revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }
 }), scopedBatch(scopeA, "AI应用开发"));
 upsertJob(db, eligibleJob("other-scope", "AI应用开发"), scopedBatch(scopeB, "AI应用开发"));
 upsertJob(db, eligibleJob("legacy", "AI应用开发"), createBatch(db, "boss", "AI应用开发", "legacy", {
@@ -127,6 +129,13 @@ assert.strictEqual(listScopedKeywordStats(db, {
   localDay: "2026-08-04",
   now: "2026-08-04T04:00:00.000Z"
 }).size, 0);
+const historical = eligibleJob('historic-version', '历史岗位词');
+historical.analysis.revision = { pipelineVersions: { ...require('../src/core/analysis_revision').PIPELINE_VERSIONS,
+  matchJob: 'historical-matching' } };
+upsertJob(db, historical, scopedBatch(scopeA, '历史岗位词'));
+assert.deepEqual(listScopedKeywordStats(db, { profileId: saved.profileId, scopeKey: scopeA,
+  now: '2026-08-04T04:00:00.000Z' }).get('历史岗位词'), { sampleSize: 0, eligibleCount: 0, usedToday: false },
+  '旧规则样本不得作为新规则的成功或失败计入关键词有效率');
 db.close();
 
 console.log("scoped_keyword_stats_smoke ok");

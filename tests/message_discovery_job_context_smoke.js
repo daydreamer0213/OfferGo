@@ -83,6 +83,29 @@ async function cacheHitSmoke() {
   assert.strictEqual(result.job.analysis.semanticStatus, "complete");
   assert.strictEqual(result.threadKey, conversationKey);
   assert.strictEqual(result.contextSource, "local_cache");
+  const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
+  db.prepare('UPDATE job_observations SET analysis_json = ? WHERE job_id = ?').run(JSON.stringify({
+    semanticStatus: 'complete', recommendation: 'primary', recommendationSchemaVersion: 2,
+    revision: { pipelineVersions: { ...PIPELINE_VERSIONS, matchJob: 'historical-matching' } }
+  }), jobId);
+  let reanalyses = 0;
+  const refresh = createMessageDiscoveryJobContextResolver({ db, profileId: fixture.profileId,
+    messageReader: { async readSelectedJobTarget() { return target; }, async assertActiveBindings() {} },
+    detailReader: { async readSelectedJobDetail() { throw new Error('existing full JD must be reused'); } },
+    async analyzeJob({ input }) {
+      assert.equal(input.jobId, jobId); reanalyses++;
+      db.prepare('UPDATE job_observations SET analysis_json = ? WHERE job_id = ?').run(JSON.stringify({
+        semanticStatus: 'complete', recommendation: 'primary', recommendationSchemaVersion: 2,
+        revision: { pipelineVersions: PIPELINE_VERSIONS }
+      }), jobId);
+    }
+  });
+  const staleCandidate = listMessageDiscoveryCandidates(db, { profileId: fixture.profileId }).find(item => item.jobId === jobId);
+  const refreshed = await refresh({ target: { tabId: 42, conversationKey }, selected, candidate: staleCandidate });
+  assert.equal(reanalyses, 1, 'old matching gets one local reanalysis');
+  assert.equal(refreshed.job.analysis.semanticStatus, 'complete');
+  await refresh({ target: { tabId: 42, conversationKey }, selected, candidate: staleCandidate });
+  assert.equal(reanalyses, 1, 'a later HR message reuses the valid analysis');
 }
 
 async function unavailableContextSmoke() {
@@ -348,7 +371,7 @@ function seedJob(fixture, sourceId, { complete = false } = {}) {
     description: complete ? detail(sourceId).description : "",
     qualityTags: [],
     analysis: complete
-      ? { semanticStatus: "complete", recommendation: "primary", marker: "cached" }
+      ? { semanticStatus: "complete", recommendation: "primary", marker: "cached", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } }
       : {}
   }, batchId);
 }
@@ -384,7 +407,7 @@ function completeAnalysisAdapter(calls, expectedSignal = null) {
     assert.strictEqual(input.purpose, undefined);
     assert.strictEqual(deps.messageContextAnalysis, true);
     if (expectedSignal) assert.strictEqual(deps.signal, expectedSignal);
-    persistAnalysis(input, { semanticStatus: "complete", recommendation: "primary", marker: "fresh" });
+    persistAnalysis(input, { semanticStatus: "complete", recommendation: "primary", marker: "fresh", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS } });
   };
 }
 

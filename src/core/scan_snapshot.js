@@ -150,15 +150,15 @@ function assertScanSnapshotCompatible(stored, current) {
   return true;
 }
 
-function remainingTargetKeys(snapshot, latestResults = []) {
-  const { targets, resultsByKey } = indexLatestResults(snapshot, latestResults);
+function remainingTargetKeys(snapshot, latestResults = [], savedJobs = []) {
+  const { targets, resultsByKey } = indexLatestResults(snapshot, latestResults, savedJobs);
   return targets
     .filter((target) => resultsByKey.get(target.targetKey)?.status !== "completed")
     .map((target) => target.targetKey);
 }
 
-function summarizeResumePlan(snapshot, latestResults = []) {
-  const { targets, resultsByKey } = indexLatestResults(snapshot, latestResults);
+function summarizeResumePlan(snapshot, latestResults = [], savedJobs = []) {
+  const { targets, resultsByKey } = indexLatestResults(snapshot, latestResults, savedJobs);
   let completed = 0;
   let partial = 0;
   let failed = 0;
@@ -203,7 +203,7 @@ function snapshotHashMatchesPayload(snapshot) {
   return stableHash(payload) === snapshot.snapshotHash;
 }
 
-function indexLatestResults(snapshot, latestResults) {
+function indexLatestResults(snapshot, latestResults, savedJobs = []) {
   if (!Array.isArray(snapshot?.targets)) throw snapshotMismatch(["snapshot.targets must be an array"]);
   const knownKeys = new Set(snapshot.targets.map((target) => target.targetKey));
   const resultsByKey = new Map();
@@ -215,6 +215,17 @@ function indexLatestResults(snapshot, latestResults) {
   }
   if (unknownKeys.length) {
     throw snapshotMismatch([`latestResults contains unknown targetKey(s): ${[...new Set(unknownKeys)].join(", ")}`]);
+  }
+  if (snapshot.site === 'boss') {
+    const pendingKeywords = new Set(savedJobs.filter(job =>
+      (job.qualityTags || []).includes('detail_unverified')
+      || (job.detailRequired === true && !job.detailRead)).map(job => job.keyword));
+    for (const target of snapshot.targets) {
+      const result = resultsByKey.get(target.targetKey);
+      if (result?.status === 'completed' && pendingKeywords.has(target.keyword)) {
+        resultsByKey.set(target.targetKey, { ...result, status: 'partial' });
+      }
+    }
   }
   return { targets: snapshot.targets, resultsByKey };
 }

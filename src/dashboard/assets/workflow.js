@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const page = document.querySelector("[data-workflow-page]");
+  const page = document.querySelector("[data-workflow-page]") || document.querySelector("main.offergo-jobs");
   if (!page) return;
   const panel = page.querySelector("[data-workflow-panel]");
   const pollKind = page.dataset.pollingKind || "none";
@@ -18,7 +18,7 @@
   let submissionInFlight = false;
 
   function bindWorkflowSubmissions(root) {
-    root.querySelectorAll('form[action="/api/workflow-run/resume"], form[data-workflow-control-form]').forEach((form) => {
+    root.querySelectorAll('form[action="/api/workflow-run/resume"], form[data-workflow-control-form], form[action="/api/analyze-job"], form[action="/api/analyze-jobs"]').forEach((form) => {
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (submissionInFlight) return;
@@ -35,8 +35,11 @@
           result.className = "workflow-alert";
           page.prepend(result);
         }
+        result.className = form.getAttribute("action").startsWith("/api/analyze-job") ? "panel" : "workflow-alert";
         result.setAttribute("role", "status");
-        result.textContent = "正在检查并处理本轮操作，请稍候…";
+        result.textContent = form.getAttribute("action").startsWith("/api/analyze-job")
+          ? "正在分析已保存的岗位资料，完成后会显示更新后的结果。岗位较多时需要几分钟，请稍候…"
+          : "正在检查并处理本轮操作，请稍候…";
         try {
           // Keep this document alive: tab inspection must be able to read it
           // while the server is handling the request.
@@ -45,6 +48,7 @@
             location.assign(response.url);
             return;
           }
+          result.className = "workflow-alert";
           result.setAttribute("role", "alert");
           if (response.headers.get("content-type")?.includes("application/json")) {
             const issue = await response.json();
@@ -60,6 +64,7 @@
             }
           }
         } catch {
+          result.className = "workflow-alert";
           result.setAttribute("role", "alert");
           result.textContent = "暂时无法确认本次操作的结果。请刷新本轮查看状态，再决定是否继续。";
         } finally {
@@ -129,7 +134,9 @@
     setText("[data-overview-acquisition]", "搜索目标 " + number(scanTargets.completed) + " / " + number(scanTargets.total) + " · 已获取 " + number(details.collected) + " 个岗位");
     setText("[data-overview-jd]", "已读取 " + number(details.read) + " / " + number(details.required) + " · 待补 " + number(details.pending));
     setText("[data-overview-remaining]", snapshot.progress.remainingWorkLabel || "本轮状态正在更新");
-    setText("[data-overview-eta]", Number.isFinite(retryAt) && retryAt > Date.now() ? "安全冷却至 " + new Date(retryAt).toLocaleString("zh-CN", { hour12: false }) : etaText(snapshot.progress.eta));
+    setText("[data-overview-eta]", snapshot.workflow.status === "paused" && (snapshot.workflow.errorCode || page.dataset.workflowErrorCode) === "MODEL_QUOTA_EXHAUSTED"
+      ? "恢复模型连接后再估算剩余时间"
+      : Number.isFinite(retryAt) && retryAt > Date.now() ? "安全冷却至 " + new Date(retryAt).toLocaleString("zh-CN", { hour12: false }) : etaText(snapshot.progress.eta));
     if (Number.isFinite(retryAt) && retryAt > Date.now()) {
       if (stable) stable.hidden = true;
       if (cooldown) { cooldown.hidden = false; cooldown.dataset.retryAt = scanWait.retryAt; }
@@ -206,7 +213,10 @@
     setText("[data-eta]", etaText(snapshot.progress.eta));
     setText("[data-recent-activity]", snapshot.recentActivity.length ? snapshot.recentActivity.map(activityText).join("；") : "还没有新的分析活动。");
     setText("[data-stop-slot]", snapshot.controls.stopConsumesRunSlot ? "会占用今天一轮" : "不会占用今天一轮");
-    for (const name of ["scan", "jd", "analysis", "communication"]) renderTrack(name, snapshot.progress.tracks?.[name]);
+    for (const name of ["scan", "jd", "analysis", "communication"]) {
+      const track = snapshot.progress.tracks?.[name];
+      renderTrack(name, name === 'analysis' ? { ...track, value: analyzed } : track);
+    }
     renderAnalysisTasks(analysis.tasks);
     renderCurrentActivity(snapshot.progress.scan);
     if (panel) panel.dataset.progressRevision = String(number(snapshot.workflow.progressRevision));
@@ -226,7 +236,8 @@
     if (paused && resume) resume.dataset.workflowPrimary = "true";
     nodes('[data-action="stop-preview"]').forEach((button) => { button.disabled = !snapshot.controls.canStop; });
     const stopConfirm = node('[data-action="stop-confirm"]'); if (stopConfirm) stopConfirm.disabled = !snapshot.controls.canStop;
-    if (paused) setText("[data-pause-reason]", snapshot.workflow.errorCode || "本轮已安全暂停");
+    // A status transition reloads the page; keep its shared server-rendered
+    // explanation instead of replacing it with an internal error code.
     page.dataset.workflowStatus = status;
     page.dataset.workflowControlState = snapshot.workflow.controlState || "none";
   };

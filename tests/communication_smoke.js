@@ -64,7 +64,7 @@ let server;
       filterSnapshot: { execution: { scanKind: "daily" } }
     });
     const analysis = {
-      provider: "mock", model: "offline-structured-mock", semanticStatus: "complete", decisionSource: "model",
+      provider: "mock", model: "offline-structured-mock", semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS }, decisionSource: "model",
       recommendation: "apply", fitLevel: "A", confidence: 0.9, realRoleType: "ai_application", businessScenario: "企业知识库 RAG",
       coreRequirements: ["Python", "RAG"], hiddenRisks: [], primaryProjects: ["KnowledgeFlow"], recommendedResumeVersion: "main",
       fitReasons: ["岗位 RAG 职责与 KnowledgeFlow 项目对应"], missingPoints: [], blockingGaps: [], riskQuestions: [],
@@ -140,15 +140,15 @@ let server;
       cardId: progressCard.id,
       idempotencyKey: requestKey(3),
       action: "mark_interview_scheduled",
-      scheduledAt: "2026-08-01T15:00:00.000Z"
+      scheduledAt: "2026-08-01T07:00:00.000Z"
     });
     assert.strictEqual(missingScheduleSummary.status, 400);
     const scheduled = await post(base, "/api/progress", {
       cardId: progressCard.id,
       idempotencyKey: requestKey(4),
       action: "mark_interview_scheduled",
-      scheduledAt: "2026-08-01T15:00:00.000Z",
-      summary: "用户确认周五下午三点面试"
+      scheduledAt: "2026-08-01T07:00:00.000Z",
+      summary: "用户确认周六下午三点面试"
     });
     assert.strictEqual(scheduled.status, 303);
     assert.strictEqual(getProgressCardForJob(db, { profileId: saved.profileId, jobId }).stage, "interview_scheduled");

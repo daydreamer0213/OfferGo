@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { nowIso, parseJson, optionalPositiveInteger, nullableText, immediateTransaction } = require("./storage_shared");
 const { MIN_COMPLETE_JOB_DESCRIPTION_LENGTH, DETAIL_UNVERIFIED_TAG } = require("../core/job_description_readiness");
+const { projectAnalysisForCurrentPipeline } = require("../core/analysis_revision");
 
 const WORKFLOW_RUN_STATUSES = [
   "created",
@@ -34,13 +35,6 @@ const WORKFLOW_OBSERVATION_READY_SQL = `
     WHERE quality_tag.value = '${DETAIL_UNVERIFIED_TAG}'
   )
 `;
-const WORKFLOW_OBSERVATION_LOCAL_SKIP_SQL = `CASE
-  WHEN json_valid(COALESCE(o.analysis_json, '{}')) THEN (
-    json_extract(o.analysis_json, '$.decisionSource') IN ('local_rules', 'hard_boundary')
-    OR json_extract(o.analysis_json, '$.semanticStatus') IN ('rule_only', 'blocked')
-  )
-  ELSE 0
-END`;
 const WORKFLOW_TRANSITIONS = Object.freeze({
   created: new Set(["scanning", "review_required", "interrupted", "failed", "stopped"]),
   scanning: new Set(["analyzing", "paused", "interrupted", "failed", "stopped"]),
@@ -681,9 +675,10 @@ function insertWorkflowJobTaskRow(db, {
   status,
   recoveryGeneration,
   modelConfigRevision,
-  now
+  now,
+  reconcileStatus = false
 }) {
-  return db.prepare(`
+  const result = db.prepare(`
     INSERT INTO workflow_job_tasks(
       workflow_run_id, batch_id, job_id, observation_id, position, status,
       recovery_generation, attempt_count_in_generation, total_attempt_count, priority,
@@ -702,6 +697,20 @@ function insertWorkflowJobTaskRow(db, {
     now,
     now
   );
+  if (!result.changes && reconcileStatus && ["pending", "skipped"].includes(status)) {
+    db.prepare(`UPDATE workflow_job_tasks SET
+      status = ?, recovery_generation = recovery_generation + 1, attempt_count_in_generation = 0, priority = 100,
+      available_at = NULL, lease_owner = NULL, leased_at = NULL, lease_expires_at = NULL,
+      model_config_revision = ?, last_error_code = NULL, last_error_stage = NULL,
+      last_error_kind = NULL, finished_at = ?, updated_at = ?
+      WHERE workflow_run_id = ? AND batch_id = ? AND job_id = ? AND observation_id = ?
+        AND (status = 'succeeded' OR (status = 'skipped' AND ? = 1 AND (last_error_code IS NULL OR last_error_code = 'LOCAL_RULE_SKIP')))
+        AND EXISTS (SELECT 1 FROM workflow_runs
+          WHERE id = workflow_job_tasks.workflow_run_id AND status = 'analyzing' AND control_state = 'none')`)
+      .run(status, modelConfigRevision || null, status === "skipped" ? now : null, now,
+        workflowRunId, batchId, jobId, observationId, status === "pending" ? 1 : 0);
+  }
+  return result;
 }
 
 function reactivateWorkflowDetailRequiredTaskRow(db, {
@@ -806,7 +815,12 @@ function isWorkflowJobTaskObservationReady(db, { taskId }) {
 }
 
 function settleIncompleteWorkflowJobTaskRows(db, { workflowRunId, now }) {
-  const localSkipped = db.prepare(`
+  const localCandidates = db.prepare(`
+    SELECT t.id, o.analysis_json FROM workflow_job_tasks t
+    JOIN job_observations o ON o.id = t.observation_id AND o.job_id = t.job_id AND o.batch_id = t.batch_id
+    WHERE t.workflow_run_id = ? AND t.status IN ('pending', 'retry_pending')
+  `).all(workflowRunId);
+  const skipLocal = db.prepare(`
     UPDATE workflow_job_tasks AS t SET
       status = 'skipped',
       priority = 100,
@@ -819,17 +833,17 @@ function settleIncompleteWorkflowJobTaskRows(db, { workflowRunId, now }) {
       last_error_kind = NULL,
       finished_at = ?,
       updated_at = ?
-    WHERE t.workflow_run_id = ?
+    WHERE t.id = ? AND t.workflow_run_id = ?
       AND t.status IN ('pending', 'retry_pending')
-      AND EXISTS (
-        SELECT 1
-        FROM job_observations o
-        WHERE o.id = t.observation_id
-          AND o.job_id = t.job_id
-          AND o.batch_id = t.batch_id
-          AND ${WORKFLOW_OBSERVATION_LOCAL_SKIP_SQL}
-      )
-  `).run(now, now, workflowRunId);
+  `);
+  let localSkipped = 0;
+  for (const row of localCandidates) {
+    const analysis = projectAnalysisForCurrentPipeline(parseJson(row.analysis_json, {}) || {});
+    if (["pending", "partial", "stale", "failed"].includes(analysis.semanticStatus)) continue;
+    if (!["local_rules", "hard_boundary"].includes(analysis.decisionSource)
+      && !["rule_only", "blocked"].includes(analysis.semanticStatus)) continue;
+    localSkipped += Number(skipLocal.run(now, now, row.id, workflowRunId).changes || 0);
+  }
   const detailRequired = db.prepare(`
     UPDATE workflow_job_tasks AS t SET
       status = 'skipped',
@@ -860,7 +874,7 @@ function settleIncompleteWorkflowJobTaskRows(db, { workflowRunId, now }) {
     now,
     workflowRunId
   );
-  return { changes: Number(localSkipped.changes || 0) + Number(detailRequired.changes || 0) };
+  return { changes: localSkipped + Number(detailRequired.changes || 0) };
 }
 
 function replaceWorkflowScanContext(db, input = {}) {

@@ -356,6 +356,7 @@ function completeAnalysis(recommendation = "primary") {
   return {
     provider: "openai_compatible",
     semanticStatus: "complete",
+    revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
     recommendation,
     recommendationSchemaVersion: 2,
     fitLevel: recommendation === "primary" ? "fit" : "mostly_fit",
@@ -385,6 +386,7 @@ function roleCoreUnprovenAnalysis() {
   return {
     provider: "openai_compatible",
     semanticStatus: "complete",
+    revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
     recommendation: "caution",
     recommendationSchemaVersion: 2,
     fitLevel: "insufficient_evidence",

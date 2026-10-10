@@ -74,6 +74,12 @@ async function main() {
       current = '城市：佛山';
       await page.getByRole('button', { name: '重新读取搜索条件' }).click();
       await page.locator('[data-discovery-scope]').getByText('城市：佛山').waitFor();
+      current = '城市：珠海';
+      await page.evaluate(() => window.dispatchEvent(new Event('offergo:workspace-ready')));
+      await page.locator('[data-discovery-scope]').getByText('城市：珠海').waitFor({ timeout: 3000 });
+      current = '城市：佛山';
+      await page.getByRole('button', { name: '重新读取搜索条件' }).click();
+      await page.locator('[data-discovery-scope]').getByText('城市：佛山').waitFor();
       failRead = true;
       await page.getByRole('button', { name: '重新读取搜索条件' }).click();
       await page.locator('[data-condition-status]').getByText('搜索页暂时无法读取').waitFor();
