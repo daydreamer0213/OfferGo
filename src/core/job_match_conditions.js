@@ -30,7 +30,7 @@ function inferSingleAtoms(label) {
     value: [cohort.dateWindow.minimum, cohort.dateWindow.maximum] }];
   if (cohort) return [{ kind: 'graduation_date', operator: 'cohort',
     value: cohort.years.length ? cohort.years : [cohort.minimum, cohort.maximum], range: !cohort.years.length }];
-  const degree = source.match(/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备)\s*)?(?:非?全日制\s*)?(中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位|毕业|及以上|以上|$)/);
+  const degree = source.match(/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备|必须)\s*)?(?:非?全日制\s*)?(中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位|毕业|及以上|以上|$)/);
   if (degree) return [{ kind: 'education_level', operator: 'at_least', value: degree[1] }];
   if (/(?:仅限|只招|必须|需为|面向).{0,8}(?:在校|在读)(?:生|学生)/.test(source)) {
     return [{ kind: 'student_status', operator: 'equals', value: 'in_school' }];
@@ -72,7 +72,8 @@ function normalizeJobConditions({ jobUnderstanding = {}, evidence = {} } = {}) {
     const expandYearQualification = atom => {
       if (!qualification || atom.kind !== 'semantic' || /或者|或/.test(text(atom.value))) return [atom];
       if (/^(?:学历(?:要求)?[:：]?\s*|(?:至少|最低|要求|须具备|具有|具备|必须)\s*)?(?:非?全日制\s*)?(?:中专|高中|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位)?[。.]?$/.test(text(atom.value))) {
-        return inferredAtoms(atom.value);
+        const inferred = inferredAtoms(atom.value);
+        if (inferred.length) return inferred;
       }
       const parts = text(atom.value).split(/[，,；;。]|并且|同时|且|并具备|并拥有/).map(text).filter(Boolean);
       return parts.length > 1 && parts.some(value => yearsAtom({ kind: 'semantic', value }))

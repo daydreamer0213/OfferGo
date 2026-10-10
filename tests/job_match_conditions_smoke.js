@@ -16,6 +16,11 @@ function evaluate({ candidateProfile, label, alternatives, trackIds = ['T1'], st
   return { conditions, conditionResults, summary: summarizeQualifications({ conditions, conditionResults, selectedTrackId }) };
 }
 const bachelor = [{ allOf: [{ kind: 'education_level', operator: 'at_least', value: '本科' }] }];
+for (const [label, degree, expected] of [['必须本科学历', '本科', 'satisfied'],
+  ['必须全日制本科及以上学历', '非全日制本科', 'conflict']]) {
+  assert.equal(evaluate({ candidateProfile: { education: [{ degree }] }, label,
+    alternatives: [{ allOf: [{ kind: 'semantic', operator: 'meets', value: label }] }] }).summary.status, expected);
+}
 assert.equal(evaluate({ candidateProfile: { education: [{ degree: '非全日制本科' }] },
   label: '本科及以上学历，必须为全日制', alternatives: bachelor }).summary.status, 'conflict');
 for (const [mode, expected] of [['全日制', 'satisfied'], ['非全日制', 'conflict']]) {
