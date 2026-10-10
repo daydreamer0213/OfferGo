@@ -196,14 +196,17 @@ function createAttemptTelemetryLogger(logger, telemetry) {
   const forward = logger && typeof logger === "object" ? logger : {};
 
   function info(event, context) {
-    observeCompletedEvent(event, context, aggregate);
+    observeModelCallEvent(event, context, aggregate);
     if (typeof forward.info === "function") return forward.info(event, sanitizeForwarded(context));
     return undefined;
   }
 
   return {
     info,
-    warn: (event, context) => (typeof forward.warn === "function" ? forward.warn(event, sanitizeForwarded(context)) : undefined),
+    warn: (event, context) => {
+      observeModelCallEvent(event, context, aggregate);
+      return typeof forward.warn === "function" ? forward.warn(event, sanitizeForwarded(context)) : undefined;
+    },
     error: (event, context) => (typeof forward.error === "function" ? forward.error(event, sanitizeForwarded(context)) : undefined),
     child: (context) => createAttemptTelemetryLogger(
       typeof forward.child === "function"
@@ -214,11 +217,14 @@ function createAttemptTelemetryLogger(logger, telemetry) {
   };
 }
 
-function observeCompletedEvent(event, context, telemetry) {
-  if (event !== "model_call_completed") return;
+function observeModelCallEvent(event, context, telemetry) {
+  if (event !== "model_call_completed" && event !== "model_call_failed") return;
   const data = context && typeof context === "object" && !Array.isArray(context) ? context : {};
-  const usage = data.usage && typeof data.usage === "object" && !Array.isArray(data.usage) ? data.usage : {};
+  // Terminal transport events already include every HTTP attempt in that call.
+  // Counting per-attempt events as well would count native retries twice.
   telemetry.modelCallCount += nonNegativeFinite(data.attempts);
+  if (event !== "model_call_completed") return;
+  const usage = data.usage && typeof data.usage === "object" && !Array.isArray(data.usage) ? data.usage : {};
   telemetry.promptTokens += nonNegativeFinite(usage.prompt_tokens);
   telemetry.completionTokens += nonNegativeFinite(usage.completion_tokens);
   telemetry.totalTokens += nonNegativeFinite(usage.total_tokens);

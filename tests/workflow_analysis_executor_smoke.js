@@ -323,7 +323,7 @@ function testTelemetryIgnoresUnrelatedEventsAndFields() {
   logger.warn("model_call_failed", { attempts: 5, errorMessage: "boom", usage: { prompt_tokens: 50 } });
   logger.info("job_analysis_failed", { input: "raw", output: "raw", message: "raw", usage: { prompt_tokens: 70 } });
   assert.deepStrictEqual(telemetry, {
-    modelCallCount: 1,
+    modelCallCount: 6,
     promptTokens: 20,
     completionTokens: 2,
     totalTokens: 12
@@ -369,7 +369,7 @@ function testTelemetryForwardsEveryEvent() {
   assert(!JSON.stringify(forwarded).includes("boom secret"));
   assert(!JSON.stringify(forwarded).includes("unexpected raw stack"));
   assert.deepStrictEqual(telemetry, {
-    modelCallCount: 1,
+    modelCallCount: 8,
     promptTokens: 3,
     completionTokens: 1,
     totalTokens: 4

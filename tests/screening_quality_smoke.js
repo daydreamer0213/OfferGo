@@ -512,6 +512,27 @@ const offCityInJd = scoreJob(job({
 assert(offCityInJd.qualityTags.includes("location_mismatch"));
 assert.strictEqual(decisionState(offCityInJd), "blocked");
 
+for (const cities of ["北京/杭州/上海/南京/成都/深圳/广州", "北京、上海、广州", "北京或广州", "北京/上海/广州市。", "北京/上海/广州（可选）。"]) {
+  const selectableCity = scoreJob(job({
+    location: "广州·海珠区",
+    description: `负责客户 AI 应用工程交付。工作地点：${cities}`
+  }), configs);
+  assert(!selectableCity.qualityTags.includes("location_mismatch"), "明确可选工作地点包含广州，应保留目标城市路径");
+  assert.strictEqual(decisionState(selectableCity), "ready");
+}
+const excludedCityList = scoreJob(job({ description: "工作地点：北京/上海。负责广州客户的远程技术支持。" }), configs);
+assert(excludedCityList.qualityTags.includes("location_mismatch"), "客户所在城市不能替代明确工作地点");
+assert.strictEqual(decisionState(excludedCityList), "blocked");
+for (const description of [
+  "工作地点：北京/上海，广州客户的技术支持以远程方式开展。",
+  "工作地点：北京/上海，广州市客户的技术支持以远程方式开展。",
+  "base 佛山，广州客户项目以远程支持为主。"
+]) {
+  const customerCity = scoreJob(job({ location: "广州", description }), configs);
+  assert(customerCity.qualityTags.includes("location_mismatch"), "逗号后的客户城市不能被当成可选工作地点");
+  assert.strictEqual(decisionState(customerCity), "blocked");
+}
+
 // 跨职业保护：运营、产品、设计等标题不再被本地规则默认拦截，交由语义证据契约判断。
 for (const title of ["电商运营专员", "产品经理", "UI设计师", "AI 培训讲师"]) {
   const scoredRole = scoreJob(job({ title, bossActiveText: "今日活跃" }), configs);

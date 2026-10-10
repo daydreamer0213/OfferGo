@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { createJobAnalysisRunner } = require('../src/core/job_analysis');
+const { createJobAnalysisRunner, cachedModelCall } = require('../src/core/job_analysis');
 const { scoreJob } = require('../src/core/scoring');
 const { presentWorkMatchInput, validateWorkMatchOutput } = require('../src/core/job_work_matching');
-const { openDb } = require('../src/core/storage');
-const { upsertJob, getJob, decisionBucket } = require('../src/storage/job_store');
+const { openDb, saveProfileAnalysis, createBatch } = require('../src/core/storage');
+const { upsertJob, getJob, decisionBucket, rescorePlanObservations, listReportJobs } = require('../src/storage/job_store');
 const { projectMessageDecisionCard } = require('../src/core/message_discovery');
 const { loadConfigs } = require('../src/config');
 
@@ -57,6 +57,7 @@ async function main() {
     assert.match(lastInput.runtimeContext.analysisAsOfDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal((await analyze(job)).recommendation, 'primary');
     assert.equal(requests, 1, 'Canonical source-bound cache must be reused');
+    await testPriorWorkMethodRefresh(lastInput, result);
 
     for (const expected of ['primary', 'apply', 'caution', 'not_recommended']) {
       tier = expected;
@@ -130,5 +131,70 @@ async function main() {
     assert.equal(failed.errorCode, 'MODEL_INVALID_JSON');
     console.log('whole_jd_analysis_smoke passed');
   } finally { db.close(); }
+}
+async function testPriorWorkMethodRefresh(input, previous) {
+  const db = openDb(':memory:');
+  try {
+    const priorVersion = 'whole-jd-work-v1-source-bound';
+    const oldSelection = Object.fromEntries(['selectedWork', 'supportingEvidenceRefs',
+      'materialConsiderations', 'modelRecommendation', 'decisionExplanation'].map(key => [key, previous[key]]));
+    await cachedModelCall({ db, configs, kind: 'selectJob', pipelineVersion: priorVersion,
+      input, run: async () => oldSelection });
+    const oldAnalysis = { ...previous, revision: { ...previous.revision,
+      pipelineVersions: { ...previous.revision.pipelineVersions, selectJob: priorVersion } } };
+    const { profileId, planId } = saveProfileAnalysis(db, {
+      profile: configs.candidateProfile,
+      document: { originalFileName: 'whole-jd.txt', format: 'text', contentHash: 'whole-jd-refresh',
+        text: configs.candidateProfile.source.resumeEvidenceText, diagnostics: {} },
+      searchPlan: { name: 'Whole JD refresh', cities: ['广州'], directions: ['后端开发'], keywords: ['后端开发'] }
+    });
+    const batchId = createBatch(db, 'zhaopin', '后端开发', 'whole-jd-refresh', { profileId, searchPlanId: planId });
+    const id = upsertJob(db, { ...job, ...scoreJob(job, configs), analysis: oldAnalysis }, batchId);
+    const before = requests;
+    tier = 'apply';
+    const analyze = createJobAnalysisRunner(configs, [], { db, analyzer });
+    assert.equal((await analyze(job)).recommendation, 'apply',
+      'The corrected work method must not reuse an old source-bound decision');
+    assert.equal(requests, before + 1, 'A previous-method cache entry must miss');
+    assert.equal((await analyze(job)).recommendation, 'apply');
+    assert.equal(requests, before + 1, 'The new-method cache remains reusable');
+    const oldStored = getJob(db, id).analysis;
+    assert.equal(oldStored.semanticStatus, 'stale');
+    assert(oldStored.staleReasons.includes('work_matching_pipeline_changed'));
+    assert.equal(oldStored.recommendation, 'primary', 'Reading stale history must preserve its original recommendation');
+    assert.equal(JSON.parse(db.prepare('SELECT analysis_json FROM jobs WHERE id = ?').get(id).analysis_json).recommendation,
+      'primary', 'Refresh projection must not rewrite the old saved decision');
+    for (let repeat = 0; repeat < 2; repeat++) {
+      rescorePlanObservations(db, { planId, configs });
+      const observation = JSON.parse(db.prepare('SELECT analysis_json FROM job_observations WHERE job_id = ?').get(id).analysis_json);
+      assert.equal(observation.recommendation, 'primary', 'New-workflow rescore must preserve the old whole-JD recommendation');
+      assert.equal(observation.semanticStatus, 'stale');
+      assert.equal(observation.decisionStatus, 'needs_retry');
+      assert.deepEqual(observation.staleReasons, ['work_matching_pipeline_changed']);
+      assert.deepEqual(observation.selectedWork, oldAnalysis.selectedWork);
+      assert.equal(observation.decisionExplanation, oldAnalysis.decisionExplanation);
+      const report = listReportJobs(db, { planId, limit: 10 }).find(row => row.id === id);
+      assert.equal(report.analysis.recommendation, 'primary');
+      assert.equal(report.decisionBucket, 'analysis_pending');
+      assert.equal(require('../src/core/decision_policy').defaultSelectedForBatch(report.decisionBucket), false);
+    }
+    const currentAnalysis = await analyze(job);
+    upsertJob(db, { ...job, ...scoreJob(job, configs), analysis: currentAnalysis }, batchId);
+    const legacyId = upsertJob(db, { ...job, sourceId: 'legacy-split', ...scoreJob(job, configs),
+      analysis: { ...currentAnalysis, semanticMatchingMode: 'split', revision: { ...currentAnalysis.revision,
+        semanticMatchingMode: 'split', pipelineVersions: { ...currentAnalysis.revision.pipelineVersions, matchJob: 'legacy-match' } } } }, batchId);
+    rescorePlanObservations(db, { planId, configs });
+    const report = listReportJobs(db, { planId, limit: 10 });
+    const current = report.find(row => row.id === id);
+    assert.equal(current.analysis.semanticStatus, 'complete');
+    assert.equal(current.analysis.recommendation, 'apply');
+    assert.equal(current.decisionBucket, 'apply');
+    assert.equal(require('../src/core/decision_policy').defaultSelectedForBatch(current.decisionBucket), true);
+    const legacy = report.find(row => row.id === legacyId);
+    assert.equal(legacy.analysis.semanticStatus, 'stale');
+    assert.equal(legacy.analysis.recommendation, null, 'Legacy stale handling must remain unchanged');
+    assert.equal(legacy.decisionBucket, 'analysis_pending');
+    assert.equal(requests, before + 1, 'Rescoring must not trigger a new model request');
+  } finally { db.close(); tier = 'primary'; }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -186,3 +186,37 @@ test('removing a complete side note without its terminator does not leave duplic
     assert.equal(renderOptimizedResume('完成记录。未做统计。后续复查。', operations), '完成记录。进行后续复查。');
   }
 });
+
+test('consolidating all content bullets into achievements leaves no empty content heading', () => {
+  const source = '工作经历\n示例研发 2025.11-2026.07\n内容:\n1. 参与接口开发。\n2. 实现偏好存储。\n业绩:\n● 参与接口开发；实现偏好存储并处理异常。\n项目经历\n个人项目内容保持完整。';
+  const removals = ['1. 参与接口开发。', '2. 实现偏好存储。'].map((originalText, index) => ({
+    id: `S${index + 1}`, operation: 'remove', originalText, proposedText: '', decision: 'accepted'
+  }));
+  assert.equal(renderOptimizedResume(source, removals), '工作经历\n示例研发 2025.11-2026.07\n业绩:\n● 参与接口开发；实现偏好存储并处理异常。\n项目经历\n个人项目内容保持完整。');
+  assert.match(renderOptimizedResume(source, removals.slice(0, 1)), /内容:\n2\. 实现偏好存储。\n业绩:/);
+  assert.equal(renderOptimizedResume(source, []), source);
+  const unchangedEmpty = '内容:\n业绩:\n● 实现偏好存储。';
+  assert.equal(renderOptimizedResume(unchangedEmpty, []), unchangedEmpty);
+});
+
+test('saved drafts from before empty-heading cleanup remain activatable without weakening baseline checks', () => {
+  const sourceText = `${base}工作经历\n示例研发 2025.11-2026.07\n内容:\n1. 参与接口开发。\n2. 实现偏好存储。\n业绩:\n● 参与接口开发；实现偏好存储并处理异常。\n项目经历\n个人项目内容保持完整。`;
+  const suggestions = ['1. 参与接口开发。', '2. 实现偏好存储。'].map((originalText, index) => ({
+    id: `S${index + 1}`, operation: 'remove', originalText, proposedText: '', decision: 'accepted'
+  }));
+  const savedGeneratedText = `${base}工作经历\n示例研发 2025.11-2026.07\n内容:\n业绩:\n● 参与接口开发；实现偏好存储并处理异常。\n项目经历\n个人项目内容保持完整。`;
+  const currentGeneratedText = renderOptimizedResume(sourceText, suggestions);
+  assert.notEqual(currentGeneratedText, savedGeneratedText);
+  for (const finalText of [savedGeneratedText, currentGeneratedText]) {
+    const result = validateResumeActivationText({ sourceText, generatedText: savedGeneratedText, finalText, suggestions });
+    assert.equal(result.valid, true, JSON.stringify(result.errors));
+  }
+  assert.equal(validateResumeActivationText({ sourceText, generatedText: currentGeneratedText,
+    finalText: currentGeneratedText, suggestions }).valid, true);
+  const altered = validateResumeActivationText({ sourceText, generatedText: `${savedGeneratedText}\n伪造生成基线。`,
+    finalText: currentGeneratedText, suggestions });
+  assert(altered.errors.some(item => item.code === 'RESUME_GENERATED_BASELINE_CHANGED'));
+  const unsupported = validateResumeActivationText({ sourceText, generatedText: savedGeneratedText,
+    finalText: `${currentGeneratedText}\n新增经历 2027.01-2028.01`, suggestions });
+  assert(unsupported.errors.some(item => item.code === 'RESUME_FACT_UNSUPPORTED'));
+});

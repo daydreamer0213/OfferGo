@@ -8,6 +8,7 @@ const {
   runWorkMatch
 } = require("../src/core/job_work_matching");
 const { buildJobMatchEvidence } = require("../src/core/job_match_evidence");
+const { createAttemptTelemetry, createAttemptTelemetryLogger } = require("../src/core/workflow_analysis_executor");
 
 const profile = {
   candidate: { name: "虚拟候选人", city: "广州", targetTitles: ["后端开发工程师"] },
@@ -123,21 +124,43 @@ async function main() {
 }
 async function testRealTransport() {
   const { OpenAICompatibleAdapter } = require('../src/adapters/models/openai_compatible');
-  const originalFetch = global.fetch, events = [], requests = [];
+  const originalFetch = global.fetch, events = [], requests = [], telemetry = createAttemptTelemetry();
   const adapter = new OpenAICompatibleAdapter({ baseUrl: 'https://api.deepseek.com', apiKey: 'fixture-key',
     model: 'deepseek-v4-flash', thinkingMode: 'enabled', reasoningEffort: 'high', maxRetries: 3, maxTokens: 1700,
-    logger: { info(event, data) { events.push({ event, data }); }, warn(event, data) { events.push({ event, data }); } } });
+    logger: createAttemptTelemetryLogger({ info(event, data) { events.push({ event, data }); },
+      warn(event, data) { events.push({ event, data }); } }, telemetry) });
   const malformed = JSON.stringify(good) + '}';
   const response = (content, finish = 'stop') => new Response(JSON.stringify({
     choices: [{ message: { content }, finish_reason: finish }]
   }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
+    for (const [field, empty] of [['decisionExplanation_note', ''], ['unrecognized_optional_text', '  \n']]) {
+      requests.length = 0;
+      global.fetch = async (_url, options) => {
+        requests.push(JSON.parse(options.body));
+        return response(JSON.stringify({ ...good, [field]: empty }));
+      };
+      const selected = await adapter.selectJob(input);
+      assert.deepEqual(selected, verify(good), 'Empty optional text must not change the grounded decision');
+      assert.equal(requests.length, 1, 'An empty unused field must not consume a repair or reject a job');
+    }
+    const privateFieldName = '候选秘密姓名 13800000001';
+    const emptyExtra = normalizeWorkMatchOutput({ ...good, [privateFieldName]: '' });
+    assert.deepEqual(emptyExtra.raw, good);
+    assert(!JSON.stringify(emptyExtra.changes).includes(privateFieldName), 'Unknown names must not leak through normalization diagnostics');
+    bad({ ...good, decisionExplanation_note: '有内容的未知附加断言' });
+    bad({ ...good, unrecognized_optional_text: null });
+    bad({ ...good, modelRecommendation: '', decisionExplanation_note: '' });
+    bad({ ...good, selectedWork: { ...good.selectedWork, jdEvidenceRefs: [candidate] }, decisionExplanation_note: '' });
+    requests.length = 0;
+    Object.assign(telemetry, createAttemptTelemetry());
     global.fetch = async (_url, options) => {
       requests.push(JSON.parse(options.body));
       return response(requests.length === 1 ? malformed : JSON.stringify(good));
     };
     assert.equal((await adapter.selectJob(input)).modelRecommendation, 'primary');
     assert.equal(requests.length, 2);
+    assert.equal(telemetry.modelCallCount, requests.length, 'The parser failure and recovery both consume real requests');
     assert.equal(JSON.parse(requests[1].messages[1].content).contractRepair.invalidResponseText, malformed,
       'Real parser error forwards the exact malformed response for the one recovery');
     assert(!JSON.stringify(events).includes(malformed), 'Raw candidate response must not enter diagnostic events');
@@ -149,16 +172,20 @@ async function testRealTransport() {
     assert.equal(adapter.maxTokens, 1700, 'Operation-local limits do not change the shared transport');
 
     requests.length = 0;
+    Object.assign(telemetry, createAttemptTelemetry());
     global.fetch = async (_url, options) => {
       requests.push(JSON.parse(options.body));
       return response(requests.length === 1 ? '' : JSON.stringify(good), requests.length === 1 ? 'length' : 'stop');
     };
     await adapter.selectJob(input);
     assert.deepEqual(requests.map(request => request.max_tokens), [4096, 8192]);
+    assert.equal(telemetry.modelCallCount, requests.length, 'A truncated response remains a counted request');
     requests.length = 0;
+    Object.assign(telemetry, createAttemptTelemetry());
     global.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return response(malformed); };
     await assert.rejects(adapter.selectJob(input), { code: 'MODEL_INVALID_JSON', modelRepairHandled: true });
     assert.equal(requests.length, 2, 'Transport retries cannot multiply the one recovery');
+    assert.equal(telemetry.modelCallCount, requests.length, 'A terminal failure still counts both requests');
 
     requests.length = 0;
     global.fetch = async (_url, options) => {

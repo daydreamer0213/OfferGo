@@ -321,9 +321,10 @@ function riskRuleApplies(item, configs, directions) {
 function explicitNonTargetCity(value, targetCities) {
   if (!(targetCities || []).length) return "";
   const text = String(value || "");
-  const cityMatch = text.match(/(?:base|驻场|工作地(?:点)?|办公地(?:点)?|上班地(?:点)?|项目地(?:点)?)[：:\/\s-]*(广州|深圳|佛山|东莞|珠海|北京|上海|杭州|成都|武汉|南京|苏州|长沙|天津|西安|重庆)/i);
-  const city = cityMatch?.[1] || "";
-  return city && !targetCities.some((target) => city === target) ? city : "";
+  const cityNames = "广州|深圳|佛山|东莞|珠海|北京|上海|杭州|成都|武汉|南京|苏州|长沙|天津|西安|重庆";
+  const cityMatch = text.match(new RegExp(`(?:base|驻场|工作地(?:点)?|办公地(?:点)?|上班地(?:点)?|项目地(?:点)?)[：:/\\s-]*((?:${cityNames})(?:市)?(?:\\s*(?:[/／、,，]|或)\\s*(?:${cityNames})(?:市)?(?=$|[\\s/／、,，。；;！？!?（）()]|均可|可选|任选))*)`, "i"));
+  const cities = cityMatch?.[1].split(/\s*(?:[/／、,，]|或)\s*/).map(city => city.replace(/市$/, "")) || [];
+  return cities.length && !cities.some((city) => targetCities.includes(city)) ? cities[0] : "";
 }
 
 function parseWorkSchedule(value) {

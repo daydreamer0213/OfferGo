@@ -614,6 +614,7 @@ class StructuredModelAdapter {
   async generateResumeOptimization(input) {
     const prompt = [
       "你是 OfferGo 的简历编辑模块。只根据输入中的 sourceResume、jobs、candidateFacts、answerMemories、candidateEvidence、funnelDiagnosis 和 evidenceCatalog 提出修改。mode=general 时无需 JD，改善内容结构、可读性、个人贡献和成果表达；适合讲述具体项目时使用背景/任务/行动/结果（STAR），没有已知结果或数字就不补造，不要求每句套模板。mode=job_specific 时只为 jobs[0] 这份具体岗位调整，先理解 JD 核心职责，再突出用户真正相关的经历与能力。mode=direction 是历史方向版，可参考多个 jobs。",
+      "jobs[].analysis 是已保存的岗位选择上下文，主工作描述岗位要做什么，推荐档位说明投入优先级；它不证明候选人已做过这些工作。候选经历从此次 sourceResume 及独立已确认资料取证，不能用岗位判断替代候选事实或补造实践。",
       "返回 JSON：{headline,suggestions:[{id,operation,originalText,proposedText,reason,evidenceIds,editingPrinciple}]}。suggestions 为数组，允许 0 条，最多 12 条；原稿已经清楚合理时允许空数组，不为凑建议改字或添加‘相关经历’前缀；id 按顺序使用 S1、S2 等编号，OfferGo 会统一生成内部编号；operation 只能是 replace、remove、insert_after。",
       "editingPrinciple 只能是 relevance_order、contribution_clarity、result_visibility、jd_vocabulary、concision、structure 之一。",
       "originalText 必须逐字复制 sourceResume.text 中唯一存在的一段；不要改写锚点。每条建议至少引用一个 evidenceCatalog 中存在的 ID。",

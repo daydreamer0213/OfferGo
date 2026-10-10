@@ -225,6 +225,10 @@ function removalRange(sourceText, range) {
 }
 
 function renderOptimizedResume(sourceText, suggestions) {
+  return renderResumeText(sourceText, suggestions, true);
+}
+
+function renderResumeText(sourceText, suggestions, cleanEmptyContentHeading) {
   let result = cleanText(sourceText, 200_000, "源简历");
   const operations = [];
   for (const suggestion of Array.isArray(suggestions) ? suggestions : []) {
@@ -267,6 +271,10 @@ function renderOptimizedResume(sourceText, suggestions) {
       result = result.slice(0, operation.start - 1) + operation.removedTailTerminator + result.slice(operation.start);
     }
     result = `${result.slice(0, operation.start)}${operation.replacement}${result.slice(operation.end)}`;
+  }
+  if (operations.length && cleanEmptyContentHeading) {
+    // Merged bullets can leave the source resume's content label with no content.
+    result = result.replace(/^[\t ]*内容[：:][\t ]*\r?\n(?:[\t ]*\r?\n)*(?=[\t ]*业绩[：:][\t ]*(?:\r?\n|$))/gm, "");
   }
   return result;
 }
@@ -340,7 +348,9 @@ function validateResumeActivationText({
   const warnings = [];
   try {
     const expectedGenerated = renderOptimizedResume(source, suggestions);
-    if (comparableResumeText(expectedGenerated) !== comparableResumeText(generated)) {
+    // Older saved drafts retain the empty heading; accept only that exact prior rendering.
+    if (comparableResumeText(expectedGenerated) !== comparableResumeText(generated)
+      && comparableResumeText(renderResumeText(source, suggestions, false)) !== comparableResumeText(generated)) {
       errors.push(issue("RESUME_GENERATED_BASELINE_CHANGED"));
     }
   } catch {

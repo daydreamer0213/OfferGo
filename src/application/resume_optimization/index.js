@@ -375,12 +375,22 @@ function isCompleteJob(job) {
 }
 
 function modelJob(job) {
+  const analysis = job.analysis || {};
   return {
     id: Number(job.id),
     title: String(job.title || ""),
     company: String(job.company || ""),
     description: String(job.description || ""),
-    analysis: job.analysis || {}
+    // Matching prose is a judgment about fit, not evidence for the selected resume.
+    analysis: analysis.semanticMatchingMode === "whole_jd" ? {
+      semanticStatus: analysis.semanticStatus,
+      semanticMatchingMode: analysis.semanticMatchingMode,
+      recommendation: analysis.recommendation,
+      selectedWork: {
+        summary: analysis.selectedWork?.summary,
+        jdEvidenceRefs: analysis.selectedWork?.jdEvidenceRefs
+      }
+    } : analysis
   };
 }
 

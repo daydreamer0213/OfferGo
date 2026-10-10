@@ -267,6 +267,47 @@ try {
   assert.strictEqual(draft.suggestions[0].decision, "accepted");
   assert.strictEqual(draft.modelIdentity.provider, "scripted");
 
+  // Matching explanations are job judgments, not facts about this source resume.
+  const selectedWork = { summary: "企业知识库应用、检索评估及接口交付", jdEvidenceRefs: ["J3"] };
+  const unsupportedNarrative = "在校期间使用 Java 独立完成企业知识库项目";
+  const wholeJobId = storage.upsertJob(db, job("resume-service-whole-jd", { company: "专项示例科技",
+    analysis: { ...job("template").analysis, semanticMatchingMode: "whole_jd", selectedWork,
+      recommendationSchemaVersion: require("../src/core/decision_policy").RECOMMENDATION_SCHEMA_VERSION,
+      modelRecommendation: "apply", decisionStatus: "decided",
+      decisionExplanation: unsupportedNarrative, fitReasons: [unsupportedNarrative],
+      materialConsiderations: [{ description: unsupportedNarrative, jdEvidenceRefs: ["J3"], candidateEvidenceRefs: ["C7"] }],
+      supportingFacts: [{ id: "C7", sourcePath: "candidateProfile.projects.0", quote: "另一绑定简历的项目" }]
+    }
+  }), ownerBatch);
+  const { getJob } = require("../src/storage/job_store");
+  const originalAnalysis = getJob(db, wholeJobId).analysis;
+  const { OpenAICompatibleAdapter } = require("../src/adapters/models/openai_compatible");
+  const originalFetch = global.fetch, wireRequests = [];
+  try {
+    global.fetch = async (_url, options) => {
+      wireRequests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "stop",
+        message: { content: JSON.stringify({ headline: "保留已有清楚原稿", suggestions: [] }) } }] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const boundedService = createResumeOptimizationService({ db,
+      adapter: new OpenAICompatibleAdapter({ baseUrl: "https://example.invalid", apiKey: "fixture-key",
+        model: "fixture-model", maxRetries: 0 }) });
+    const boundedDraft = await boundedService.createDraft({ profileId: owner.profileId, planId: owner.planId,
+      sourceResumeVersionId: owner.resumeVersionId, mode: "job_specific", jobId: wholeJobId });
+    assert.strictEqual(wireRequests.length, 1, "context projection must not add another model call");
+    const wireInput = JSON.parse(wireRequests[0].messages.find(item => item.role === "user").content);
+    assert.deepStrictEqual(wireInput.jobs[0].analysis, { semanticStatus: "complete", semanticMatchingMode: "whole_jd",
+      recommendation: "apply", selectedWork }, "resume editing needs the saved job decision, not candidate assertions from its explanation");
+    assert.strictEqual(wireInput.jobs[0].description, job("expected").description);
+    assert(wireInput.sourceResume.text.includes("参与企业知识库开发"));
+    assert(wireInput.evidenceCatalog.some(item => item.kind === "fact" && item.text.includes("两周内到岗")));
+    assert(!JSON.stringify(wireInput).includes(unsupportedNarrative));
+    assert(!JSON.stringify(wireInput).includes("另一绑定简历的项目"));
+    assert.deepStrictEqual(getJob(db, wholeJobId).analysis, originalAnalysis, "stored matching judgment must remain unchanged");
+    assert.strictEqual(boundedDraft.finalText, document("resume-owner", "候选人甲").text);
+  } finally { global.fetch = originalFetch; }
+
   const otherOwnerPlanId = Number(db.prepare(`INSERT INTO search_plans(
     profile_id, name, plan_json, is_active, created_at, updated_at
   ) VALUES (?, 'Owner second plan', ?, 0, ?, ?)`)

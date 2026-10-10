@@ -570,7 +570,9 @@ function rescorePlanObservations(db, { planId, configs }) {
         || (!previousAnalysis.semanticStatus && !["rule-only", "rule-gate", "scan-checkpoint", "rule-fallback"].includes(previousAnalysis.provider));
       const analysis = {
         ...previousAnalysis, workSchedule: scored.workSchedule, workScheduleEvidence: scored.workScheduleEvidence, technicalFit: scored.technicalFit,
-        ...(modelBacked && staleReasons.length ? { semanticStatus: "stale", decisionSource: "analysis_pending", recommendation: null, decisionStatus: "needs_retry", staleReasons, expectedRevision } : {})
+        ...(modelBacked && staleReasons.length ? { semanticStatus: "stale", decisionSource: "analysis_pending",
+          recommendation: previousAnalysis.semanticMatchingMode === "whole_jd" ? previousAnalysis.recommendation : null,
+          decisionStatus: "needs_retry", staleReasons, expectedRevision } : {})
       };
       update.run(raw.salary, raw.experience, raw.education, scored.score, scored.level, JSON.stringify(scored.matches), JSON.stringify(scored.risks), JSON.stringify(scored.qualityTags), JSON.stringify(analysis), row.observation_id);
     }
