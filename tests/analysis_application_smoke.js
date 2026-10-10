@@ -36,6 +36,7 @@ let server;
 
 (async () => {
   try {
+    await testPausedInventoryRecovery();
     await testDashboardContract();
     await testApplicationBoundary();
     await testUnresolvedMatchCanActuallyRetry();
@@ -281,6 +282,35 @@ async function testApplicationBoundary() {
   assert.deepStrictEqual(errorRunner.calls, [], "validation failures must happen before analyzer execution");
 }
 
+async function testPausedInventoryRecovery() {
+  const saved = seedPlan('paused-inventory');
+  const jobId = seedFailedJob(saved, 'paused-inventory-complete');
+  const current = seedPausedWorkflow(saved, 'paused-inventory-current');
+  const historical = seedPausedWorkflow(saved, 'paused-inventory-history', { localDay: '1900-01-01' });
+  const otherPlatform = seedPausedWorkflow(saved, 'paused-inventory-zhaopin', { site: 'zhaopin' });
+  const historicalBefore = getWorkflowRun(db, historical.id);
+  const otherBefore = getWorkflowRun(db, otherPlatform.id);
+  const recovered = await retryPendingJobAnalyses({ db, input: { planId: saved.planId, jobIds: [jobId] },
+    deps: applicationDeps(controlledRunner({ delayMs: 0 })) });
+  assert.equal(recovered.completed, 1);
+  assert.equal(listWorkflowInventory(db, { planId: saved.planId }).length, 1);
+  const updated = getWorkflowRun(db, current.id);
+  assert.equal(updated.inventoryCount, 1, 'successful ordinary retry must refresh a paused workflow recommendation count');
+  assert.deepStrictEqual({ ...updated, inventoryCount: current.inventoryCount, updatedAt: current.updatedAt }, current,
+    'count reconciliation must preserve pause reason, resume phase, generation and every other workflow field');
+  assert.deepStrictEqual(getWorkflowRun(db, historical.id), historicalBefore, 'historical workflow counts must remain unchanged');
+  assert.deepStrictEqual(getWorkflowRun(db, otherPlatform.id), otherBefore, 'BOSS inventory must not overwrite the other platform count');
+  reconcilePlanWorkflowInventory(db, saved.planId);
+  assert.deepStrictEqual(getWorkflowRun(db, current.id), updated, 'unchanged inventory must not rewrite the paused workflow');
+}
+
+function seedPausedWorkflow(saved, id, overrides = {}) {
+  const workflow = createWorkflowRun(db, { id, profileId: saved.profileId, planId: saved.planId,
+    localDay: chinaLocalDay(), sequence: 1, inventoryCount: 0, ...overrides });
+  db.prepare("UPDATE workflow_runs SET status = 'paused', control_state = 'pause_requested', error_code = 'MODEL_QUOTA_EXHAUSTED', error_message = 'fixture quota pause', resume_phase = 'analyzing', recovery_generation = 2 WHERE id = ?").run(workflow.id);
+  return getWorkflowRun(db, workflow.id);
+}
+
 async function testBulkRecoveryStopsOnQuotaFailure() {
   const saved = seedPlan('quota-recovery');
   const ids = Array.from({ length: 6 }, (_, i) => seedFailedJob(saved, `quota-recovery-${i}`, { source: 'zhaopin' }));
@@ -387,6 +417,19 @@ async function testDashboardContract() {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const base = `http://127.0.0.1:${server.address().port}`;
+
+  const paused = seedPlan('http-paused-inventory');
+  const pausedJobId = seedFailedJob(paused, 'http-paused-inventory-complete');
+  await retryOneJobAnalysis({ db, input: { planId: paused.planId, jobId: pausedJobId },
+    deps: applicationDeps(controlledRunner({ delayMs: 0 })) });
+  const pausedWorkflow = seedPausedWorkflow(paused, 'http-paused-inventory');
+  const pausedPage = await fetch(`${base}/workflow?runId=${pausedWorkflow.id}`);
+  assert.equal(pausedPage.status, 200);
+  assert.match(await pausedPage.text(), /data-overview-recommendations>1<\/dd>/,
+    'opening the paused task must repair and display an already stale recommendation count');
+  const pausedAfter = getWorkflowRun(db, pausedWorkflow.id);
+  assert.equal(pausedAfter.inventoryCount, 1);
+  assert.deepStrictEqual({ ...pausedAfter, inventoryCount: pausedWorkflow.inventoryCount, updatedAt: pausedWorkflow.updatedAt }, pausedWorkflow);
 
   const singleFailed = await post(base, "/api/analyze-job", { planId: http.planId, jobId: failedJobId });
   const singleFailedHtml = await singleFailed.text();

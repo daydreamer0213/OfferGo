@@ -142,7 +142,7 @@ function reconcilePlanWorkflowInventory(db, planId) {
     planId,
     site: "boss",
     localDay: shanghaiLocalDay(),
-    statuses: ["review_required", "interrupted"],
+    statuses: ["review_required", "interrupted", "paused"],
     limit: 500
   })) {
     if (workflow.inventoryCount === inventoryCount) continue;

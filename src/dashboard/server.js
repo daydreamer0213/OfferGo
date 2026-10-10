@@ -5652,7 +5652,7 @@ function renderWorkflowDashboardPage({ db, searchParams, logger = null, workflow
   }
   let workflow = getWorkflowRun(db, workflowRunId);
   if (!workflow) return renderErrorPage("本轮任务不存在。", "/plan", { code: "WORKFLOW_RUN_NOT_FOUND" });
-  if (["review_required", "interrupted"].includes(workflow.status)) {
+  if (["review_required", "interrupted", "paused"].includes(workflow.status)) {
     reconcilePlanWorkflowInventory(db, workflow.planId);
     workflow = getWorkflowRun(db, workflowRunId);
   }
