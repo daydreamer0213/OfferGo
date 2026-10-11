@@ -114,6 +114,8 @@ const logger = {
     assert.match(page.body, /我参与了 &lt;script&gt;alert\(1\)&lt;\/script&gt; 知识库开发/);
     assert.doesNotMatch(page.body, /<script>alert\(1\)<\/script>/);
     assert.match(page.body, /原回答/);
+    assert.match(page.body, /<textarea name="sourceQuote"[^>]*required>/, 'users can select the factual original passage');
+    assert.doesNotMatch(page.body, /type="hidden" name="sourceQuote"/, 'source selection must not be hidden');
     assert.match(page.body, /我参与知识库开发，并负责接口联调/);
     const retryFeedback = page.body.match(/<div class="interview-retries">([\s\S]*?)<\/div>/)?.[1];
     assert(retryFeedback, 'completed interview must show the retry feedback');

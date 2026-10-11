@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const storage = require('../src/core/storage');
 const evidence = require('../src/storage/candidate_evidence_store');
 const { selectRelevantCandidateMaterial } = require('../src/core/candidate_evidence');
+require('./candidate_evidence_source_regressions').runEvidenceSourceRegressions();
 const db = storage.openDb(':memory:');
 try {
   const owner = storage.saveProfileAnalysis(db, { profile: { candidate: { name: '甲' } }, document: { contentHash: 'a', text: '甲的简历', originalFileName: 'a.txt', format: 'text' }, searchPlan: { directions: ['工程师'] } });

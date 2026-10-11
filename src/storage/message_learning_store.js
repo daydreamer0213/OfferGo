@@ -1,5 +1,6 @@
 const { createHash } = require("node:crypto");
 const { immediateTransaction, nowIso, parseJson, storageError } = require("./storage_shared");
+const { getCandidateEvidenceSourceStatus } = require('./candidate_evidence_store');
 
 const MAX_DRAFT_TEXT = 4000;
 const MAX_FACT_VALUE = 2000;
@@ -285,14 +286,19 @@ function listCandidateAnswerMemories(db, {
   // projection before model input or fact-quality checks.
   const sourceIds = memories.filter(memory => memory.source === 'user_edited_reply').map(memory => `reply-edit:${memory.id}`);
   if (!sourceIds.length) return memories;
-  const updates = db.prepare(`SELECT source_id, source_quote, evidence_text, withdrawn_at
+  const updates = db.prepare(`SELECT source_id, source_quote, evidence_text, withdrawn_at, updated_at
     FROM candidate_evidence_entries WHERE profile_id = ? AND source_kind = 'manual'
       AND source_id IN (${sourceIds.map(() => '?').join(',')})
       AND (withdrawn_at IS NOT NULL OR evidence_text != source_quote)
     ORDER BY updated_at, id`).all(profile, ...sourceIds);
   return memories.map(memory => {
     const linked = updates.filter(entry => entry.source_id === `reply-edit:${memory.id}`)
-      .map(entry => ({ sourceQuote: entry.source_quote, text: entry.evidence_text, withdrawnAt: entry.withdrawn_at || '' }));
+      .map(entry => {
+        const status = getCandidateEvidenceSourceStatus(db, { profileId: profile, sourceKind: 'manual',
+          sourceQuote: entry.source_quote, text: entry.evidence_text });
+        return { sourceQuote: entry.source_quote, text: entry.evidence_text,
+          withdrawnAt: entry.withdrawn_at || (status !== 'fact' ? entry.updated_at : '') };
+      });
     return linked.length ? { ...memory, sourceEvidenceUpdates: linked } : memory;
   });
 }

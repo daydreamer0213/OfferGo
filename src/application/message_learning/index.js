@@ -242,7 +242,7 @@ function createMessageReplyLearningService({
   }
 
   function listCommunicationProfile({ profileId, answerPage = 1, answerQuery = '' }) {
-    const evidence = listCandidateEvidence(db, { profileId });
+    const evidence = listCandidateEvidence(db, { profileId, includeNonFacts: true });
     const revisions = listCandidateFactRevisions(db, { profileId, limit: 2000 });
     const page = Number.isSafeInteger(Number(answerPage)) && Number(answerPage) > 0 ? Number(answerPage) : 1;
     const pageSize = 50;
@@ -250,7 +250,7 @@ function createMessageReplyLearningService({
     const answers = listCandidateAnswerMemories(db, { profileId, activeOnly: true,
       source: 'user_edited_reply', limit: pageSize + 1, offset: (page - 1) * pageSize, search: query });
     return {
-      facts: mergeCandidateFacts(listCandidateFacts(db, profileId), evidence, { factRevisions: revisions })
+      facts: mergeCandidateFacts(listCandidateFacts(db, profileId), evidence.filter(entry => !entry.sourceStatus), { factRevisions: revisions })
         .map(fact => ({ ...fact, confirmation: factStatus(nowIso(now()), { ...fact, key: fact.factKey }) })),
       evidence,
       answers: answers.slice(0,pageSize).map(memory => ({ ...memory, learning: getMessageReplyLearningStatus(db, { profileId, memoryId: memory.id }) })),

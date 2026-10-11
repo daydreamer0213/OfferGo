@@ -4375,6 +4375,9 @@ async function handleCommunicationProfile(req, res, service) {
 
 function sendReplyLearningError(res, error) {
   const code = String(error?.code || "MESSAGE_REPLY_LEARNING_FAILED");
+  if (code.startsWith('CANDIDATE_EVIDENCE_SOURCE_')) {
+    return sendJson(res, 409, { error: error.message, errorCode: code });
+  }
   const statusCode = code === "MESSAGE_REPLY_DRAFT_CONFLICT" ? 409
     : code.endsWith("_NOT_FOUND") || code === "CANDIDATE_PROFILE_NOT_FOUND" ? 404
     : error instanceof TypeError || code.endsWith("_INVALID") ? 400

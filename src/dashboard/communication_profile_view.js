@@ -1,3 +1,18 @@
+const EVIDENCE_EDIT_SCRIPT = `<script>
+document.addEventListener("submit", async function(event) {
+  const form = event.target;
+  if (!form.matches("[data-evidence-edit]")) return;
+  event.preventDefault();
+  const button = form.querySelector("button"), alert = form.querySelector("[data-evidence-error]");
+  button.disabled = true; alert.hidden = true;
+  try {
+    const response = await fetch(form.action, {method:"POST", body:new URLSearchParams(new FormData(form))});
+    if (!response.ok) { const result = await response.json(); throw new Error(result.error || "暂时无法保存，请稍后重试。"); }
+    location.assign(response.url);
+  } catch (error) { alert.textContent = error.message; alert.hidden = false; button.disabled = false; }
+});
+</script>`;
+
 const FACT_LABELS = Object.freeze({
   employment_status: "当前求职状态",
   availability_date: "到岗时间",
@@ -36,7 +51,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
   const answerPage = data.answerPage || { page:1, query:'', hasPrevious:false, hasNext:false };
   const answerLink = page => `/communication-profile?profileId=${profileId}&answerPage=${page}&answerQuery=${encodeURIComponent(answerPage.query)}#saved-answers`;
   const answerControls = `<form class="form-stack" method="get" action="/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><label>查找历史回答<input name="answerQuery" maxlength="160" value="${escapeAttr(answerPage.query)}" placeholder="输入问题或回答里的关键词"></label><button>查找回答</button></form><nav aria-label="历史回答分页"><p class="line">第 ${answerPage.page} 页${answerPage.query ? ' · 当前为关键词搜索结果' : ''}</p>${answerPage.hasPrevious ? `<a class="button-link secondary" href="${escapeAttr(answerLink(answerPage.page-1))}">上一页</a>` : ''} ${answerPage.hasNext ? `<a class="button-link secondary" href="${escapeAttr(answerLink(answerPage.page+1))}">下一页</a>` : ''}</nav>`;
-  const evidence = (data.evidence || []).map(item => `<article class="message-draft"><h3>${escapeHtml(item.subject)}</h3><p class="line">${item.sourceKind === 'interview_turn' ? '从面试回答确认' : String(item.sourceId || '').startsWith('reply-edit:') ? '来自你改写并采用的回复' : '你补充的经历'} · 更新于 ${escapeHtml(formatTime(item.updatedAt))}</p><form class="form-stack" method="post" action="/api/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="revise_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><label>主题<input name="subject" maxlength="160" value="${escapeAttr(item.subject)}" required></label><label>我确认的经历<textarea name="text" maxlength="8000" required>${escapeHtml(item.text)}</textarea></label><button>保存修改</button></form><details><summary>查看当时的原话</summary><p>${escapeHtml(item.sourceQuote)}</p></details><form method="post" action="/api/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="withdraw_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><button class="secondary">不再使用这段经历</button></form></article>`).join('') || '<p>面试练习里确认的经历，以及你改写并采用的回复中的个人经历，会出现在这里。</p>';
+  const evidence = (data.evidence || []).map(item => `<article class="message-draft"><h3>${escapeHtml(item.subject)}</h3>${item.sourceStatus ? `<p class="status warn">${item.sourceStatus === 'ambiguous' ? '原话在不同上下文中重复，暂不作为真实经历使用。' : item.sourceStatus === 'invalid' ? '来源原话与原回答不一致，暂不作为真实经历使用。' : '原回答包含明确的示范或假设限定，已停止作为真实经历使用。'}可回到面试回答重新选取真实部分，或在这里停止使用。</p>` : ''}<p class="line">${item.sourceKind === 'interview_turn' ? '从面试回答确认' : String(item.sourceId || '').startsWith('reply-edit:') ? '来自你改写并采用的回复' : '你补充的经历'} · 更新于 ${escapeHtml(formatTime(item.updatedAt))}</p><form class="form-stack" method="post" action="/api/communication-profile" data-evidence-edit><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="revise_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><label>主题<input name="subject" maxlength="160" value="${escapeAttr(item.subject)}" required></label><label>我确认的经历<textarea name="text" maxlength="8000" required>${escapeHtml(item.text)}</textarea></label><button${item.sourceStatus ? ' disabled' : ''}>保存修改</button><div class="alert" data-evidence-error role="alert" hidden></div></form><details><summary>查看当时的原话</summary><p>${escapeHtml(item.sourceQuote)}</p></details><form method="post" action="/api/communication-profile"><input type="hidden" name="profileId" value="${profileId}"><input type="hidden" name="action" value="withdraw_evidence"><input type="hidden" name="evidenceId" value="${item.id}"><button class="secondary">不再使用这段经历</button></form></article>`).join('') || '<p>面试练习里确认的经历，以及你改写并采用的回复中的个人经历，会出现在这里。</p>';
   const history = data.revisions.map((revision) => {
     const action = revision.operation === "delete" ? "已删除" : "更新为";
     const value = revision.operation === "delete" ? "" : `：${escapeHtml(revision.factValue)}`;
@@ -50,7 +65,7 @@ function renderCommunicationProfilePage({ db, searchParams, service, helpers }) 
     planId: plan?.id || "",
     stage: "消息",
     brandHref: plan?.id ? `/plan?planId=${plan.id}` : "/onboarding",
-    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。回答默认只用于原岗位；你也可以选择让其他岗位的类似问题参考。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel" id="saved-answers"><h2>我改过并让 OfferGo 记住的回答</h2>${answerControls}${answers}</section><section class="panel"><h2>我确认过的真实经历</h2>${evidence}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
+    content: `<main id="main-content" class="message-layout"><header class="page-heading"><p class="eyebrow">越用越懂你</p><h1>我的沟通资料</h1><p class="lede">这里保存你亲自修改过的回答和明确资料。回答默认只用于原岗位；你也可以选择让其他岗位的类似问题参考。</p></header><section class="panel"><h2>我目前使用的沟通资料</h2>${facts}</section><section class="panel" id="saved-answers"><h2>我改过并让 OfferGo 记住的回答</h2>${answerControls}${answers}</section><section class="panel"><h2>我确认过的真实经历</h2>${evidence}${EVIDENCE_EDIT_SCRIPT}</section><details class="panel"><summary>历史修改</summary><ul>${history}</ul></details><p><a class="button-link secondary" href="${escapeAttr(messagesPath)}">返回消息发现</a></p></main>`
   });
 }
 

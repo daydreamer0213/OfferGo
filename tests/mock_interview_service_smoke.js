@@ -682,11 +682,28 @@ const db = storage.openDb(":memory:");
     const clarified = await dutyService.answerTurn({...dutyIdentity,answerText:'我负责接口联调并完成验收。'});
     assert.strictEqual(clarified.turns[0].answerText, '我负责接口联调并完成验收。');
     const dutyEvidence = dutyService.confirmEvidence({...dutyIdentity,subject:'接口联调职责',text:'我负责接口联调并完成验收。',sourceQuote:'我负责接口联调并完成验收。'});
+    const excludedSourceIds = [];
+    for (const [sourceQuestion, sourceAnswer, sourceQuote] of [
+      ['请介绍做过的工作。', '下面是练习示范，不是我的实际经历。以前我独立负责利润预算。', '以前我独立负责利润预算'],
+      ['假设现在由你测试接口，你会怎么做？', '我会先确认输入。测试版只调整校验，对照版保持当前逻辑。', '测试版只调整校验，对照版保持当前逻辑']
+    ]) {
+      const oldSource = storage.createMockInterviewSession(db, { ...dutyBase, sessionKind: 'resume_general',
+        resumeVersionId: dutySession.resumeVersionId, context: dutySession.context, settings: dutySession.settings,
+        initialQuestion: { text: sourceQuestion, focus: 'contribution', resumeEvidenceIds: ['R2'] } });
+      db.prepare('UPDATE mock_interview_turns SET answer_text = ? WHERE session_id = ?').run(sourceAnswer, oldSource.id);
+      excludedSourceIds.push(Number(db.prepare(`INSERT INTO candidate_evidence_entries(
+        profile_id, subject, evidence_text, source_kind, source_id, source_item_key, source_quote, scope_json, created_at, updated_at
+      ) VALUES (?, '旧来源', '我负责接口联调并完成利润预算测试。', 'interview_turn', ?, 'turn:1', ?, '{}', ?, ?)`)
+        .run(dutyOwner.profileId, String(oldSource.id), sourceQuote, new Date().toISOString(), new Date().toISOString()).lastInsertRowid));
+    }
     for (let n=0;n<101;n++) seedCompletedHistory(db, {...dutyBase,sessionKind:'resume_general',weakness:'历史',createdAt:'2099-01-01T00:00:00.000Z'});
     dutyMode = 'confirmed';
     const reusedDuty = await dutyService.startSession(dutyBase);
     assert.strictEqual(reusedDuty.turns[0].questionText, '你负责的接口联调有哪些关键取舍？');
     assert.deepStrictEqual(dutyCalls.at(-1).context.candidateEvidence.find(item => item.id === dutyEvidence.id).resumeEvidenceIds, ['R2']);
+    for (const id of excludedSourceIds) {
+      assert(!dutyCalls.at(-1).context.candidateEvidence.some(item => item.id === id), 'fresh native generation excludes old fictional or scenario-method evidence');
+    }
     assert.deepStrictEqual(storage.listMockInterviewSessions(db, {profileId:owner.profileId,sessionIds:[dutySession.id]}), [], 'source filter still enforces candidate ownership');
     // A style returned as questionKind is invalid, but the existing bounded correction must work at start and after an answer.
     for (const stage of ['start', 'answer']) {

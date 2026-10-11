@@ -74,6 +74,28 @@ for (const action of ['correct', 'withdraw']) {
   });
 }
 
+test('legacy nonfactual experience edits cannot reenter native reply input through answer memory', async () => {
+  const f = await fixture('correct');
+  const nonfact = '下面是练习示范，不是我的经历。我独立负责全年利润预算。';
+  try {
+    f.db.prepare('UPDATE candidate_evidence_entries SET evidence_text = ? WHERE id = ?').run(nonfact, f.entry.id);
+    assert(!evidenceStore.listCandidateEvidence(f.db, { profileId: f.owner.profileId }).some(entry => entry.id === f.entry.id));
+    const analyze = createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+      const stories = JSON.stringify({ candidateEvidence: input.candidateEvidence, answerMemories: input.answerMemories });
+      assert(!stories.includes(nonfact), 'a filtered legacy edit must not return through sourceEvidenceUpdates');
+      assert(!stories.includes(oldQuote), 'do not restore the superseded clause as current truth');
+      assert(stories.includes(unrelated), 'unrelated adopted experience is retained');
+      return { messageIntent: 'information_request', messageCategory: 'project_fact', messageSummary: '联调经历',
+        requiredFactKeys: [], usedFactKeys: [], usedMemoryIds: [], usedEvidenceIds: [], responseItems: [], coverage: [],
+        missingFact: null, messages: [unrelated] };
+    } } });
+    await analyze({ ...candidateReplyMaterial(f.db, f.owner.profileId), job: { id: f.jobId, company: '示例公司' },
+      messages: [{ text: '怎样做接口联调？' }] });
+    assert.equal(f.db.prepare('SELECT evidence_text FROM candidate_evidence_entries WHERE id = ?').get(f.entry.id).evidence_text, nonfact,
+      'reading retains the raw historical entry');
+  } finally { f.db.close(); }
+});
+
 test('formatting-equivalent source spans are removed without erasing unrelated content', () => {
   const memory = { id: 1, source: 'user_edited_reply', finalText: '我累计完成 3 个知识库接口联调项目。' + unrelated,
     sourceEvidenceUpdates: [{ sourceQuote: oldQuote, text: newQuote, withdrawnAt: '' }] };
