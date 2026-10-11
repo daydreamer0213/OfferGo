@@ -172,7 +172,7 @@ function applyPlatformRuntimePolicy(configs = {}, policy = {}, { acquisitionMode
   };
 }
 
-function evaluatePlatformBoundaries(job = {}, policy = {}) {
+function evaluatePlatformBoundaries(job = {}, policy = {}, { employmentType } = {}) {
   const tags = [];
   const risks = [];
   const filters = policy.filters || {};
@@ -186,7 +186,7 @@ function evaluatePlatformBoundaries(job = {}, policy = {}) {
   checkSalary(job, filters.salary, tags, risks);
   checkExperience(job, filters.experience, tags, risks);
   checkDegree(job, filters.degree, tags, risks);
-  checkJobType(job, filters.jobType, tags, risks);
+  checkJobType(job, filters.jobType, tags, risks, employmentType);
   return { qualityTags: tags, risks };
 }
 
@@ -248,9 +248,9 @@ function checkDegree(job, filter, tags, risks) {
   }
 }
 
-function checkJobType(job, filter, tags, risks) {
+function checkJobType(job, filter, tags, risks, employmentType) {
   if (!(filter?.labels || []).length) return;
-  const actual = jobTypeLabel(job);
+  const actual = jobTypeLabel(job, employmentType);
   if (!actual) {
     tags.push("platform_job_type_unverified");
     return;
@@ -320,8 +320,8 @@ function isDegreeLabel(value) {
   return /^(学历不限|不限|初中|中专|中技|高中|大专|本科|硕士|博士)$/.test(normalizeDegree(value));
 }
 
-function jobTypeLabel(job) {
-  return { internship: "实习", part_time: "兼职", full_time: "全职" }[employmentTypeOf(job).type] || "";
+function jobTypeLabel(job, employmentType) {
+  return { internship: "实习", part_time: "兼职", full_time: "全职" }[employmentType ?? employmentTypeOf(job).type] || "";
 }
 
 function jobTypeChoice(value) {

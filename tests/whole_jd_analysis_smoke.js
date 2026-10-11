@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { createJobAnalysisRunner, cachedModelCall } = require('../src/core/job_analysis');
-const { scoreJob } = require('../src/core/scoring');
+const { scoreJob, decisionState } = require('../src/core/scoring');
 const { presentWorkMatchInput, validateWorkMatchOutput } = require('../src/core/job_work_matching');
 const { openDb, saveProfileAnalysis, createBatch } = require('../src/core/storage');
 const { upsertJob, getJob, decisionBucket, rescorePlanObservations, listReportJobs } = require('../src/storage/job_store');
@@ -129,6 +129,57 @@ async function main() {
     assert.equal(failed.semanticStatus, 'failed');
     assert.equal(failed.recommendation, null);
     assert.equal(failed.errorCode, 'MODEL_INVALID_JSON');
+
+    const alternateBefore = requests;
+    const alternateCard = { ...job, sourceId: 'alternate-title-card', title: '后端开发实习/初级工程师',
+      tags: ['后端开发实习/初级工程师', '在校/应届', '本科'], description: '', detailRequired: true, detailRead: false };
+    const alternatePending = await analyze(alternateCard);
+    assert.equal(alternatePending.semanticStatus, 'refresh', 'A junior alternative needs its JD rather than a card-stage exclusion');
+    assert.equal(alternatePending.recommendation, null, 'Missing JD cannot become a recommendation');
+    assert.equal(requests, alternateBefore, 'Acquiring missing JD must not request the model');
+    const alternateIntern = await analyze({ ...alternateCard, sourceId: 'alternate-title-intern-only',
+      description: internshipOnly.description, detailRead: true, qualityTags: [] });
+    assert.equal(alternateIntern.recommendation, 'not_recommended');
+    assert.equal(requests, alternateBefore, 'An actual internship-only JD still stops before the model');
+    const alternateFull = { ...alternateCard, sourceId: 'alternate-title-independent-fulltime',
+      description: mixedJob.description, detailRead: true, qualityTags: [] };
+    tier = 'caution';
+    const alternateResult = await analyze(alternateFull);
+    assert.equal(alternateResult.recommendation, 'caution', 'The native model tier stays unchanged');
+    assert.equal(alternateResult.semanticStatus, 'complete');
+    assert.equal(requests, alternateBefore + 1, 'The independent full-time JD can reach whole-JD matching');
+    assert.equal(lastInput.originalJob.description, mixedJob.description);
+    const alternateBatch = createBatch(db, 'zhaopin', '后端开发', 'alternate-title-test');
+    const alternateId = upsertJob(db, { ...alternateFull, ...scoreJob(alternateFull, configs), analysis: alternateResult }, alternateBatch);
+    assert.equal(getJob(db, alternateId).analysis.recommendation, 'caution', 'Saving/reopening must not upgrade the tier');
+    assert.equal((await analyze(alternateFull)).recommendation, 'caution');
+    assert.equal(requests, alternateBefore + 1, 'The unchanged whole-JD cache remains usable');
+
+
+    const reviewedBefore = requests;
+    const bareIntern = await analyze({ ...alternateCard, sourceId: 'reviewed-bare-intern',
+      description: '只招实习生，要求每周到岗4天，持续参与六个月以上。' + description, detailRead: true, qualityTags: [] });
+    assert.equal(bareIntern.recommendation, 'not_recommended');
+    assert.equal(requests, reviewedBefore, 'Bare explicit internship-only JD must stop before the model');
+    for (const evidence of [{ jobType: '兼职' }, { tags: ['兼职'] }, { jobType: '实习' }]) {
+      const explicit = await analyze({ ...alternateFull, ...evidence, sourceId: 'reviewed-explicit-' + JSON.stringify(evidence) });
+      assert.equal(explicit.recommendation, 'not_recommended');
+      assert.equal(requests, reviewedBefore, 'Independent employment metadata remains a hard boundary');
+    }
+    const fullTimeFilteredConfigs = { ...configs, platformPolicy: { filters: { jobType: { labels: ['全职'] } } } };
+    const filteredScore = scoreJob(alternateCard, fullTimeFilteredConfigs);
+    assert.equal(decisionState(filteredScore), 'refresh', 'Native platform full-time filter must permit necessary JD acquisition');
+    assert(!filteredScore.qualityTags.includes('platform_job_type_mismatch'));
+    const filteredAnalyze = createJobAnalysisRunner(fullTimeFilteredConfigs, [], { db, analyzer });
+    const filteredPending = await filteredAnalyze({ ...alternateCard, sourceId: 'reviewed-platform-pending' });
+    assert.equal(filteredPending.semanticStatus, 'refresh');
+    assert.equal(filteredPending.recommendation, null);
+    assert.equal(requests, reviewedBefore, 'Platform-filtered incomplete JD must not request a model');
+    const filteredIntern = await filteredAnalyze({ ...alternateCard, sourceId: 'reviewed-platform-intern',
+      description: '只招实习生，要求每周到岗4天。' + description, detailRead: true, qualityTags: [] });
+    assert.equal(filteredIntern.recommendation, 'not_recommended');
+    assert.equal(requests, reviewedBefore);
+
     console.log('whole_jd_analysis_smoke passed');
   } finally { db.close(); }
 }

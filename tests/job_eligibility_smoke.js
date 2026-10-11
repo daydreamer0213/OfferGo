@@ -142,4 +142,45 @@ for (const snippet of [...cohortMismatch.evidence.job, ...cohortMismatch.evidenc
 assert.strictEqual(new Set(cohortMismatch.evidence.job).size, cohortMismatch.evidence.job.length);
 assert.strictEqual(new Set(cohortMismatch.evidence.candidate).size, cohortMismatch.evidence.candidate.length);
 
+
+// A junior alternative requires the JD; it is not proof of full-time work.
+for (const title of ['AI 工具开发实习/初级工程师（应届生可）', '初级后端开发工程师／实习生']) {
+  const card = { title, salary: '8-9K', tags: [title, '在校/应届', '本科'], description: '' };
+  const options = { candidateProfile: graduated2024, targetJobTypes: fullTimeTarget, deferJdQualifications: true };
+  const pending = evaluateJobEligibility(card, options);
+  assert.equal(pending.status, 'eligible', 'A parallel junior option must reach detail acquisition: ' + title);
+  assert.equal(pending.employmentType, 'unknown', 'Do not infer a confirmed full-time route from a title');
+  assert(!pending.qualityTags.includes('internship_role'));
+  assert.equal(evaluateJobEligibility(card, { ...options, deferJdQualifications: false }).status, 'blocked', 'Legacy behavior stays explicit');
+  assert.equal(evaluateJobEligibility({ ...card, description: '本岗位只招实习生，实习周期至少六个月。' }, options).status, 'blocked', 'Actual internship JD remains a boundary');
+  assert.equal(evaluateJobEligibility({ ...card, salary: '30-50元/时' }, options).status, 'blocked', 'Hourly pay keeps the existing part-time boundary');
+  assert.equal(evaluateJobEligibility({ ...card, jobType: '兼职' }, options).status, 'blocked', 'Explicit part-time remains excluded');
+  const mixed = evaluateJobEligibility({ ...card, description: '社会招聘：后端全职岗位负责接口和数据库开发。另设实习生岗位，实习周期至少六个月。' }, options);
+  assert.equal(mixed.status, 'eligible', 'The independent full-time JD option remains available');
+  assert.equal(mixed.employmentType, 'mixed');
+}
+for (const title of ['AI 开发实习生', 'Python/RAG 开发实习生', '初级工程师实习生', '实习生/初级课程助教']) {
+  assert.equal(evaluateJobEligibility({ title, description: '' }, { targetJobTypes: fullTimeTarget, deferJdQualifications: true }).status,
+    'blocked', 'A slash in skills or an internship-only title must not create a junior employment option: ' + title);
+}
+
+
+const reviewedAlternative = { title: 'AI 工具开发实习/初级工程师（应届生可）', salary: '8-9K', description: '' };
+const reviewedOptions = { candidateProfile: graduated2024, targetJobTypes: fullTimeTarget, deferJdQualifications: true };
+const reviewedMixedDescription = '社会招聘：后端全职岗位负责接口和数据库开发。另设实习生岗位，实习周期至少六个月。';
+for (const description of ['只招实习生，要求每周到岗4天，持续参与六个月以上。', '仅招实习生，负责订单接口开发。']) {
+  const excluded = evaluateJobEligibility({ ...reviewedAlternative, description }, reviewedOptions);
+  assert.equal(excluded.status, 'blocked', 'Explicit internship-only text must close the whole-JD boundary');
+  assert.equal(excluded.employmentType, 'internship');
+}
+for (const evidence of [{ jobType: '兼职' }, { tags: ['兼职'] }, { employmentType: 'part_time' }]) {
+  const excluded = evaluateJobEligibility({ ...reviewedAlternative, ...evidence, description: reviewedMixedDescription }, reviewedOptions);
+  assert.equal(excluded.status, 'blocked', 'An independent full-time paragraph cannot override explicit part-time metadata');
+  assert(excluded.qualityTags.includes('part_time_role'));
+}
+for (const evidence of [{ jobType: '实习' }, { tags: ['实习生'] }, { employmentType: 'internship' }]) {
+  assert.equal(evaluateJobEligibility({ ...reviewedAlternative, ...evidence }, reviewedOptions).status, 'blocked',
+    'The parallel title must not erase independent explicit internship metadata');
+}
+
 console.log("job_eligibility_smoke ok");

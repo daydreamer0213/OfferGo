@@ -101,19 +101,24 @@ function evaluateJobEligibility(job = {}, {
 
 function employmentTypeOf(job, { scopedDescription = false } = {}) {
   const title = normalized(job.title);
-  const structured = normalized([
+  const structuredFields = [
     job.jobType,
     job.employmentType,
     job.workType,
     ...(Array.isArray(job.tags) ? job.tags : [])
-  ].filter(Boolean).join(" "));
+  ].filter(Boolean).map(normalized);
+  const structured = structuredFields.join(" ");
   const description = normalized(job.description);
   const combined = `${title} ${structured} ${description}`;
   const metadata = `${title} ${structured}`;
+  // A parallel junior role needs its JD; the title alone cannot prove internship-only work.
+  const juniorAlternative = scopedDescription && /实习(?:生)?\s*[/／或]\s*初级[^/／或，,。；;]*?(?:工程师|开发)|初级[^/／或，,。；;]*?(?:工程师|开发)\s*[/／或]\s*实习(?:生)?/.test(title)
+    && !structuredFields.some(value => value !== title && /实习生?|intern(?:ship)?|兼职|part[ _-]?time/i.test(value));
   // A description may advertise separate employment options. An explicit
   // internship/part-time card remains a boundary; a generic card must not
   // apply one advertised option to every independently offered full-time job.
-  if (scopedDescription && !/实习生?|intern(?:ship)?|兼职|part[ _-]?time/i.test(metadata)) {
+  if (scopedDescription && !/兼职|part[ _-]?time/i.test(metadata)
+    && (juniorAlternative || !/实习生?|intern(?:ship)?/i.test(metadata))) {
     const clauses = semanticClauses(description);
     const fullTime = clauses.find(clause => /(?:社会招聘|社招).{0,12}(?:岗位|方向|职位)|全职(?:岗位|方向|职位)|(?:岗位|方向|职位|工作性质).{0,8}全职|^(?:社会招聘|社招)[:：]/.test(clause)
       && !/转正|转为|转成|实习(?:期)?后|不接受|不招|非全职/.test(clause)
@@ -127,7 +132,7 @@ function employmentTypeOf(job, { scopedDescription = false } = {}) {
   const mixed = combined.match(/(?:全职|社招).{0,10}(?:或|\/|、|均可|皆可).{0,10}实习(?:生)?|实习(?:生)?.{0,10}(?:或|\/|、|均可|皆可).{0,10}(?:全职|社招)|(?:可接受|欢迎)实习生/);
   if (mixed) return partTime || { type: "mixed", evidence: [mixed[0]] };
 
-  const metadataInternship = /实习经验|实习经历/.test(metadata)
+  const metadataInternship = juniorAlternative || /实习经验|实习经历/.test(metadata)
     ? null
     : metadata.match(/实习生?|intern(?:ship)?/i);
   const descriptionInternship = internshipDescriptionEvidence(description);
@@ -167,7 +172,7 @@ function internshipDescriptionEvidence(description) {
       && !/实习(?:周期|时长)|实习生(?:岗位|职位)|(?:岗位|职位).{0,12}实习生/.test(clause)) {
       continue;
     }
-    const match = clause.match(/实习(?:周期|时长).{0,32}(?:月|周|天)|实习生(?:岗位|职位)|(?:岗位|职位|招聘|招募|面向).{0,12}实习生|实习生.{0,12}(?:招聘|招募)/);
+    const match = clause.match(/^(?:只招|仅招)实习生|实习(?:周期|时长).{0,32}(?:月|周|天)|实习生(?:岗位|职位)|(?:岗位|职位|招聘|招募|面向).{0,12}实习生|实习生.{0,12}(?:招聘|招募)/);
     if (match) return clause;
   }
   return "";

@@ -64,7 +64,7 @@ function scoreJob(job, configs) {
   const matches = [];
   const risks = [];
   const qualityTags = [];
-  const platformBoundary = evaluatePlatformBoundaries(job, configs.platformPolicy);
+  const platformBoundary = evaluatePlatformBoundaries(job, configs.platformPolicy, { employmentType: eligibility.employmentType });
   qualityTags.push(...platformBoundary.qualityTags);
   risks.push(...platformBoundary.risks);
   qualityTags.push(...eligibility.qualityTags);
