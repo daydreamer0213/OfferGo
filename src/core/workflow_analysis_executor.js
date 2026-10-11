@@ -408,7 +408,8 @@ async function executeAttempt(context, claimed, leaseOwner, summary) {
         taskId: claimed.task.id,
         leaseOwner,
         analyzedJob,
-        reasonCode: LOCAL_RULE_SKIP_CODE,
+        reasonCode: analyzedJob.analysis?.semanticStatus === "refresh" || analyzedJob.analysis?.decisionSource === "source_refresh"
+          ? "SOURCE_REFRESH_REQUIRED" : LOCAL_RULE_SKIP_CODE,
         startedAt,
         finishedAt
       });
@@ -597,8 +598,8 @@ function isLocalRuleSkip(analyzedJob) {
   const analysis = analyzedJob?.analysis && typeof analyzedJob.analysis === "object"
     ? analyzedJob.analysis
     : {};
-  return String(analysis.decisionSource || "") === "local_rules"
-    || String(analysis.semanticStatus || "") === "rule_only";
+  return ["local_rules", "hard_boundary", "source_refresh"].includes(analysis.decisionSource)
+    || ["rule_only", "blocked", "refresh"].includes(analysis.semanticStatus);
 }
 
 function isWorkflowFatalError(error) {

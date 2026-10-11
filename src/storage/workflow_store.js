@@ -721,14 +721,19 @@ function reactivateWorkflowDetailRequiredTaskRow(db, {
   modelConfigRevision,
   now
 }) {
+  // A ready, refreshed source starts a new task generation; retain total attempts
+  // and prior attempt rows, whose (task, generation, attempt) identity is unique.
   return db.prepare(`
     UPDATE workflow_job_tasks SET
       observation_id = ?,
       status = CASE
+        WHEN last_error_code = 'SOURCE_REFRESH_REQUIRED' THEN 'pending'
         WHEN attempt_count_in_generation > 0 THEN 'retry_pending'
         ELSE 'pending'
       END,
-      priority = CASE WHEN attempt_count_in_generation > 0 THEN 20 ELSE 100 END,
+      recovery_generation = recovery_generation + CASE WHEN last_error_code = 'SOURCE_REFRESH_REQUIRED' THEN 1 ELSE 0 END,
+      attempt_count_in_generation = CASE WHEN last_error_code = 'SOURCE_REFRESH_REQUIRED' THEN 0 ELSE attempt_count_in_generation END,
+      priority = CASE WHEN last_error_code != 'SOURCE_REFRESH_REQUIRED' AND attempt_count_in_generation > 0 THEN 20 ELSE 100 END,
       available_at = NULL,
       lease_owner = NULL,
       leased_at = NULL,
@@ -744,15 +749,19 @@ function reactivateWorkflowDetailRequiredTaskRow(db, {
 
       AND job_id = ?
       AND status = 'skipped'
-      AND last_error_code = ?
-      AND attempt_count_in_generation < 2
+      AND last_error_code IN (?, 'SOURCE_REFRESH_REQUIRED')
+      AND (last_error_code = 'SOURCE_REFRESH_REQUIRED' OR attempt_count_in_generation < 2)
       AND EXISTS (
         SELECT 1
         FROM job_observations o
-        WHERE o.id = workflow_job_tasks.observation_id
+        WHERE o.id = ?
           AND o.job_id = workflow_job_tasks.job_id
           AND o.batch_id = workflow_job_tasks.batch_id
           AND ${WORKFLOW_OBSERVATION_READY_SQL}
+          AND (workflow_job_tasks.last_error_code != 'SOURCE_REFRESH_REQUIRED' OR (
+            COALESCE(json_extract(o.analysis_json, '$.semanticStatus'), '') != 'refresh'
+            AND COALESCE(json_extract(o.analysis_json, '$.decisionSource'), '') != 'source_refresh'
+          ))
       )
   `).run(
     observationId,
@@ -761,7 +770,8 @@ function reactivateWorkflowDetailRequiredTaskRow(db, {
     workflowRunId,
     batchId,
     jobId,
-    WORKFLOW_DETAIL_REQUIRED_CODE
+    WORKFLOW_DETAIL_REQUIRED_CODE,
+    observationId
   );
 }
 
@@ -828,9 +838,9 @@ function settleIncompleteWorkflowJobTaskRows(db, { workflowRunId, now }) {
       lease_owner = NULL,
       leased_at = NULL,
       lease_expires_at = NULL,
-      last_error_code = NULL,
-      last_error_stage = NULL,
-      last_error_kind = NULL,
+      last_error_code = ?,
+      last_error_stage = ?,
+      last_error_kind = ?,
       finished_at = ?,
       updated_at = ?
     WHERE t.id = ? AND t.workflow_run_id = ?
@@ -839,10 +849,13 @@ function settleIncompleteWorkflowJobTaskRows(db, { workflowRunId, now }) {
   let localSkipped = 0;
   for (const row of localCandidates) {
     const analysis = projectAnalysisForCurrentPipeline(parseJson(row.analysis_json, {}) || {});
+    const refresh = analysis.semanticStatus === 'refresh' || analysis.decisionSource === 'source_refresh';
     if (["pending", "partial", "stale", "failed"].includes(analysis.semanticStatus)) continue;
-    if (!["local_rules", "hard_boundary"].includes(analysis.decisionSource)
+    if (!refresh && !["local_rules", "hard_boundary"].includes(analysis.decisionSource)
       && !["rule_only", "blocked"].includes(analysis.semanticStatus)) continue;
-    localSkipped += Number(skipLocal.run(now, now, row.id, workflowRunId).changes || 0);
+    localSkipped += Number(skipLocal.run(refresh ? 'SOURCE_REFRESH_REQUIRED' : null,
+      refresh ? 'input' : null, refresh ? 'waiting_for_source' : null,
+      now, now, row.id, workflowRunId).changes || 0);
   }
   const detailRequired = db.prepare(`
     UPDATE workflow_job_tasks AS t SET
@@ -1325,6 +1338,7 @@ function countWorkflowJobTaskStatuses(db, workflowRunId) {
     failed: 0,
     skipped: 0,
     detailRequired: 0,
+    sourceRefreshRequired: 0,
     stopped: 0,
     total: 0
   };
@@ -1336,6 +1350,9 @@ function countWorkflowJobTaskStatuses(db, workflowRunId) {
     }
     if (row.status === "skipped" && row.last_error_code === WORKFLOW_DETAIL_REQUIRED_CODE) {
       counts.detailRequired += Number(row.n);
+    }
+    if (row.status === "skipped" && row.last_error_code === 'SOURCE_REFRESH_REQUIRED') {
+      counts.sourceRefreshRequired += Number(row.n);
     }
   }
   return counts;

@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { PRODUCT_POLICY } = require("../src/core/product_policy");
+const { PIPELINE_VERSIONS } = require("../src/core/analysis_revision");
 const {
   openDb,
   createBatch,
@@ -14,6 +15,9 @@ const {
 } = require("../src/core/storage");
 const {
   initializeWorkflowJobTasks,
+  reactivateWorkflowDetailRequiredTasks,
+  countWorkflowJobTaskStatusesForRun,
+  completedWorkflowAnalysisCount,
   claimWorkflowJobTask,
   commitWorkflowJobTaskFailure,
   listWorkflowJobTasks,
@@ -58,6 +62,8 @@ const {
   await testRunWorkflowAnalysisRetryCooldownCannotBeBypassed();
   await testRunWorkflowAnalysisConfigurationPauseStopsClaiming();
   await testRunWorkflowAnalysisQueueDrainedCounts();
+  await testSourceRefreshWaitsWithoutFalseSuccessOrReplay();
+  await testSourceRefreshAfterRetryPreservesModelBudget();
   await testRunWorkflowAnalysisNineFinalTimeoutsStayAnalyzing();
   await testRunWorkflowAnalysisTenthFinalTimeoutOpensCircuitWithSibling();
   await testRunWorkflowAnalysisPauseRequestedFinalizesPaused();
@@ -1081,6 +1087,107 @@ async function testRunWorkflowAnalysisQueueDrainedCounts() {
   } finally {
     db.close();
   }
+}
+
+async function testSourceRefreshWaitsWithoutFalseSuccessOrReplay() {
+  const db = openDb(":memory:");
+  try {
+    const refresh = { semanticStatus: "refresh", decisionSource: "source_refresh", recommendation: null,
+      decisionStatus: "needs_retry", questionsToVerify: ["BOSS活跃未知"] };
+    const scenario = seedWorkflow(db, { analyses: [refresh, {}, {}, {}, {}],
+      localDay: "2026-10-14", modelConfigRevision: "exec-source-refresh" });
+    const entries = observationEntries(db, scenario.batchId);
+    const init = () => initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId,
+      batchId: scenario.batchId, jobs: entries, modelConfigRevision: "exec-source-refresh",
+      now: "2026-10-14T00:00:00.000Z" });
+    init();
+    let modelCalls = 0;
+    const run = () => runWorkflowAnalysis({ db, workflowRunId: scenario.workflowId,
+      primaryRuntime: primaryRuntime(), backupRuntime: null,
+      createAnalyzeJob: () => async (job) => {
+        modelCalls += 1;
+        if (job.sourceId.endsWith("-job-5")) throw Object.assign(new Error("invalid contract"), { code: "MODEL_CONTRACT_INVALID" });
+        const complete = analyzedJob(job);
+        return { ...complete, analysis: { ...complete.analysis, revision: { pipelineVersions: PIPELINE_VERSIONS } } };
+      },
+      analyzeScannedJob: async (job, { analyzeJob }) => {
+        if (job.sourceId.endsWith("-job-2") && modelCalls < 2) return { ...job, analysis: refresh };
+        if (job.sourceId.endsWith("-job-4")) return { ...job, analysis: { semanticStatus: "blocked", decisionSource: "hard_boundary", recommendation: "not_recommended", decisionStatus: "decided" } };
+        return analyzeJob(job);
+      },
+      logger: silentLogger(), now: fixedClock("2026-10-14T00:05:00.000Z"),
+      workerIdFactory: (index) => `refresh-worker-${index}`, retryBackoffMs: [0, 0],
+      random: () => 0, sleep: async () => {} });
+    const result = await run();
+    assert.equal(result.succeeded, 1, "source refresh and hard boundaries are not model completions");
+    assert.equal(modelCalls, 2, "known source refresh must not enter the model");
+    const tasks = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
+    assert.deepEqual(tasks.map((task) => task.status), ["skipped", "skipped", "succeeded", "skipped", "failed"]);
+    assert.deepEqual(tasks.slice(0, 2).map((task) => task.lastErrorCode), ["SOURCE_REFRESH_REQUIRED", "SOURCE_REFRESH_REQUIRED"]);
+    const counts = countWorkflowJobTaskStatusesForRun(db, scenario.workflowId);
+    assert.equal(counts.sourceRefreshRequired, 2);
+    assert.equal(completedWorkflowAnalysisCount(counts), 2, "only complete and decided exclusions are handled");
+    const source = db.prepare("SELECT description, analysis_json FROM job_observations WHERE id = ?").get(tasks[1].observationId);
+    assert.ok(source.description.length > 100);
+    assert.deepEqual(JSON.parse(source.analysis_json).questionsToVerify, ["BOSS活跃未知"]);
+    assert.equal(listJobAnalysisAttempts(db, { workflowRunId: scenario.workflowId, taskId: tasks[1].id })[0].modelCallCount, 0);
+    init();
+    assert.equal((await run()).claimed, 0, "waiting sources and terminal tasks are not immediately replayed");
+    assert.equal(reactivateWorkflowDetailRequiredTasks(db, { workflowRunId: scenario.workflowId,
+      batchId: scenario.batchId, jobs: entries, modelConfigRevision: "exec-source-refresh",
+      now: "2026-10-14T00:06:00.000Z" }).reactivated, 0, "unchanged refresh cannot reactivate");
+    for (const task of tasks.slice(0, 2)) db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?")
+      .run(JSON.stringify({ semanticStatus: "pending", decisionSource: "analysis_pending" }), task.observationId);
+    assert.equal(reactivateWorkflowDetailRequiredTasks(db, { workflowRunId: scenario.workflowId,
+      batchId: scenario.batchId, jobs: entries, modelConfigRevision: "exec-source-refresh",
+      now: "2026-10-14T00:06:00.000Z" }).reactivated, 2);
+    assert.equal((await run()).succeeded, 2, "only refreshed sources resume");
+    assert.equal(modelCalls, 4);
+  } finally { db.close(); }
+}
+
+async function testSourceRefreshAfterRetryPreservesModelBudget() {
+  const db = openDb(":memory:");
+  try {
+    const scenario = seedWorkflow(db, { analyses: [{}], localDay: "2026-10-16", modelConfigRevision: "exec-refreshed-budget" });
+    const entries = observationEntries(db, scenario.batchId);
+    initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId, jobs: entries,
+      modelConfigRevision: "exec-refreshed-budget", now: "2026-10-16T00:00:00.000Z" });
+    let sourceReady = false, calls = 0;
+    const run = () => runWorkflowAnalysis({ db, workflowRunId: scenario.workflowId,
+      primaryRuntime: primaryRuntime(), backupRuntime: null,
+      createAnalyzeJob: () => async (job) => {
+        calls += 1;
+        if (calls < 3) throw timeoutError();
+        return analyzedJob(job);
+      },
+      analyzeScannedJob: async (job, { analyzeJob }) => !sourceReady && calls > 0
+        ? { ...job, analysis: { semanticStatus: "refresh", decisionSource: "source_refresh", decisionStatus: "needs_retry" } }
+        : analyzeJob(job),
+      logger: silentLogger(), now: fixedClock("2026-10-16T00:05:00.000Z"),
+      workerIdFactory: () => "refreshed-budget-worker", retryBackoffMs: [0, 0], random: () => 0, sleep: async () => {} });
+    const waiting = await run();
+    assert.equal(waiting.claimed, 2);
+    const task = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0];
+    assert.equal(task.lastErrorCode, "SOURCE_REFRESH_REQUIRED");
+    assert.equal(task.attemptCountInGeneration, 2);
+    const originalAttempts = listJobAnalysisAttempts(db, { workflowRunId: scenario.workflowId, taskId: task.id });
+    db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?")
+      .run(JSON.stringify({ semanticStatus: "pending", decisionSource: "analysis_pending" }), task.observationId);
+    sourceReady = true;
+    assert.equal(reactivateWorkflowDetailRequiredTasks(db, { workflowRunId: scenario.workflowId,
+      batchId: scenario.batchId, jobs: entries, modelConfigRevision: "exec-refreshed-budget",
+      now: "2026-10-16T00:06:00.000Z" }).reactivated, 1);
+    const reactivated = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId })[0];
+    assert.equal(reactivated.recoveryGeneration, task.recoveryGeneration + 1);
+    assert.equal(reactivated.attemptCountInGeneration, 0);
+    assert.equal(reactivated.totalAttemptCount, 2);
+    assert.deepEqual(listJobAnalysisAttempts(db, { workflowRunId: scenario.workflowId, taskId: task.id }), originalAttempts);
+    const result = await run();
+    assert.equal(result.claimed, 2, "newly ready source retains the usual two-attempt model budget");
+    assert.equal(result.succeeded, 1);
+    assert.equal(calls, 3);
+  } finally { db.close(); }
 }
 
 async function testRunWorkflowAnalysisNineFinalTimeoutsStayAnalyzing() {

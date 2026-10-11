@@ -170,6 +170,7 @@
   };
 
   const analysisStatusText = (task = {}) => {
+    if (task.lastErrorCode === "SOURCE_REFRESH_REQUIRED") return "来源待刷新";
     if (task.lastErrorCode === "DETAIL_REQUIRED") return "详情待补";
     if (task.status === "failed" && task.resolvedAfterFailure) return "首次失败，后续已解决";
     return ({ pending: "等待分析", running: "分析中", retry_pending: "等待重试", succeeded: "已完成", skipped: "已按本地规则处理", failed: "分析失败", stopped: "已停止" })[String(task.status || "")] || "状态待确认";
@@ -209,10 +210,11 @@
     const scanTargets = snapshot.progress.scanTargets || {};
     const details = snapshot.progress.details || {};
     const detailRequired = number(analysis.detailRequired);
+    const sourceRefreshRequired = number(analysis.sourceRefreshRequired);
     const historicalFailed = Object.prototype.hasOwnProperty.call(analysis, "historicalFailed") ? number(analysis.historicalFailed) : number(analysis.failed);
     const resolvedAfterFailure = number(analysis.resolvedAfterFailure);
     const unresolvedFailed = Object.prototype.hasOwnProperty.call(analysis, "unresolvedFailed") ? number(analysis.unresolvedFailed) : Math.max(0, historicalFailed - resolvedAfterFailure);
-    const analyzed = number(analysis.succeeded) + resolvedAfterFailure + Math.max(0, number(analysis.skipped) - detailRequired);
+    const analyzed = number(analysis.succeeded) + resolvedAfterFailure + Math.max(0, number(analysis.skipped) - detailRequired - sourceRefreshRequired);
     const remaining = number(analysis.pending) + number(analysis.running) + number(analysis.retryPending);
     setText("[data-stage-label]", "第 " + number(snapshot.progress.stageIndex) + " 阶段 / 共 " + number(snapshot.progress.stageCount) + " 阶段");
     setText("[data-stage-name]", snapshot.progress.stage || "");

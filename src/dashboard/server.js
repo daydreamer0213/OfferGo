@@ -5664,7 +5664,11 @@ function renderWorkflowDashboardPage({ db, searchParams, logger = null, workflow
   const progressSnapshot = getWorkflowProgressSnapshot(db, { workflowRunId: workflow.id });
   const progressJobs = progressSnapshot?.progress?.phaseKey === "analysis"
     ? listWorkflowProgressJobs(db, workflow.id)
-    : [];
+    : workflow.status === "review_required"
+      ? listWorkflowProgressJobs(db, workflow.id).filter((job) => ["pending", "running", "retry_pending"].includes(job.status)
+        || (job.status === "failed" && !job.resolvedAfterFailure)
+        || ["DETAIL_REQUIRED", "SOURCE_REFRESH_REQUIRED"].includes(job.lastErrorCode))
+      : [];
   let healthReport = {};
   try {
     const snapshot = workflowHealth.getSnapshot(db, { profileId: plan.profileId, planId: plan.id, now: new Date().toISOString() });

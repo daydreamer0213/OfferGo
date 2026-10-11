@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { buildWorkflowViewModel } = require("../src/dashboard/view_models/workflow");
+const { renderWorkflowPage } = require("../src/dashboard/pages/workflow");
 const {
   openDb,
   createBatch,
@@ -45,6 +47,8 @@ try {
   testTruthfulFourTrackReadModel();
   testFailedTaskResolutionUsesLatestPlanObservation();
   testInvalidatedSuccessfulResultIsNotDisplayedAsComplete();
+  testReviewKeepsSourceRefreshAndFailuresVisible();
+  testOrdinaryReanalysisResolvesHistoricalSourceWait();
   testCommunicationProgressSeparatesAmbiguity();
   testStageMapping();
   testModelIdentityFromPlannerSnapshot();
@@ -79,6 +83,78 @@ function testInvalidatedSuccessfulResultIsNotDisplayedAsComplete() {
   assert.equal(snapshot.progress.analysis.pending, 1);
   assert.equal(listWorkflowProgressJobs(db, scenario.workflowId)[0].status, 'pending');
   assert.equal(db.prepare('SELECT status FROM workflow_job_tasks WHERE id = ?').get(task.id).status, 'succeeded', 'a read does not rewrite historical task state');
+}
+
+function testReviewKeepsSourceRefreshAndFailuresVisible() {
+  const scenario = seedWorkflow(db, { analyses: [{}, {}, {}], localDay: "2026-10-15", modelConfigRevision: "mrev-refresh" });
+  initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId,
+    jobs: observationEntries(db, scenario.batchId), modelConfigRevision: "mrev-refresh", now: "2026-10-15T00:00:00.000Z" });
+  const tasks = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
+  const refresh = JSON.stringify({ semanticStatus: "refresh", decisionSource: "source_refresh", decisionStatus: "needs_retry" });
+  for (const task of tasks.slice(0, 2)) db.prepare("UPDATE job_observations SET analysis_json = ? WHERE id = ?").run(refresh, task.observationId);
+  db.prepare("UPDATE workflow_job_tasks SET status = 'succeeded' WHERE id = ?").run(tasks[0].id);
+  db.prepare("UPDATE workflow_job_tasks SET status = 'skipped', last_error_code = 'SOURCE_REFRESH_REQUIRED' WHERE id = ?").run(tasks[1].id);
+  db.prepare("UPDATE workflow_job_tasks SET status = 'failed' WHERE id = ?").run(tasks[2].id);
+  transitionWorkflowRun(db, { id: scenario.workflowId, status: "review_required" });
+  const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
+  assert.equal(snapshot.progress.analysis.succeeded, 0);
+  assert.equal(snapshot.progress.analysis.sourceRefreshRequired, 2);
+  assert.equal(snapshot.progress.analysis.unresolvedFailed, 1);
+  assert.equal(snapshot.progress.tracks.analysis.value, 0);
+  assert.match(snapshot.progress.remainingWorkLabel, /2 个岗位.*待刷新/);
+  assert.match(snapshot.progress.remainingWorkLabel, /1 个岗位分析失败/);
+  const jobs = listWorkflowProgressJobs(db, scenario.workflowId);
+  assert.equal(jobs[0].lastErrorCode, "SOURCE_REFRESH_REQUIRED");
+  const vm = buildWorkflowViewModel({ workflow: { id: scenario.workflowId, planId: scenario.planId, status: "review_required", site: "boss" },
+    plan: { id: scenario.planId }, progressSnapshot: snapshot, progressJobs: jobs });
+  assert.equal(vm.progress.tracks.analysis.value, 0);
+  assert.equal(vm.progress.analysis.sourceRefreshRequired, 2);
+  const html = renderWorkflowPage(vm);
+  assert.match(html, /来源待刷新/);
+  assert.match(html, /href="\/queue\?planId=/, "the retained pending sources have the ordinary jobs entry");
+  assert.equal(db.prepare("SELECT status FROM workflow_job_tasks WHERE id = ?").get(tasks[0].id).status, "succeeded", "display does not rewrite historical success");
+}
+
+function testOrdinaryReanalysisResolvesHistoricalSourceWait() {
+  const scenario = seedWorkflow(db, { analyses: [{}, {}], localDay: "2026-10-17", modelConfigRevision: "mrev-source-resolved" });
+  initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId,
+    jobs: observationEntries(db, scenario.batchId), modelConfigRevision: "mrev-source-resolved", now: "2026-10-17T00:00:00.000Z" });
+  db.prepare("UPDATE workflow_job_tasks SET status = 'skipped', last_error_code = 'SOURCE_REFRESH_REQUIRED' WHERE workflow_run_id = ?").run(scenario.workflowId);
+  const tasks = listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId });
+  const history = tasks.map(task => ({ ...task }));
+  const failedRetryBatchId = createBatch(db, "boss", "analysis-retry", "ready source failed analysis smoke", {
+    profileId: scenario.profileId, searchPlanId: scenario.planId });
+  for (const task of tasks) {
+    const job = db.prepare("SELECT source, source_id, title, description FROM jobs WHERE id = ?").get(task.jobId);
+    upsertJob(db, { source: job.source, sourceId: job.source_id, title: job.title, description: job.description,
+      bossActiveDays: 1, bossActiveText: "今日活跃", qualityTags: [],
+      analysis: { semanticStatus: "failed", decisionSource: "analysis_pending", decisionStatus: "needs_retry", errorCode: "MODEL_TIMEOUT" }
+    }, failedRetryBatchId);
+  }
+  const failedSnapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
+  assert.equal(failedSnapshot.progress.analysis.sourceRefreshRequired, 0, "a ready source with failed analysis cannot retain its old source waiting reason");
+  assert.equal(failedSnapshot.progress.analysis.pending, 2);
+  assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }), history);
+  const retryBatchId = createBatch(db, "boss", "analysis-retry", "source refresh smoke", {
+    profileId: scenario.profileId, searchPlanId: scenario.planId });
+  for (let index = 0; index < tasks.length; index += 1) {
+    const job = db.prepare("SELECT source, source_id, title, description FROM jobs WHERE id = ?").get(tasks[index].jobId);
+    upsertJob(db, { source: job.source, sourceId: job.source_id, title: job.title, description: job.description,
+      bossActiveDays: 1, bossActiveText: "今日活跃",
+      qualityTags: [], analysis: index === 0
+        ? { semanticStatus: "complete", decisionSource: "model", decisionStatus: "decided", recommendation: "apply",
+          revision: { pipelineVersions: require("../src/core/analysis_revision").PIPELINE_VERSIONS } }
+        : { semanticStatus: "blocked", decisionSource: "hard_boundary", decisionStatus: "decided", recommendation: "not_recommended" }
+    }, retryBatchId);
+  }
+  transitionWorkflowRun(db, { id: scenario.workflowId, status: "review_required" });
+  const snapshot = getWorkflowProgressSnapshot(db, { workflowRunId: scenario.workflowId });
+  assert.equal(snapshot.progress.analysis.sourceRefreshRequired, 0, "ordinary same-plan reanalysis resolves waiting source display");
+  assert.equal(snapshot.progress.analysis.succeeded, 1);
+  assert.equal(snapshot.progress.tracks.analysis.value, 2, "valid result and decided boundary count as handled");
+  assert.deepEqual(listWorkflowProgressJobs(db, scenario.workflowId).map(task => task.lastErrorCode), [null, null]);
+  assert.doesNotMatch(snapshot.progress.remainingWorkLabel, /待刷新/);
+  assert.deepEqual(listWorkflowJobTasks(db, { workflowRunId: scenario.workflowId }), history, "ordinary result reads preserve original wait history");
 }
 
 function testSnapshotRequiresExactRunId() {

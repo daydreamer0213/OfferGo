@@ -407,7 +407,7 @@ function commitWorkflowJobTaskSkipped(db, {
       leaseOwner: owner,
       status: "skipped",
       reasonCode: reason,
-      reasonKind: "skipped",
+      reasonKind: reason === "SOURCE_REFRESH_REQUIRED" ? "waiting_for_source" : "skipped",
       finishedAt: finished,
       now: finished
     });
@@ -594,7 +594,7 @@ function countWorkflowJobTaskStatusesForRun(db, workflowRunId) {
 
 function completedWorkflowAnalysisCount(counts = {}) {
   return Number(counts.succeeded || 0)
-    + Math.max(0, Number(counts.skipped || 0) - Number(counts.detailRequired || 0));
+    + Math.max(0, Number(counts.skipped || 0) - Number(counts.detailRequired || 0) - Number(counts.sourceRefreshRequired || 0));
 }
 
 function earliestRetryAvailableAt(db, { workflowRunId, now }) {

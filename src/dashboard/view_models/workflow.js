@@ -99,20 +99,21 @@ function progressView(snapshot, progressJobs = []) {
   const tracks = source.tracks || {};
   const skipped = number(analysis.skipped);
   const detailRequired = number(analysis.detailRequired);
+  const sourceRefreshRequired = number(analysis.sourceRefreshRequired);
   const directSucceeded = number(analysis.succeeded);
   const historicalFailed = number(analysis.historicalFailed ?? analysis.failed);
   const resolvedAfterFailure = number(analysis.resolvedAfterFailure);
   const unresolvedFailed = Object.hasOwn(analysis, "unresolvedFailed")
     ? number(analysis.unresolvedFailed)
     : Math.max(0, historicalFailed - resolvedAfterFailure);
-  const analyzed = directSucceeded + resolvedAfterFailure + Math.max(0, skipped - detailRequired);
+  const analyzed = directSucceeded + resolvedAfterFailure + Math.max(0, skipped - detailRequired - sourceRefreshRequired);
   return {
     visible: true, revision: number(snapshot?.workflow?.progressRevision), status: String(snapshot?.workflow?.status || ""),
     controlState: String(snapshot?.workflow?.controlState || ""), stage: String(source.stage || ""),
     stageIndex: number(source.stageIndex), stageCount: number(source.stageCount), phaseKey: String(source.phaseKey || ""),
     remainingWorkLabel: String(source.remainingWorkLabel || "本轮状态正在更新"),
     modelLabel: [snapshot?.model?.provider, snapshot?.model?.model].filter(Boolean).join(" · ") || "批量模型待记录",
-    meter: { max: Math.max(1, number(analysis.total)), value: analyzed + detailRequired + number(analysis.failed) + number(analysis.stopped) },
+    meter: { max: Math.max(1, number(analysis.total)), value: analyzed + detailRequired + sourceRefreshRequired + number(analysis.failed) + number(analysis.stopped) },
     scanTargets: {
       total: number(scanTargets.total), processed: number(scanTargets.processed), completed: number(scanTargets.completed), pending: number(scanTargets.pending),
       partial: number(scanTargets.partial), failed: number(scanTargets.failed)
@@ -123,7 +124,7 @@ function progressView(snapshot, progressJobs = []) {
     },
     analysis: {
       total: number(analysis.total), succeeded: directSucceeded, directSucceeded, running: number(analysis.running), retryPending: number(analysis.retryPending),
-      detailRequired, failed: historicalFailed, historicalFailed, resolvedAfterFailure, unresolvedFailed,
+      detailRequired, sourceRefreshRequired, failed: historicalFailed, historicalFailed, resolvedAfterFailure, unresolvedFailed,
       remaining: number(analysis.pending) + number(analysis.running) + number(analysis.retryPending),
       stopped: number(analysis.stopped), collected: number(details.collected), detailsRead: number(details.read), detailsPending: number(details.pending),
       terminal: number(analysis.terminal),
@@ -144,7 +145,7 @@ function progressView(snapshot, progressJobs = []) {
       taskId: number(job.taskId),
       position: number(job.position),
       status: String(job.status || ""),
-      statusLabel: job.lastErrorCode === "DETAIL_REQUIRED"
+      statusLabel: job.lastErrorCode === "SOURCE_REFRESH_REQUIRED" ? "来源待刷新" : job.lastErrorCode === "DETAIL_REQUIRED"
         ? "详情待补"
         : job.status === "failed" && job.resolvedAfterFailure
           ? "首次失败，后续已解决"

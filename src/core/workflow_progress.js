@@ -123,7 +123,8 @@ function getWorkflowProgressSnapshot(db, {
       growing: details.growing
     },
     analysis: {
-      value: counts.terminal,
+      value: counts.succeeded + counts.resolvedAfterFailure
+        + Math.max(0, counts.skipped - counts.detailRequired - counts.sourceRefreshRequired),
       max: counts.total,
       indeterminate: phaseKey === "analysis" && counts.total === 0
     },
@@ -188,6 +189,7 @@ function getWorkflowProgressSnapshot(db, {
         unresolvedFailed: counts.unresolvedFailed,
         skipped: counts.skipped,
         detailRequired: counts.detailRequired,
+        sourceRefreshRequired: counts.sourceRefreshRequired,
         stopped: counts.stopped,
         pending: counts.pending,
         terminal: counts.terminal,
@@ -395,6 +397,7 @@ function countTaskStatuses(rows) {
     failed: 0,
     skipped: 0,
     detailRequired: 0,
+    sourceRefreshRequired: 0,
     stopped: 0,
     historicalFailed: 0,
     resolvedAfterFailure: 0,
@@ -410,6 +413,9 @@ function countTaskStatuses(rows) {
     }
     if (row.status === "skipped" && row.lastErrorCode === "DETAIL_REQUIRED") {
       counts.detailRequired += 1;
+    }
+    if (row.status === "skipped" && row.lastErrorCode === "SOURCE_REFRESH_REQUIRED") {
+      counts.sourceRefreshRequired += 1;
     }
     if (row.status === "failed") {
       counts.historicalFailed += 1;
@@ -446,13 +452,19 @@ function readWorkflowTaskRows(db, workflowRunId, { includeDisplay = false } = {}
   `).all(workflowRunId).map((row) => {
     const analysis = projectAnalysisForCurrentPipeline(parseJson(row.latest_analysis_json, {}));
     const currentAnalysisResolved = analysisIsComplete(analysis);
-    const invalidatedSuccess = row.status === 'succeeded'
+    const historicalSourceWait = row.status === 'skipped' && row.last_error_code === 'SOURCE_REFRESH_REQUIRED';
+    const resolvedSource = historicalSourceWait && currentAnalysisResolved;
+    const sourceRefresh = ['succeeded', 'skipped'].includes(row.status)
+      && (analysis.semanticStatus === 'refresh' || analysis.decisionSource === 'source_refresh');
+    const invalidatedResult = (row.status === 'succeeded' || historicalSourceWait) && !sourceRefresh
       && ['pending', 'stale', 'partial', 'failed'].includes(analysis.semanticStatus);
     return {
       id: Number(row.id),
       position: Number(row.position),
-      status: invalidatedSuccess ? 'pending' : String(row.status || ""),
-      lastErrorCode: row.last_error_code === "DETAIL_REQUIRED" ? "DETAIL_REQUIRED" : null,
+      status: resolvedSource && analysis.semanticStatus === 'complete' ? 'succeeded'
+        : sourceRefresh ? 'skipped' : invalidatedResult ? 'pending' : String(row.status || ""),
+      lastErrorCode: resolvedSource || invalidatedResult ? null : sourceRefresh ? 'SOURCE_REFRESH_REQUIRED'
+        : ['DETAIL_REQUIRED', 'SOURCE_REFRESH_REQUIRED'].includes(row.last_error_code) ? row.last_error_code : null,
       finishedAt: row.finished_at || null,
       modelConfigRevision: row.model_config_revision || null,
       resolvedAfterFailure: row.status === "failed" && currentAnalysisResolved,
@@ -612,9 +624,19 @@ function workflowRemainingWorkLabel(status, progress) {
       + progress.analysis.retryPending;
     const failed = Number(progress.analysis.unresolvedFailed || 0);
     const unresolved = failed ? `；另有 ${failed} 个岗位分析失败尚未解决` : "";
-    return `还有 ${pending} 个岗位待分析；${progress.analysis.detailRequired} 个岗位待补详情${unresolved}`;
+    const refresh = Number(progress.analysis.sourceRefreshRequired || 0);
+    return `还有 ${pending} 个岗位待分析；${progress.analysis.detailRequired} 个岗位待补详情${refresh ? `；${refresh} 个岗位来源待刷新` : ''}${unresolved}`;
   }
   if (status === "review_required") {
+    const analysis = progress.analysis;
+    const pending = analysis.pending + analysis.running + analysis.retryPending;
+    const remaining = [
+      pending ? `${pending} 个岗位待分析` : '',
+      analysis.detailRequired ? `${analysis.detailRequired} 个岗位待补详情` : '',
+      analysis.sourceRefreshRequired ? `${analysis.sourceRefreshRequired} 个岗位来源待刷新` : '',
+      analysis.unresolvedFailed ? `${analysis.unresolvedFailed} 个岗位分析失败尚未解决` : ''
+    ].filter(Boolean);
+    if (remaining.length) return `已有结果可确认；另有 ${remaining.join('；')}，可在岗位列表查看`;
     return "岗位已准备完成，等待你确认清单";
   }
   if (status === "communicating" || status === "interrupted") {
