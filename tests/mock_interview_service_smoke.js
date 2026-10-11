@@ -455,6 +455,29 @@ const db = storage.openDb(":memory:");
       sessionId: newerCompletedId }).selectedSession.id, newerCompletedId,
     "主动查看历史训练时必须保留用户选择");
 
+    const hypotheticalInputs = [];
+    const hypotheticalQuestion = '假设你负责的知识库里有一个检索质量问题，你会如何定位并验证改动？';
+    const hypotheticalService = createMockInterviewService({ db, adapter: { ...adapter,
+      async generateMockInterviewStep(input) {
+        const raw = await adapter.generateMockInterviewStep(input);
+        if (!input.turns.length) return raw;
+        hypotheticalInputs.push(JSON.parse(JSON.stringify(input)));
+        raw.nextQuestion = { questionKind: 'topic_transition', focus: '检索排查',
+          resumeEvidenceIds: [input.context.resumeEvidenceCatalog[1].id],
+          basedOnTurnNumber: null, text: hypotheticalQuestion };
+        return raw;
+      }
+    } });
+    const hypotheticalSession = await hypotheticalService.startSession({ profileId: owner.profileId,
+      planId: owner.planId, resumeVersionId: owner.resumeVersionId, settings: { plannedQuestions: 3 } });
+    const hypotheticalSaved = await hypotheticalService.answerTurn({ profileId: owner.profileId,
+      planId: owner.planId, sessionId: hypotheticalSession.id, turnNumber: 1, answerText: firstAnswer });
+    assert.strictEqual(hypotheticalInputs.length, 1, 'an explicit hypothetical role must not trigger regeneration');
+    assert.strictEqual(hypotheticalInputs[0].questionRevision, undefined);
+    assert.strictEqual(hypotheticalSaved.turns[1].questionText, hypotheticalQuestion);
+    assert.strictEqual(hypotheticalService.getSession({ profileId: owner.profileId, planId: owner.planId,
+      sessionId: hypotheticalSession.id }).turns[1].questionText, hypotheticalQuestion);
+
     // Regeneration must occur before persistence: one answer and one next turn are saved.
     for (const problem of ['repeat', 'logistics', 'responsibility', 'mixed_logistics']) {
       const regenerationInputs = [];

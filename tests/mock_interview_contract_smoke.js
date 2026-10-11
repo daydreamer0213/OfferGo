@@ -287,3 +287,30 @@ assert.throws(() => validateInterviewStep(dutyStep, { ...stepContext, turns: [],
 const dutyFollowup = { ...dutyStep, answerReview: { conclusion: '复盘', strengths: [], improvements: [], turnNumbers: [1] }, nextQuestion: { ...dutyStep.nextQuestion, questionKind: 'follow_up', basedOnTurnNumber: 1, answerEvidence: '我负责接口联调' } };
 assert.doesNotThrow(() => validateInterviewStep(dutyFollowup, { ...stepContext, interviewBrief: generalBrief, turns: [{turnNumber: 1, resumeEvidenceIds: ['R2'], answer: '我负责接口联调并完成验收。'}] }));
 assert.throws(() => validateInterviewStep(trainingStep('请介绍项目，你期望薪资是多少，什么时候能到岗，能否出差，目前是否在职？'), { ...stepContext, interviewBrief: generalBrief, turns: [] }), error => error.code === 'MOCK_INTERVIEW_LOGISTICS_QUESTION');
+
+// An assigned hypothetical role is not a statement of the candidate's work history.
+const profitScenario = '我们再往利润和取舍上走一步。假设你负责的店铺里有一个商品，点击和下单都还可以，但退款率明显偏高，优惠后毛利很薄。现在需要你判断是否继续主推它，你会先拉哪些数据、和谁核对哪些口径，最后用什么标准做取舍？';
+const profitContext = { ...stepContext, turns: [], resumeEvidenceCatalog: [
+  { id: 'R2', kind: 'resume', text: '4年电商运营，参与页面转化分析；预算由负责人批准，没有负责完整利润核算。' }
+] };
+for (const marker of ['假设', '假如', '如果', '设想', '假设由']) {
+  const text = profitScenario.replace('假设你', `${marker}你`);
+  assert.strictEqual(validateInterviewStep(trainingStep(text), profitContext).nextQuestion.text, text);
+}
+assert.throws(() => validateInterviewStep(dutyStep, { ...stepContext, turns: [],
+  candidateEvidence: [{ ...linkedDuty, text: '假设我负责接口联调，我会先核对验收标准。' }] }),
+error => error.code === 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY');
+for (const text of [profitScenario.replace('假设你', '你'),
+  '假设你负责的店铺需要调整，请说说你负责的完整利润核算有哪些经验？',
+  '假设你负责的店铺调整需要参考你负责的完整利润核算有哪些经验？',
+  '请说说你负责的完整利润核算有哪些经验，再假设退款率上升如何处理？',
+  '如果方便，请说说你负责的完整利润核算有哪些经验？']) {
+  assert.throws(() => validateInterviewStep(trainingStep(text), profitContext),
+    error => error.code === 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY');
+}
+const hypothesisWorkStep = trainingStep('你负责的业务假设验证有哪些关键取舍？');
+const hypothesisWork = { ...linkedDuty, text: '我负责业务假设验证并完成实验评估。' };
+assert.doesNotThrow(() => validateInterviewStep(hypothesisWorkStep, { ...stepContext, turns: [],
+  resumeEvidenceCatalog: [{ id: 'R2', kind: 'resume', text: hypothesisWork.text }] }));
+assert.doesNotThrow(() => validateInterviewStep(hypothesisWorkStep, { ...stepContext, turns: [],
+  candidateEvidence: [hypothesisWork] }));

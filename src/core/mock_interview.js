@@ -114,21 +114,27 @@ function normalizeQuestion(value, evidenceById) {
 }
 
 function assertQuestionResponsibilityBoundary(question, citedEvidence, context) {
-  const ownership = /你(?:主要)?(负责|主导|牵头|独立完成|独立负责|全权负责)的([^，,。？！?！；;]+)/.exec(question.text);
-  if (!ownership) return;
-  const duty = ownership[2].split(/有哪些|有什么|有何|如何|怎么|怎样|中|时/)[0].replace(/(?:工作|项目)$/, '').trim();
-  const supports = text => String(text || '').split(/[，,。；;！？!?\n]/).some(clause => {
-    if (/(?:没有|没|未|不|并非|不是|无需|不曾).{0,8}(?:负责|主导|牵头|独立完成)|(?:同事|别人|他人|团队|主管).{0,6}(?:负责|主导|牵头)|(?:如果|假如|设想|希望|计划|将来)/.test(clause)) return false;
-    const at = clause.indexOf(ownership[1]);
-    return at >= 0 && duty.length >= 2 && clause.slice(at + ownership[1].length).includes(duty);
-  });
+  const ownerships = [...question.text.matchAll(/你(?:主要)?(负责|主导|牵头|独立完成|独立负责|全权负责)的/g)];
+  if (!ownerships.length) return;
   const linked = item => question.resumeEvidenceIds.some(id => (item.resumeEvidenceIds || []).includes(id));
   const supplemental = (context.candidateEvidence || []).filter(item => linked(item) && !item.withdrawnAt);
   const latest = context.turns?.at(-1);
   const answer = question.basedOnTurnNumber === Number(latest?.turnNumber)
     && latest?.answer?.includes(question.answerEvidence) && linked(latest) ? latest.answer : '';
-  if (![...citedEvidence, ...supplemental].some(item => supports(item.text)) && !supports(answer)) {
-    throw Object.assign(new Error("问题不能超出简历证据中的职责边界"), { code: 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY' });
+  for (const ownership of ownerships) {
+    // A directly assigned hypothetical role is not a claim about past work. Other claims still need evidence.
+    if (/(?:假设|假如|如果|设想)(?:由)?\s*$/.test(question.text.slice(0, ownership.index))) continue;
+    const duty = question.text.slice(ownership.index + ownership[0].length)
+      .split(/[，,。？！?！；;]|有哪些|有什么|有何|如何|怎么|怎样|中|时/)[0].replace(/(?:工作|项目)$/, '').trim();
+    const supports = text => String(text || '').split(/[，,。；;！？!?\n]/).some(clause => {
+      if (/(?:没有|没|未|不|并非|不是|无需|不曾).{0,8}(?:负责|主导|牵头|独立完成)|(?:同事|别人|他人|团队|主管).{0,6}(?:负责|主导|牵头)|(?:如果|假如|设想|希望|计划|将来)/.test(clause)
+        || /假设(?:由)?(?:我|你|自己)(?:主要)?(?:负责|主导|牵头|独立完成|独立负责|全权负责)/.test(clause)) return false;
+      const at = clause.indexOf(ownership[1]);
+      return at >= 0 && duty.length >= 2 && clause.slice(at + ownership[1].length).includes(duty);
+    });
+    if (![...citedEvidence, ...supplemental].some(item => supports(item.text)) && !supports(answer)) {
+      throw Object.assign(new Error("问题不能超出简历证据中的职责边界"), { code: 'MOCK_INTERVIEW_RESPONSIBILITY_BOUNDARY' });
+    }
   }
 }
 
