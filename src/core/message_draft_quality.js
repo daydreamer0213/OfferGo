@@ -4,6 +4,9 @@ const OPENING_LENGTH = 18;
 const MIN_OPENING_LENGTH = 8;
 const MIN_TRIGRAM_TEXT_LENGTH = 16;
 const TRIGRAM_SIMILARITY_THRESHOLD = 0.72;
+const CALENDAR_RANGE = /(?<!\d)(\d{4})[./年-]\s*(\d{1,2})月?\s*(?:做到|至|到|—|–|－|-|~|～)\s*(\d{4})[./年-]\s*(\d{1,2})月?(?!\d)/g;
+const RESUME_SECTION = /(?:^|\n)\s*(教育经历|教育背景|学历|工作经历|工作经验|职业经历|实习经历|项目经历|项目经验)\s*(?:[:：]|\r?$)/gm;
+const WORK_PREDICATE = /工作|任职|在职|经验|实习|担任|从事|做(?:了|过)?\s*(?:销售|运营|开发|研发|软件|前端|后端|测试|产品|设计|管理)/;
 
 const CLAIM_PATTERNS = Object.freeze({
   phone: /(?<!\d)1[3-9]\d{9}(?!\d)/g,
@@ -30,10 +33,13 @@ function normalizedMessageText(text) {
 
 function extractHighRiskClaims(text) {
   const source = String(text || "").slice(0, 10000);
-  const claims = [];
+  const ranges = calendarRanges(source);
+  const claims = ranges.map(range => ({ kind: 'date_range', value: range.value, position: range.index }));
+  // Calendar endpoints are dates, rather than a claimed number of years/months.
+  const durationSource = source.replace(CALENDAR_RANGE, value => ' '.repeat(value.length));
   const seen = new Set();
   for (const [kind, pattern] of Object.entries(CLAIM_PATTERNS)) {
-    for (const match of source.matchAll(pattern)) {
+    for (const match of (kind === 'duration' ? durationSource : source).matchAll(pattern)) {
       const value = String(match[0] || "").trim().slice(0, 160);
       if (['arrival', 'employment', 'interview_availability', 'travel', 'overtime', 'relocation'].includes(kind)) {
         const clause = source.slice(0, match.index).split(/[，。；\n]/).pop()
@@ -89,9 +95,13 @@ function assessMessageDraftQuality({ text, recentTexts = [], evidenceTexts = [] 
     : [];
   const evidenceClaims = (Array.isArray(evidenceTexts) ? evidenceTexts : [])
     .flatMap((value) => extractHighRiskClaims(value));
+  const evidenceRanges = (Array.isArray(evidenceTexts) ? evidenceTexts : []).flatMap(calendarRanges);
   const evidenceKeys = new Set(evidenceClaims.map((claim) => `${claim.kind}:${claimSignature(claim)}`));
   const errors = extractHighRiskClaims(text)
-    .filter((claim) => !evidenceKeys.has(`${claim.kind}:${claimSignature(claim)}`)
+    .filter((claim) => !(claim.kind === 'date_range'
+        ? supportedCalendarRange(claim, text, evidenceRanges)
+        : evidenceKeys.has(`${claim.kind}:${claimSignature(claim)}`))
+      && !(claim.kind === 'duration' && supportedDatedDuration(claim, text, evidenceRanges))
       && !(claim.kind === 'numeric_achievement' && numericTestDataScope(claim.value)
         && testDataObject(claim.value) === 'data'
         && evidenceClaims.some(evidence => evidence.kind === 'numeric_achievement'
@@ -104,6 +114,75 @@ function assessMessageDraftQuality({ text, recentTexts = [], evidenceTexts = [] 
     warnings,
     matchedOpening: similarity.matchedOpening
   };
+}
+
+function calendarRanges(text) {
+  const source = String(text || '').normalize('NFKC').slice(0, 10000);
+  const matches = [...source.matchAll(CALENDAR_RANGE)];
+  return matches.map((match, index) => {
+    const [startYear, startMonth, endYear, endMonth] = match.slice(1).map(Number);
+    const prefix = source.slice(0, match.index);
+    const section = [...prefix.matchAll(RESUME_SECTION)].at(-1)?.[1] || '';
+    const lineStart = prefix.lastIndexOf('\n') + 1;
+    const label = source.slice(lineStart, match.index);
+    const end = match.index + match[0].length;
+    const nextSection = source.slice(end).search(RESUME_SECTION);
+    const nextEntry = matches[index + 1] ? Math.max(end, source.lastIndexOf('\n', matches[index + 1].index) + 1) : source.length;
+    const context = source.slice(lineStart, Math.min(nextEntry, nextSection < 0 ? source.length : end + nextSection));
+    const sentenceStart = Math.max(...['。', '；', ';', '\n'].map(mark => prefix.lastIndexOf(mark))) + 1;
+    const sentence = source.slice(sentenceStart).split(/[。；;\n]/)[0];
+    const clause = prefix.slice(Math.max(prefix.lastIndexOf('，'), prefix.lastIndexOf(','), sentenceStart - 1) + 1)
+      + match[0] + source.slice(match.index + match[0].length).split(/[，,。；;\n]/)[0];
+    return { value: match[0], index: match.index, statement: namedEmployer(clause) ? clause : sentence,
+      start: startYear * 12 + startMonth, end: endYear * 12 + endMonth,
+      valid: startMonth >= 1 && startMonth <= 12 && endMonth >= 1 && endMonth <= 12 && endYear * 12 + endMonth >= startYear * 12 + startMonth,
+      label, context, work: /工作|职业|实习/.test(section)
+        || (!section && /公司|工程师|开发|经理|专员|助理|咨询师/i.test(label)) };
+  });
+}
+
+function namedEmployer(text) {
+  const match = /(?:我(?:曾|之前|此前|过去)?(?:在|于)|(?:在(?!职)|于))\s*([^，,。；;\n\d]{2,30}?)(?=从|做(?:了|过|到)?|的?(?:工作|任职|实习)|\d)/.exec(text)
+    || /^(?!我|本人|这|该)([^，,。；;\n\d]{2,30}?)(?:的)?(?:工作|任职|在职|实习)(?:时间|时长|经历)?/.exec(text.trim());
+  const name = normalizedMessageText(match?.[1] || '');
+  return /^(?:这|那|该|原公司|公司|企业)/.test(name) ? '' : name;
+}
+
+function matchingCalendarRanges(range, sentence, evidenceRanges) {
+  const employer = namedEmployer(sentence);
+  return evidenceRanges.filter(evidence => evidence.valid && evidence.start === range.start && evidence.end === range.end
+    && (!employer || normalizedMessageText(evidence.label).includes(employer)));
+}
+
+function supportedCalendarRange(claim, text, evidenceRanges) {
+  const range = calendarRanges(text).find(range => range.index === claim.position);
+  if (!range?.valid) return false;
+  const work = WORK_PREDICATE.test(range.statement);
+  return matchingCalendarRanges(range, range.statement, evidenceRanges).some(evidence => !work || evidence.work);
+}
+
+function supportedDatedDuration(claim, text, evidenceRanges) {
+  const amount = /(\d+(?:\.\d+)?)\s*(个月|月|年)/.exec(claim.value);
+  if (!amount) return false;
+  const months = Number(amount[1]) * (amount[2] === '年' ? 12 : 1);
+  if (months <= 0) return false;
+  return String(text || '').normalize('NFKC').split(/[。；;\n]/).some(sentence => {
+    const withoutDates = sentence.replace(CALENDAR_RANGE, value => ' '.repeat(value.length));
+    if (!normalizedMessageText(withoutDates).includes(normalizedMessageText(claim.value))) return false;
+    const employer = namedEmployer(sentence);
+    const ranges = calendarRanges(sentence);
+    const matched = ranges.length
+      ? ranges.flatMap(range => matchingCalendarRanges(range, sentence, evidenceRanges))
+      : evidenceRanges.filter(range => range.valid && range.work && employer && normalizedMessageText(range.label).includes(employer));
+    if (new Set(matched.map(range => `${range.start}:${range.end}`)).size !== 1) return false;
+    const roles = semanticToken('duration', sentence).split('+')
+      .filter(role => ['software', 'sales', 'operations', 'product', 'design', 'management'].includes(role));
+    const work = WORK_PREDICATE.test(sentence)
+      || (employer && !/就读|学习|本科|硕士|博士|项目/.test(sentence));
+    return matched.some(range => range.end - range.start === months
+      && (!work || range.work)
+      && roles.every(role => semanticToken('duration', range.context).split('+').includes(role)));
+  });
 }
 
 function similarRecentText(normalized, recentTexts) {
@@ -156,6 +235,10 @@ function trigrams(text) {
 
 function claimSignature({ kind, value }) {
   const normalized = normalizedMessageText(value);
+  if (kind === 'date_range') {
+    const range = calendarRanges(value)[0];
+    return range?.valid ? `${range.start}:${range.end}` : normalized;
+  }
   if (["phone", "email", "url"].includes(kind)) return normalized;
   if (kind === "salary") return numericToken(value);
   if (kind === 'employment') {

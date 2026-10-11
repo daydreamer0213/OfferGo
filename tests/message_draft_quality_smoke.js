@@ -94,6 +94,52 @@ assert.equal(extractHighRiskClaims('2026年10月9日参加面试。').some(c=>c.
 assert.equal(assessMessageDraftQuality({text:'我有3年后端经验。',evidenceTexts:['我有2年后端经验。']}).valid,false,
   'actual experience duration must remain checked');
 
+const datedEmployment = '工作经历\n海岚咨询有限公司 AI应用工程师 2025.11-2026.07\n参与后端检索链路开发。\n教育经历\n青山大学 本科 2021.09-2025.06\n项目经历\n个人应用 独立开发者 2026.07-至今';
+for (const text of [
+  '我在海岚从2025年11月做到2026年7月，约8个月。',
+  '海岚在职时间约8个月，2025年11月到2026年7月。',
+  '我在海岚做了约8个月，参与后端开发。',
+  '我有8个月后端开发经验，2025年11月到2026年7月。',
+  '这段工作是2025/11到2026/7，约8个月。'
+]) {
+  const result = assessMessageDraftQuality({ text, evidenceTexts: [datedEmployment] });
+  assert.equal(result.valid, true, `${text}: ${JSON.stringify(result.errors)}`);
+}
+for (const text of [
+  '我在海岚从2025年11月到2026年8月，约8个月。',
+  '我在海岚从2025年11月到2026年7月，约1年。',
+  '我在海岚做了约9个月。',
+  '我在另一家公司从2025年11月到2026年7月，约8个月。',
+  '我有8个月销售经验，2025年11月到2026年7月。',
+  '我有8个月销售和运营经验，2025年11月到2026年7月。',
+  '我在海岚从2025年11月到2026年7月做销售，共8个月。',
+  '我在海岚从2025年11月到2026年7月做销售和运营，共8个月。',
+  '我有45个月工作经验，2021年9月到2025年6月。',
+  '我在青山大学工作，时间是2021年9月到2025年6月。',
+  '我在青山大学从2021年9月到2025年6月做销售。',
+  '我在青山大学从2021年9月到2025年6月担任销售。',
+  '我在海岚从2025年11月到2026年7月。另在另一家公司从2025年11月到2026年7月。',
+  '我目前在职，2025年11月到2026年7月。'
+]) {
+  assert.equal(assessMessageDraftQuality({ text, evidenceTexts: [datedEmployment] }).valid, false, text);
+}
+assert.equal(assessMessageDraftQuality({
+  text: '我在海岚做了约8个月。',
+  evidenceTexts: ['项目经历\n海岚工具 独立开发者 2025.11-2026.07']
+}).valid, false, 'a project date must not become employer tenure');
+assert.equal(assessMessageDraftQuality({
+  text: '我在海岚做了约8个月。',
+  evidenceTexts: ['工作经历\n海岚咨询 工程师 2025.11-至今']
+}).valid, false, 'open dates do not establish a completed tenure or current status');
+assert.equal(assessMessageDraftQuality({
+  text: '我在海岚的实习是2025年11月到2025年11月。',
+  evidenceTexts: ['实习经历\n海岚咨询 工程师 2025.11-2025.11']
+}).valid, true, 'same-month dates remain valid without inventing a duration');
+assert.equal(assessMessageDraftQuality({
+  text: '我在青山大学从2021.09到2025.06就读本科。',
+  evidenceTexts: [datedEmployment]
+}).valid, true, 'a named school does not turn an education date into employment');
+
 const supportedAvailabilityParaphrase = assessMessageDraftQuality({
   text: "我本周三可以到岗。",
   recentTexts: [],
