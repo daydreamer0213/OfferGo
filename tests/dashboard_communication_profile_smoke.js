@@ -353,6 +353,7 @@ async function main() {
   assert.strictEqual(publicStatus.status, 200);
   assert(!JSON.stringify(publicStatus.body).includes("一周内到岗"));
   assert.strictEqual(browserCalls, 0, "draft learning and profile management must stay local");
+  await evidenceEditBrowserRegression(base, fixture.profileId);
   console.log("dashboard_communication_profile_smoke ok");
 }
 
@@ -572,4 +573,40 @@ function jsonResponse(status, body) {
 
 function visibleText(markup) {
   return String(markup).replace(/<input[^>]*type="hidden"[^>]*>/g, "").replace(/<[^>]+>/g, " ");
+}
+
+
+async function evidenceEditBrowserRegression(base, profileId) {
+  let chromium;
+  try { ({ chromium } = require('playwright')); }
+  catch (error) { if (process.env.ROLEFLOW_REQUIRE_PLAYWRIGHT === '1') throw error; console.log('evidence edit browser SKIP: Playwright unavailable'); return; }
+  const { saveCandidateEvidence } = require('../src/storage/candidate_evidence_store');
+  const original = '我参与接口联调，整理了操作说明。';
+  const entry = saveCandidateEvidence(db, { profileId, subject:'页面编辑回归', text:original,
+    sourceKind:'manual',sourceId:'browser-edit-regression',sourceItemKey:'1',sourceQuote:original });
+  const browser = await chromium.launch({channel:'msedge',headless:true});
+  try {
+    const page = await browser.newPage();
+    await page.goto(base+'/communication-profile?profileId='+profileId);
+    const form = page.locator('form[data-evidence-edit]').filter({has:page.locator('input[name="evidenceId"][value="'+entry.id+'"]')});
+    const requests = [];
+    page.on('request',request=>{if(request.method()==='POST')requests.push(request.url());});
+    const changed = '我参与接口联调，并完成现场培训。';
+    await form.locator('textarea[name="text"]').fill(changed);
+    await form.locator('button').click();
+    await page.waitForFunction(expected=>document.querySelector('form[data-evidence-edit] input[name="evidenceId"][value="'+expected.id+'"]')?.form.querySelector('textarea[name="text"]').value===expected.text && document.querySelector('form[data-evidence-edit] input[name="evidenceId"][value="'+expected.id+'"]')?.form.querySelector('button').disabled===false,{id:entry.id,text:changed});
+    // Verify persistence rather than a textarea that already contains the submitted text.
+    await page.reload();
+    assert.equal(await form.locator('textarea[name="text"]').inputValue(),changed);
+    assert.deepEqual(requests,[base+'/api/communication-profile']);
+    assert.equal(db.prepare('SELECT evidence_text FROM candidate_evidence_entries WHERE id=?').get(entry.id).evidence_text,changed);
+    const fictional = '下面是练习示范，不是我的经历。我负责全年利润预算。';
+    await form.locator('textarea[name="text"]').fill(fictional);
+    await form.locator('button').click();
+    await form.locator('[data-evidence-error]').waitFor({state:'visible'});
+    assert.match(await form.locator('[data-evidence-error]').innerText(),/所选原话包含明确/);
+    assert.equal(await form.locator('textarea[name="text"]').inputValue(),fictional);
+    assert.equal(await form.locator('button').isEnabled(),true);
+    assert.equal(db.prepare('SELECT evidence_text FROM candidate_evidence_entries WHERE id=?').get(entry.id).evidence_text,changed);
+  } finally { await browser.close(); }
 }

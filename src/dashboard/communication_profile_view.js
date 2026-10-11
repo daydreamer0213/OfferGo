@@ -6,7 +6,7 @@ document.addEventListener("submit", async function(event) {
   const button = form.querySelector("button"), alert = form.querySelector("[data-evidence-error]");
   button.disabled = true; alert.hidden = true;
   try {
-    const response = await fetch(form.action, {method:"POST", body:new URLSearchParams(new FormData(form))});
+    const response = await fetch(form.getAttribute("action"), {method:"POST", body:new URLSearchParams(new FormData(form))});
     if (!response.ok) { const result = await response.json(); throw new Error(result.error || "暂时无法保存，请稍后重试。"); }
     location.assign(response.url);
   } catch (error) { alert.textContent = error.message; alert.hidden = false; button.disabled = false; }
