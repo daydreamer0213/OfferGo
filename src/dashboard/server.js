@@ -6756,7 +6756,7 @@ function compactScheduleLabel(analysis = {}) {
 
 function compactActivityLabel(job = {}) {
   const label = job.bossActiveText || "活跃度待确认";
-  const effectiveDays = Number(job.effectiveBossActiveDays);
+  const effectiveDays = Number(job.effectiveBossActiveDays ?? NaN);
   if (Number.isFinite(effectiveDays) && effectiveDays <= 3) return "3日内活跃";
   const age = Number(job.daysSinceLastSeen);
   return Number.isFinite(age) && age > 0 ? `${label}（${age}天前采集）` : label;

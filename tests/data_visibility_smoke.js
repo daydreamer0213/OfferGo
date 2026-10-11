@@ -51,6 +51,7 @@ try {
   planPolicyUiSmoke({ profileId, planId });
   inboundVisibilitySmoke({ profileId, planId });
   jobNarrativeUiSmoke({ profileId, planId });
+  unknownActivityLabelSmoke({ profileId, planId });
   assert.strictEqual(db.prepare("PRAGMA quick_check").get().quick_check, "ok");
   console.log("data_visibility_smoke ok");
 } finally {
@@ -365,6 +366,23 @@ function planPolicyUiSmoke({ planId }) {
     const attributes = "min=\"" + bounds[0] + "\" max=\"" + bounds[1] + "\" name=\"" + name + "\" value=\"" + fallback + "\"";
     assert(html.includes(attributes), name + " 必须使用 PRODUCT_POLICY 边界和默认值");
   }
+}
+
+function unknownActivityLabelSmoke({ profileId, planId }) {
+  const batchId = createBatch(db, "boss", "activity-label", "unknown activity label", { profileId, searchPlanId: planId });
+  upsertJob(db, job("activity-label-unknown", { title: "活跃未知显示测试岗位", bossActiveText: null, bossActiveDays: null,
+    description: "负责 Python RAG 应用开发、检索优化、接口联调、测试与线上问题排查。".repeat(6),
+    qualityTags: ["activity_unverified"], analysis: { semanticStatus: "refresh", decisionSource: "source_refresh", decisionStatus: "needs_retry" }
+  }), batchId);
+  upsertJob(db, job("activity-label-today", { title: "今日活跃显示测试岗位" }), batchId);
+  const unknownHtml = renderQueuePage({ db,
+    searchParams: new URLSearchParams({ planId: String(planId), pool: "activity_pending" }) });
+  const unknown = jobArticle(unknownHtml, "活跃未知显示测试岗位");
+  assert(unknown.includes("活跃度待确认"), "unknown activity must not render as an active recruiter");
+  assert(!unknown.includes("3日内活跃"));
+  const todayHtml = renderQueuePage({ db,
+    searchParams: new URLSearchParams({ planId: String(planId), pool: "apply" }) });
+  assert(jobArticle(todayHtml, "今日活跃显示测试岗位").includes("3日内活跃"), "confirmed zero-day activity remains active");
 }
 
 function job(sourceId, overrides = {}) {

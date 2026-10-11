@@ -25,6 +25,8 @@ const MOVED_DEFINITIONS = [
   ...WORKFLOW_EXPORTS.filter((name) => ![
     "replaceWorkflowScanContext", "createWorkflowRun", "getWorkflowRun", "listWorkflowRuns", "transitionWorkflowRun",
     "getWorkflowObservationJob", "claimWorkflowJobTaskRow", "insertWorkflowJobTaskRow", "settleIncompleteWorkflowJobTaskRows", "workflowHasAnalysisTasks", "listWorkflowLinkIssues",
+    // Source-wait recovery and counts have intentional behavior changes, covered by CHILD_TESTS.
+    "reactivateWorkflowDetailRequiredTaskRow", "countWorkflowJobTaskStatuses",
     "listWorkflowStateInvariantViolations"
   ].includes(name)),
   "nonNegativeInteger", "workflowRunError",
