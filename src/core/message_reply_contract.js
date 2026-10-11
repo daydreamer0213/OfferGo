@@ -205,10 +205,9 @@ function assertKnownFactKeys(normalized, facts, now) {
   const userFacts = new Map(facts.filter((fact) => fact.source === "user_provided"
     && factStatus(now, fact).status === "valid").map((fact) => [String(fact.key || ""), fact]));
   const unansweredKey = normalized.missingFact?.key;
+  // A fact clarification has no draft yet; validate any supplied coverage separately.
   const canAskForUnansweredKey = !normalized.messages.length
-    && normalized.requiredFactKeys.includes(unansweredKey)
-    && normalized.responseItems.some((item) => item.required && normalized.coverage.some(
-      (entry) => entry.responseItemId === item.id && !entry.covered));
+    && normalized.requiredFactKeys.includes(unansweredKey);
   // Response item IDs name HR questions; only fact key fields claim candidate facts.
   const ids = [
     ...normalized.requiredFactKeys,

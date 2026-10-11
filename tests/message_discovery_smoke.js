@@ -2935,19 +2935,49 @@ async function recruiterReceiptSmoke() {
 }
 
 async function classificationOutcomeSmoke() {
+  const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
+  const { answerMissingMessageFact } = require('../src/application/message_discovery/answer_fact');
+  const { getMessageGroupClassification } = require('../src/storage/message_discovery_store');
   const missing = createFixture({ suffix: "missing", title: "Missing Engineer" });
   let summary = await runBossMessageDiscovery({
     db,
     profileId: missing.profileId,
-    reader: fakeReader([selectedConversation({ title: missing.title, messageId: "123456789012350" })]),
-    classifyMessageGroup: async () => ({
-      ...classification({ stage: "needs_user_action", messages: [] }),
-      missingFact: { key: "project_status", question: "Confirm project status" }
-    })
+    now: () => NOW,
+    reader: fakeReader([selectedConversation({ title: missing.title,
+      messages: [message('friend', '123456789012350', '你在这个项目中具体负责什么？')] })]),
+    classifyMessageGroup: createMessageReplyAnalyzer({ adapter: { async draftMessageGroup() {
+      return { messageIntent: 'information_request', messageCategory: 'project_fact',
+        messageSummary: '招聘方询问项目中本人具体负责的工作。',
+        requiredFactKeys: ['project_status'], usedFactKeys: [], usedMemoryIds: [],
+        responseItems: [], coverage: [], messages: [],
+        missingFact: { key: 'project_status', question: '你在这个项目中具体负责什么？' } };
+    } } })
   });
   assert.strictEqual(summary.results[0].stage, "needs_user_action");
   assert.strictEqual(summary.results[0].missingFactKey, "project_status");
   assert.deepStrictEqual(summary.results[0].messages, []);
+  assert.strictEqual(listOpenMessageReplyDrafts(db, { profileId: missing.profileId }).length, 0);
+  const inbound = listMessageInboundContexts(db, { profileId: missing.profileId, cardId: missing.card.id })[0];
+  const answerInput = { db, profileId: missing.profileId, cardId: missing.card.id,
+    messageGroupKey: inbound.messageGroupKey, factKey: 'project_status',
+    factValue: '我负责接口联调。', now: () => NOW };
+  await assert.rejects(answerMissingMessageFact({ ...answerInput, factKey: 'another_status' }),
+    error => error.code === 'MESSAGE_DISCOVERY_FACT_STALE');
+  const answered = await answerMissingMessageFact({ ...answerInput,
+    classifyMessageGroup: createMessageReplyAnalyzer({ adapter: { async draftMessageGroup(input) {
+      const fact = input.facts.find(item => item.key === 'project_status');
+      assert.strictEqual(fact.source, 'user_provided');
+      assert.strictEqual(fact.value, answerInput.factValue);
+      return { messageIntent: 'information_request', messageCategory: 'project_fact',
+        messageSummary: '招聘方询问项目中本人具体负责的工作。',
+        requiredFactKeys: ['project_status'], usedFactKeys: ['project_status'], usedMemoryIds: [],
+        responseItems: [{ id: 'project_duties', kind: 'question', required: true }],
+        coverage: [{ responseItemId: 'project_duties', covered: true }],
+        missingFact: null, messages: [answerInput.factValue] };
+    } } }) });
+  assert.strictEqual(answered.drafts.length, 1);
+  assert.strictEqual(answered.drafts[0].currentText, answerInput.factValue);
+  assert.strictEqual(getMessageGroupClassification(db, answerInput).missingFactKey, '');
 
   const interviewMention = createFixture({ suffix: "interview-mention", title: "Interview System Engineer" });
   summary = await runBossMessageDiscovery({

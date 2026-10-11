@@ -218,6 +218,20 @@ async function main() {
   });
   assert.strictEqual(validateMessageReply(englishQuestion, { facts: [], now: NOW }).missingFact.key,
     "english_proficiency");
+  const pendingQuestion = { ...englishQuestion, responseItems: [], coverage: [] };
+  const pending = validateMessageReply(pendingQuestion, { facts: [], now: NOW });
+  assert.deepStrictEqual(pending.missingFact, englishQuestion.missingFact);
+  assert.deepStrictEqual(pending.messages, []);
+  assert.strictEqual(pending.progressUpdate.stage, 'needs_user_action');
+  assert.throws(() => validateMessageReply({ ...pendingQuestion,
+    usedFactKeys: ['english_proficiency'] }, { facts: [], now: NOW }),
+  error => error.code === 'MESSAGE_REPLY_FACT_NOT_SUPPLIED');
+  assert.throws(() => validateMessageReply({ ...pendingQuestion,
+    messages: ['我可以进行日常英文交流。'] }, { facts: [], now: NOW }),
+  error => error.code === 'MESSAGE_REPLY_INVALID');
+  assert.throws(() => validateMessageReply({ ...pendingQuestion,
+    coverage: [{ responseItemId: 'unknown_question', covered: false }] }, { facts: [], now: NOW }),
+  error => error.code === 'MESSAGE_REPLY_COVERAGE_INVALID');
   assert.throws(() => validateMessageReply({ ...englishQuestion, missingFact: { key: "another_fact", question: "请确认" } },
     { facts: [], now: NOW }), (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT");
   assert.throws(() => validateMessageReply({ ...englishQuestion, missingFact: { key: "bad key", question: "请确认" } },
@@ -225,7 +239,7 @@ async function main() {
   assert.throws(() => validateMessageReply({ ...englishQuestion,
     requiredFactKeys: [], responseItems: [], coverage: [] }, { facts: [], now: NOW }),
   (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT",
-  "an unsupplied generic missing fact must match a required response item");
+  "an unsupplied generic missing fact must be declared as required");
   assert.throws(() => validateMessageReply(englishReply, { facts: [{ ...englishFact, source: "model_generated" }], now: NOW }),
     (error) => error.code === "MESSAGE_REPLY_UNKNOWN_FACT");
   assert.throws(
