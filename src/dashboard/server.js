@@ -1994,14 +1994,14 @@ function renderMatchCardPage({ db, searchParams, formValues = null, validationEr
   if (searchParams.get("saved")) notices.push(`<p class="notice">草稿已保存；确认之前不会改变扫描依据。</p>`);
   if (!activeCard) notices.push(`<p class="setup-warning">尚无已确认的匹配偏好卡。无需重新上传简历，打开现有草稿卡确认后即可扫描。 ${draftLinks}</p>`);
   if (card?.status === "draft" && activeCard) notices.push(`<p class="setup-warning">${card.source === "user" ? "新资料" : "新简历"}待确认，不会自动替换当前匹配依据。</p>`);
-  const boundProfile = card?.status === "draft" ? db.prepare("SELECT profile_json FROM profile_versions WHERE id = ? AND profile_id = ?").get(card.profileVersionId, profile.id) : null;
+  const boundProfile = card?.status === "draft" ? listProfileVersions(db, profile.id, 50).find((version) => version.id === card.profileVersionId) : null;
   const value = (key, fallback) => formValues?.[key] ?? fallback;
   const body = !card
     ? `<section class="panel"><h2>选择要确认的草稿卡</h2><p class="hint">匹配偏好卡来自你已上传的简历；选择一张草稿卡检查并确认。</p><p>${draftLinks || "当前没有草稿卡。"}</p></section>`
     : card.status === "draft"
       ? `<section class="panel"><h2>匹配偏好卡 #${card.id}（草稿）</h2>
   <p class="hint">检查已保存的简历事实和匹配依据；确认后，扫描和岗位匹配才会使用这份资料。</p>
-  ${boundProfile ? renderMatchingProfileFacts(JSON.parse(boundProfile.profile_json)) : ""}
+  ${boundProfile ? renderMatchingProfileFacts(boundProfile.profile) : ""}
   <form class="form-stack" method="post" action="/api/match-card">
     <input type="hidden" name="profileId" value="${escapeAttr(profile.id)}">
     <input type="hidden" name="cardId" value="${escapeAttr(card.id)}">
@@ -5028,6 +5028,7 @@ function renderProfilePage({ db, searchParams, formValues = null, validationErro
   ${pendingNotice}
   ${planNotice}
   <p class="hint">默认按你提供的内容使用；只在需要调整方向、薪资或项目表述时再编辑。</p>
+  <p class="hint">修改后确认用于岗位筛选；面试与简历优化按对应页面选择的简历版本生成。</p>
   <form class="panel form-stack" method="post" action="/api/profile">
     <input type="hidden" name="profileId" value="${escapeAttr(profile.id)}">
     <label>姓名<input name="name" value="${escapeAttr(value("name", profile.displayName || "候选人"))}"></label>
