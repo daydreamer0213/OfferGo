@@ -6732,7 +6732,7 @@ function compactJobConclusion(decisionBucket) {
   return {
     primary: "值得优先推进。",
     apply: "可以推进，优先级低于主投岗位。",
-    caution: "建议先确认关键问题，再决定是否推进。",
+    caution: "可以尝试投递，优先级较低。",
     not_recommended: "当前不建议优先推进。",
     analysis_pending: "分析尚未完成，暂不做推进判断。",
     refresh: "岗位信息有变化，刷新分析后再判断。"
