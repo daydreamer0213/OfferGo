@@ -57,7 +57,9 @@ async function main() {
     assert.match(lastInput.runtimeContext.analysisAsOfDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal((await analyze(job)).recommendation, 'primary');
     assert.equal(requests, 1, 'Canonical source-bound cache must be reused');
-    await testPriorWorkMethodRefresh(lastInput, result);
+    for (const priorVersion of ['whole-jd-work-v1-source-bound', 'whole-jd-work-v2-opportunity-bound']) {
+      await testPriorWorkMethodRefresh(lastInput, result, priorVersion);
+    }
 
     for (const expected of ['primary', 'apply', 'caution', 'not_recommended']) {
       tier = expected;
@@ -183,10 +185,9 @@ async function main() {
     console.log('whole_jd_analysis_smoke passed');
   } finally { db.close(); }
 }
-async function testPriorWorkMethodRefresh(input, previous) {
+async function testPriorWorkMethodRefresh(input, previous, priorVersion) {
   const db = openDb(':memory:');
   try {
-    const priorVersion = 'whole-jd-work-v1-source-bound';
     const oldSelection = Object.fromEntries(['selectedWork', 'supportingEvidenceRefs',
       'materialConsiderations', 'modelRecommendation', 'decisionExplanation'].map(key => [key, previous[key]]));
     await cachedModelCall({ db, configs, kind: 'selectJob', pipelineVersion: priorVersion,
