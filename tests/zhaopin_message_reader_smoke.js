@@ -414,6 +414,47 @@ async function loginGuardSmoke(page, first) {
   const accountSelected = await accountReader.openQueuedConversation({ ...accountScan.rows[0], tabId: accountScan.tabId });
   assert.equal(accountSelected.sourceJobId, `zhaopin:${JOB_A}`, "the ordinary authenticated account header permits guarded selection");
 
+  await page.evaluate(() => {
+    const account = document.querySelector(".home-header__right > .home-header__c-login");
+    const wrapper = document.createElement("div");
+    wrapper.className = "login-after-root";
+    account.before(wrapper);
+    wrapper.append(account);
+  });
+  try {
+    const wrappedReader = readerFor(fakeBrowser(page));
+    const wrappedScan = await wrappedReader.scanConversationRows();
+    assert.equal((await page.evaluate(ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION)).state, "ready",
+      "the live authenticated account wrapper permits snapshot reads");
+    const wrappedSelected = await wrappedReader.openQueuedConversation({ ...wrappedScan.rows[0], tabId: wrappedScan.tabId });
+    assert.equal(wrappedSelected.sourceJobId, `zhaopin:${JOB_A}`, "the live account wrapper permits guarded selection");
+
+    await page.evaluate(() => {
+      const panel = document.createElement("section");
+      panel.className = "login-panel fixture-wrapper-login";
+      panel.innerHTML = '<label>合成口令<input type="password"></label>';
+      document.querySelector(".login-after-root").append(panel);
+    });
+    const clicksBeforeWrappedChallenge = await page.evaluate(() => window.fixture.clicks);
+    await assert.rejects(() => readerFor(fakeBrowser(page)).scanConversationRows(),
+      error => error.code === "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "a real login panel in the account wrapper blocks scanning");
+    await assert.rejects(() => wrappedReader.openQueuedConversation({ ...wrappedScan.rows[0], tabId: wrappedScan.tabId }),
+      error => error.code === "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "a real login panel in the account wrapper blocks selection");
+    assert.equal(await page.evaluate(() => window.fixture.clicks), clicksBeforeWrappedChallenge, "a real wrapped challenge blocks before row.click()");
+    await page.evaluate(() => {
+      document.querySelector(".fixture-wrapper-login").remove();
+      document.body.append(document.querySelector(".login-after-root"));
+    });
+    await assert.rejects(() => readerFor(fakeBrowser(page)).scanConversationRows(),
+      error => error.code === "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "an account wrapper outside the observed header is not exempt");
+  } finally {
+    await page.evaluate(() => {
+      const wrapper = document.querySelector(".login-after-root");
+      document.querySelector(".home-header__right").append(wrapper.querySelector(".home-header__c-login"));
+      wrapper.remove();
+    });
+  }
+
   await setFixture(page, { sessions: [first], active: first, timeline, misplacedAccountHeader: true });
   await assert.rejects(() => readerFor(fakeBrowser(page)).scanConversationRows(), error => error.code === "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "the account class outside the exact header parent remains a login challenge");
 

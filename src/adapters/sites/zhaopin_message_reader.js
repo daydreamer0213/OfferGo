@@ -14,8 +14,12 @@ function isVisibleZhaopinLoginChallenge(node) {
   if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
   const ordinaryHeaderLink = node.matches?.("a.home-header__b-login, a.home-header__c-no-login")
     && node.parentElement?.matches?.(".home-header__right");
+  const ordinaryHomeAccountWrapper = node.matches?.(".home-header__right > .login-after-root")
+    && node.querySelector?.(":scope > .home-header__c-login");
   const ordinaryAccountHeader = node.closest?.(".home-header__c-login");
-  const ordinaryHomeAccountNode = ordinaryAccountHeader?.parentElement?.matches?.(".home-header__right") && (
+  const ordinaryHomeAccountNode = ordinaryAccountHeader?.matches?.(
+    ".home-header__right > .home-header__c-login, .home-header__right > .login-after-root > .home-header__c-login"
+  ) && (
     node === ordinaryAccountHeader
     || node.matches?.(".home-header__c-login, .c-login__top, .c-login__name, .c-login__photo, .c-login__img, .c-login__top__name, .c-login__top__photo, .c-login__top__img, .c-login__ul")
   );
@@ -24,7 +28,7 @@ function isVisibleZhaopinLoginChallenge(node) {
     node === detailHeader
     || node.matches?.("a.header-nav__b-login, .header-nav__c-login, .c-login__top, .c-login__name, .c-login__photo, .c-login__img, .c-login__top__name, .c-login__top__photo, .c-login__top__img")
   );
-  return !(ordinaryHeaderLink || ordinaryHomeAccountNode || ordinaryDetailHeaderNode);
+  return !(ordinaryHeaderLink || ordinaryHomeAccountWrapper || ordinaryHomeAccountNode || ordinaryDetailHeaderNode);
 }
 
 const ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION = String.raw`(() => {
