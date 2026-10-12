@@ -150,6 +150,7 @@ const { storeResumeSourceFile, resolveResumeSourceFile } = require("../core/resu
 const { PRODUCT_POLICY } = require("../core/product_policy");
 const { evidenceFitReasons } = require("../core/model_contract");
 const { defaultSelectedForBatch } = require("../core/decision_policy");
+const { hasCompleteJobDescription } = require("../core/job_description_readiness");
 const {
   createCommunicationBatch,
   controlCommunicationBatch,
@@ -4321,7 +4322,7 @@ async function handleCommunication(req, res, { db, modelConfig, modelReady, logg
     if (!job) throw new Error("岗位不存在或不属于当前筛选方案。");
     if (job.archived) throw new Error("岗位已归档，请先恢复后再生成沟通草稿。");
     const mode = ["greeting", "hr_reply", "follow_up"].includes(params.mode) ? params.mode : "greeting";
-    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有证据完整的主投岗位可以生成定制招呼语；其他岗位请使用 BOSS 通用招呼语。");
+    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有证据完整的主投或可投岗位可以生成定制招呼语；其他岗位请使用 BOSS 通用招呼语。");
     if (mode === "follow_up" && job.applicationStatus !== "no_reply") throw new Error("只有已标记为“无回复待跟进”的岗位可以生成跟进文案。");
     if (mode === "hr_reply" && !String(params.hrMessage || "").trim()) throw new Error("请粘贴 HR 的原话。");
     if (params.factKey && params.factValue) saveCandidateFact(db, { profileId: profile.id, factKey: params.factKey, factValue: params.factValue, source: "user_provided" });
@@ -4565,8 +4566,15 @@ async function handleProgress(req, res, db, messageDiscovery = null, replyLearni
 
 function canGenerateGreeting(job) {
   const analysis = job.analysis || {};
-  return ["primary", "apply"].includes(job.decisionBucket) && analysis.semanticStatus === "complete"
-    && Boolean(analysis.evidence?.jd?.length && analysis.evidence?.resume?.length);
+  if (!["primary", "apply"].includes(job.decisionBucket) || analysis.semanticStatus !== "complete") return false;
+  if (analysis.semanticMatchingMode === "whole_jd") {
+    return hasCompleteJobDescription(job)
+      && Array.isArray(analysis.selectedWork?.jdEvidenceRefs) && analysis.selectedWork.jdEvidenceRefs.length > 0
+      && Array.isArray(analysis.supportingFacts)
+      && analysis.supportingFacts.some((fact) => String(fact.quote || "").trim()
+        && analysis.supportingEvidenceRefs?.includes(fact.id));
+  }
+  return Boolean(analysis.evidence?.jd?.length && analysis.evidence?.resume?.length);
 }
 
 function renderCommunicationResult({ result, job, profile, plan, hrMessage }) {

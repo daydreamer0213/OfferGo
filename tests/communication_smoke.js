@@ -10,6 +10,7 @@ const {
   createBatch,
   upsertJob,
   listReportJobs,
+  listDecisionPool,
   getLatestMainScanBatchId,
   buildFeedbackSummary,
   listCandidateFacts
@@ -22,6 +23,10 @@ const {
   listProgressEvents
 } = require("../src/core/candidate_progress");
 const { createDashboardServer } = require("../src/dashboard/server");
+const { loadConfigs } = require("../src/config");
+const { createJobAnalysisRunner } = require("../src/core/job_analysis");
+const { scoreJob } = require("../src/core/scoring");
+const { presentWorkMatchInput, validateWorkMatchOutput } = require("../src/core/job_work_matching");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-communication-"));
 fs.mkdirSync(path.join(root, "configs"), { recursive: true });
@@ -284,6 +289,7 @@ let server;
       funnelCountBeforeArchive,
       "archiving must not change funnel samples"
     );
+    await wholeJdGreetingSmoke(base, saved, profile);
     console.log("communication_smoke ok");
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
@@ -306,4 +312,77 @@ function post(base, route, values) {
 
 function requestKey(sequence) {
   return `progress:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
+}
+
+async function wholeJdGreetingSmoke(base, saved, profile) {
+  const configs = loadConfigs(path.resolve(__dirname, ".."));
+  configs.model = { provider: "fixture", model: "whole-jd-greeting-fixture" };
+  configs.profile = { location: { target_cities: ["广州"] }, candidate: { target_roles: ["AI应用开发"] } };
+  configs.candidateProfile = { ...profile, source: {
+    resumeEvidenceText: "KnowledgeFlow 使用 Python、RAG 和 LangGraph 完成多 Agent 工作流。"
+  } };
+  configs.targetPolicy = { jobTypes: ["全职"], directions: ["AI应用开发"] };
+  let tier = "primary";
+  const analyze = createJobAnalysisRunner(configs, [], { db, analyzer: {
+    async selectJob(input) {
+      const sources = presentWorkMatchInput(input).sourceIndex;
+      const jd = Object.keys(sources).find((id) => sources[id].path === "originalJob.description");
+      const resume = Object.keys(sources).find((id) => sources[id].path === "candidateProfile.resumeEvidenceText");
+      return validateWorkMatchOutput({
+        selectedWork: { summary: "企业知识库 RAG 和 Agent 应用交付", jdEvidenceRefs: [jd] },
+        supportingEvidenceRefs: [resume], materialConsiderations: [], modelRecommendation: tier,
+        decisionExplanation: "KnowledgeFlow 的 RAG 和多 Agent 实践直接支持岗位工作。"
+      }, input);
+    }
+  } });
+  const template = {
+    source: "boss", keyword: "AI应用开发", title: "完整 JD 定制招呼测试", company: "知识库测试公司",
+    url: "https://www.zhipin.com/job_detail/whole-jd-greeting.html",
+    location: "广州", salary: "10-18K", experience: "1-3年", education: "本科",
+    bossActiveText: "今日活跃", bossActiveDays: 0, tags: ["Python", "RAG"], qualityTags: [],
+    description: "负责企业知识库 RAG 检索链路、Agent 工具调用与 FastAPI 接口开发，需要 Python 项目经验。".repeat(4)
+  };
+  const cases = [
+    { name: "primary", tier: "primary", allowed: true },
+    { name: "apply", tier: "apply", allowed: true },
+    { name: "caution", tier: "caution", allowed: false },
+    { name: "not-recommended", tier: "not_recommended", allowed: false },
+    { name: "failed", tier: "apply", allowed: false, analysis: { semanticStatus: "failed" } },
+    { name: "partial", tier: "apply", allowed: false, analysis: { semanticStatus: "partial" } },
+    { name: "missing-jd-source", tier: "apply", allowed: false, analysis: { selectedWork: { summary: "企业知识库交付", jdEvidenceRefs: [] } } },
+    { name: "missing-resume-facts", tier: "apply", allowed: false, analysis: { supportingFacts: [], evidence: { jd: [], resume: [] } } },
+    { name: "unverified-detail", tier: "apply", allowed: false, job: { qualityTags: ["detail_unverified"] } },
+    { name: "short-detail", tier: "apply", allowed: false, job: { description: "只有搜索卡摘要" } }
+  ];
+  for (const testCase of cases) {
+    tier = testCase.tier;
+    const original = { ...template, sourceId: `whole-jd-greeting-${testCase.name}` };
+    const produced = await analyze(original);
+    assert.strictEqual(produced.semanticMatchingMode, "whole_jd");
+    assert.deepStrictEqual(produced.evidence.jd, [], "use the actual producer format without legacy quote backfill");
+    const jobId = upsertJob(db, { ...original, ...scoreJob(original, configs),
+      ...testCase.job, analysis: { ...produced, ...testCase.analysis } },
+      createBatch(db, "boss", "AI应用开发", `whole-jd-greeting-${testCase.name}`, {
+        profileId: saved.profileId, searchPlanId: saved.planId
+      }));
+    const stored = listDecisionPool(db, { planId: saved.planId, site: "boss" }).find((job) => job.id === jobId);
+    if (testCase.allowed) assert.strictEqual(stored.decisionBucket, testCase.tier,
+      `${testCase.name}: native saved recommendation ${JSON.stringify({ recommendation: produced.recommendation, status: produced.semanticStatus, preScreen: produced.preScreen, eligibility: stored.eligibilityStatus, risks: stored.risks, tags: stored.qualityTags })}`);
+    const html = await (await fetch(`${base}/queue?planId=${saved.planId}&pool=${stored.decisionBucket}&scope=all`)).text();
+    const forms = [...html.matchAll(/<form\b[^>]*action="\/api\/communication"[^>]*>[\s\S]*?<\/form>/g)];
+    const hasGreeting = forms.some(([form]) => form.includes('name="mode" value="greeting"')
+      && form.includes(`name="jobId" value="${jobId}"`));
+    assert.strictEqual(hasGreeting, testCase.allowed, `${testCase.name}: ordinary UI greeting eligibility`);
+    const response = await post(base, "/api/communication", {
+      mode: "greeting", jobId, profileId: saved.profileId, planId: saved.planId
+    });
+    const body = await response.text();
+    assert.strictEqual(response.status, testCase.allowed ? 200 : 400, `${testCase.name}: ${body}`);
+    if (testCase.allowed) {
+      assert(body.includes("KnowledgeFlow"));
+      assert(body.includes("文案只生成到本页，不会自动发送"));
+    }
+  }
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM communication_batches").get().n, 0,
+    "generating local drafts must not create confirmed execution batches");
 }

@@ -238,9 +238,12 @@ class MockModelAdapter {
     };
   }
 
-  async draftCommunication({ mode = "greeting", candidateProfile = {}, jobUnderstanding = {}, matchDecision = {}, hrMessage = "", userProvidedFacts = [], draftQualityRevision = null } = {}) {
+  async draftCommunication({ mode = "greeting", candidateProfile = {}, jobUnderstanding = {}, matchDecision = {}, jobEvidence: originalJob = {}, hrMessage = "", userProvidedFacts = [], draftQualityRevision = null } = {}) {
     const kind = ["greeting", "hr_reply", "follow_up"].includes(mode) ? mode : "greeting";
-    const jobEvidence = (matchDecision.evidence?.jd || jobUnderstanding.evidenceSnippets || []).slice(0, 2);
+    const jdEvidence = matchDecision.evidence?.jd?.length ? matchDecision.evidence.jd
+      : jobUnderstanding.evidenceSnippets?.length ? jobUnderstanding.evidenceSnippets
+        : matchDecision.semanticMatchingMode === "whole_jd" && originalJob.description ? [originalJob.description] : [];
+    const jobEvidence = jdEvidence.slice(0, 2);
     const resumeEvidence = (matchDecision.evidence?.resume || (candidateProfile.skills || []).map((skill) => skill.name || skill)).slice(0, 2);
     const facts = Object.fromEntries((userProvidedFacts || []).map((item) => [item.factKey, item.factValue]));
     if (kind === "hr_reply") {
