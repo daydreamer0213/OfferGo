@@ -6660,8 +6660,8 @@ function renderCompactJobBase(job, filters) {
   const refreshFailure = compactRefreshFailure(job);
   const visibleRisks = compactVisibleRisks(job.risks);
   const analysisFailure = compactAnalysisFailure(job);
-  const risk = refreshFailure || analysisFailure || visibleRisks.slice(0, 2).join("；") || "暂无明显硬风险；工作制与团队情况可在沟通时确认。";
-  const riskLabel = refreshFailure || analysisFailure ? '分析状态' : '需要确认';
+  const risk = refreshFailure || analysisFailure || visibleRisks.slice(0, 2).join("；") || "主要支持与差距见匹配说明。";
+  const riskLabel = refreshFailure || analysisFailure ? '分析状态' : visibleRisks.length ? '需要确认' : '补充提示';
   const status = job.applicationStatus ? ` · ${statusLabel(job)}` : "";
   const salaryLabel = job.salary || ((job.qualityTags || []).includes("salary_unverified") ? "薪资待确认" : "薪资未说明");
   const experienceLabel = job.experience || ((job.qualityTags || []).includes("experience_unverified") ? "经验待确认" : "经验未说明");
@@ -6702,7 +6702,7 @@ function compactJobNarrative(job, { salaryLabel, risk }) {
     ? `${company}的岗位资料显示业务场景与${businessScenario}相关；这个机会的核心是${roleSentence}。`
     : industryContext
       ? `${company}所在方向为${industryContext}；这个机会的核心是${roleSentence}。`
-      : `${company}的具体业务在当前岗位资料中没有展开；可以确认的机会重点是${roleSentence}。`;
+      : `${company} · ${String(job.title || "岗位名称待补充").trim()}`;
   const fit = evidenceFitReasons(analysis)
     .map((item) => String(item || "").trim())
     .filter(Boolean)

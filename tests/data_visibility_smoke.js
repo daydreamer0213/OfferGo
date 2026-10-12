@@ -138,6 +138,7 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
   upsertJob(db, job("job-narrative-fallback", {
     title: "公司资料降级测试岗位",
     company: "资料有限公司",
+    description: "面向商品、供应链和门店场景，负责内部业务系统开发与维护。",
     analysis: {
       provider: "mock",
       semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
@@ -150,6 +151,27 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
       industryContext: "未明确",
       fitReasons: ["已有后端开发经验"],
       jobQuality: { level: "normal", concerns: [] },
+      hardBlockers: []
+    }
+  }), batchId);
+  const cohortGap = "岗位明确面向2027届在校生，候选人已本科毕业并有全职经历，当前届别不符。";
+  upsertJob(db, job("job-narrative-cohort", {
+    title: "明确届别校招测试岗位",
+    company: "校招测试公司",
+    description: "面向2027届在校生，参与Agent产品架构、功能实现及自动化评估工具开发。",
+    analysis: {
+      provider: "mock",
+      semanticStatus: "complete", revision: { pipelineVersions: require('../src/core/analysis_revision').PIPELINE_VERSIONS },
+      semanticMatchingMode: "whole_jd",
+      decisionStatus: "decided",
+      decisionSource: "model_work_match",
+      recommendation: "not_recommended",
+      recommendationSchemaVersion: 2,
+      modelRecommendation: "not_recommended",
+      componentRecommendation: "not_recommended",
+      roleSummary: "参与Agent产品架构、功能实现及自动化评估工具开发",
+      decisionExplanation: cohortGap,
+      fitReasons: [cohortGap],
       hardBlockers: []
     }
   }), batchId);
@@ -174,13 +196,27 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
   assert(main.includes('知识库项目拆分文档并联调问答接口'), 'stored candidate action must appear in the main matching explanation');
   assert(main.includes('整理企业文档并交付知识库问答接口'), 'main matching explanation must connect that action to the actual role work');
   assert(main.includes("18-25K·14薪"));
+  assert(main.includes("需要确认团队规模"), "actual extra risks must remain visible");
   assert(!main.includes("决策来源"));
   assert(details.includes("决策来源"), "technical decision provenance must remain in details");
 
-  const fallbackMain = jobArticle(html, "公司资料降级测试岗位").split("<details")[0];
-  assert(fallbackMain.includes("具体业务在当前岗位资料中没有展开"));
-  assert(fallbackMain.includes("可以确认的机会重点是负责内部业务系统开发"));
+  const fallbackArticle = jobArticle(html, "公司资料降级测试岗位");
+  const fallbackMain = fallbackArticle.split("<details")[0];
+  const companySection = fallbackMain.split("<strong>公司与机会：</strong>")[1].split("</div>")[0];
+  assert(companySection.includes("资料有限公司"), "missing legacy business fields must retain known company identity");
+  assert(fallbackMain.includes("负责内部业务系统开发"), "role work must remain visible");
+  assert(fallbackArticle.includes("面向商品、供应链和门店场景"), "the full JD must retain its known business context");
   assert(!fallbackMain.includes("未明确领域"));
+  const cohortHtml = renderQueuePage({ db,
+    searchParams: new URLSearchParams({ planId: String(planId), pool: "not_recommended", scope: "new" }) });
+  const cohortMain = jobArticle(cohortHtml, "明确届别校招测试岗位").split("<details")[0];
+  assert(cohortMain.includes('decision not_recommended'), "an explicit cohort conflict must keep its saved recommendation");
+  assert(cohortMain.includes(cohortGap), "the main explanation must retain the actual reason for not recommending");
+  const fallbackErrors = [];
+  if (companySection.includes("具体业务在当前岗位资料中没有展开")) fallbackErrors.push("missing extracted business fields must not negate business stated in the source JD");
+  if (companySection.includes("负责内部业务系统开发")) fallbackErrors.push("the company fallback must not duplicate the full role explanation");
+  if (cohortMain.includes("暂无明显硬风险")) fallbackErrors.push("empty extra risks must not deny the explicit conflict in the matching explanation");
+  assert.equal(fallbackErrors.length, 0, fallbackErrors.join("; "));
 }
 
 function jobArticle(html, title) {
