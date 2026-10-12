@@ -43,7 +43,7 @@ function fixtureHtml() {
         set(data) { this.sessions = data.sessions; this.active = Object.prototype.hasOwnProperty.call(data, 'active') ? data.active : data.sessions[0] || null; this.timeline = data.timeline || []; this.loading = Boolean(data.loading); this.listLoading = data.listLoading === true; this.loginPanel = data.loginPanel === true; this.accountHeader = data.accountHeader === true; this.misplacedAccountHeader = data.misplacedAccountHeader === true; this.timelineError = data.timelineError || ""; this.selectWrong = data.selectWrong || ""; this.offline = data.offline === true; this.render(); },
         render() {
           document.querySelector('.login-panel').hidden = !this.loginPanel;
-          document.querySelector('.home-header__right > .home-header__c-login').hidden = !this.accountHeader;
+          document.querySelector('.home-header__right > .home-header__c-login, .home-header__right > .login-after-root > .home-header__c-login').hidden = !this.accountHeader;
           document.querySelector('.fixture-misplaced-account').hidden = !this.misplacedAccountHeader;
           const side = document.querySelector('.im-side-panel'); side.replaceChildren();
           side.__vue__ = { $options: { name: 'SidePanelThreeColumns' }, listLoading: this.listLoading, listError: '', sessions: this.sessions };
@@ -414,6 +414,9 @@ async function loginGuardSmoke(page, first) {
   const accountSelected = await accountReader.openQueuedConversation({ ...accountScan.rows[0], tabId: accountScan.tabId });
   assert.equal(accountSelected.sourceJobId, `zhaopin:${JOB_A}`, "the ordinary authenticated account header permits guarded selection");
 
+  const wrappedPageErrors = [];
+  const captureWrappedPageError = (error) => wrappedPageErrors.push(error.message);
+  page.on("pageerror", captureWrappedPageError);
   await page.evaluate(() => {
     const account = document.querySelector(".home-header__right > .home-header__c-login");
     const wrapper = document.createElement("div");
@@ -422,12 +425,18 @@ async function loginGuardSmoke(page, first) {
     wrapper.append(account);
   });
   try {
+    const other = session({ sessionId: "c".repeat(32), jobNumber: JOB_B, unreadCount: 0 });
+    await setFixture(page, { sessions: [first, other], active: other, timeline, accountHeader: true });
     const wrappedReader = readerFor(fakeBrowser(page));
     const wrappedScan = await wrappedReader.scanConversationRows();
     assert.equal((await page.evaluate(ZHAOPIN_MESSAGE_SNAPSHOT_EXPRESSION)).state, "ready",
       "the live authenticated account wrapper permits snapshot reads");
+    assert.equal(await page.evaluate(() => window.fixture.active.jobNumber), JOB_B,
+      "the wrapped regression starts on a different conversation");
     const wrappedSelected = await wrappedReader.openQueuedConversation({ ...wrappedScan.rows[0], tabId: wrappedScan.tabId });
     assert.equal(wrappedSelected.sourceJobId, `zhaopin:${JOB_A}`, "the live account wrapper permits guarded selection");
+    assert.equal(await page.evaluate(() => window.fixture.active.jobNumber), JOB_A,
+      "the wrapped regression verifies the actual conversation changed");
 
     await page.evaluate(() => {
       const panel = document.createElement("section");
@@ -453,7 +462,9 @@ async function loginGuardSmoke(page, first) {
       document.querySelector(".home-header__right").append(wrapper.querySelector(".home-header__c-login"));
       wrapper.remove();
     });
+    page.off("pageerror", captureWrappedPageError);
   }
+  assert.deepEqual(wrappedPageErrors, [], "wrapped account selection must not hide page script errors");
 
   await setFixture(page, { sessions: [first], active: first, timeline, misplacedAccountHeader: true });
   await assert.rejects(() => readerFor(fakeBrowser(page)).scanConversationRows(), error => error.code === "ZHAOPIN_MESSAGE_LOGIN_REQUIRED", "the account class outside the exact header parent remains a login challenge");
