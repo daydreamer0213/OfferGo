@@ -119,7 +119,8 @@ const {
 } = require("../storage/onboarding_store");
 const { matchingCardFromProfile, matchingCardRevision } = require("../core/matching_card");
 const { createLlmAnalyzer } = require("../core/llm_analyzer");
-const { normalizeCandidateProfile, normalizeSearchPlan } = require("../core/profile_schema");
+const { normalizeSearchPlan } = require("../core/profile_schema");
+const { formatFieldLines, parseFieldLines } = require("./profile_field_lines");
 const { CITY_CODES, cityToBossCode, planKeywords, profileToRuntimeConfigs, resolveScanPolicy } = require("../core/search_plan");
 const { acquisitionModeOf, generatedPlatformOf } = require("../core/search_plan_schema");
 const { isCatalogFresh, resolveNativeFilterSnapshot, formatNativeFilterSummary } = require("../core/platform_filters");
@@ -1962,7 +1963,7 @@ function matchingCardEntryLocation(db, profileId, resumeContentHash) {
   return `/match-card?profileId=${profileId}&cardId=${created.id}`;
 }
 
-function renderMatchCardPage({ db, searchParams }) {
+function renderMatchCardPage({ db, searchParams, formValues = null, validationError = "" }) {
   const profileId = Number(searchParams.get("profileId") || 0);
   const profile = getCandidateProfile(db, profileId);
   if (!profile) return renderErrorPage("还没有候选人画像，请先上传简历。", "/onboarding");
@@ -1988,22 +1989,27 @@ function renderMatchCardPage({ db, searchParams }) {
     .map((item) => `<a class="button-link" href="/match-card?profileId=${profile.id}&cardId=${item.id}">打开草稿卡 #${item.id}</a>`)
     .join(" ");
   const notices = [];
+  if (validationError) notices.push(`<p class="setup-warning" role="alert">保存未完成，输入内容已保留：${escapeHtml(validationError)}</p>`);
+  if (searchParams.get("profileSaved")) notices.push(`<p class="notice">资料已保存。请检查下面的新资料；确认前仍使用原来的资料筛选岗位。</p>`);
   if (searchParams.get("saved")) notices.push(`<p class="notice">草稿已保存；确认之前不会改变扫描依据。</p>`);
   if (!activeCard) notices.push(`<p class="setup-warning">尚无已确认的匹配偏好卡。无需重新上传简历，打开现有草稿卡确认后即可扫描。 ${draftLinks}</p>`);
-  if (card?.status === "draft" && activeCard) notices.push(`<p class="setup-warning">新简历待确认，不会自动替换当前匹配依据。</p>`);
+  if (card?.status === "draft" && activeCard) notices.push(`<p class="setup-warning">${card.source === "user" ? "新资料" : "新简历"}待确认，不会自动替换当前匹配依据。</p>`);
+  const boundProfile = card?.status === "draft" ? db.prepare("SELECT profile_json FROM profile_versions WHERE id = ? AND profile_id = ?").get(card.profileVersionId, profile.id) : null;
+  const value = (key, fallback) => formValues?.[key] ?? fallback;
   const body = !card
     ? `<section class="panel"><h2>选择要确认的草稿卡</h2><p class="hint">匹配偏好卡来自你已上传的简历；选择一张草稿卡检查并确认。</p><p>${draftLinks || "当前没有草稿卡。"}</p></section>`
     : card.status === "draft"
       ? `<section class="panel"><h2>匹配偏好卡 #${card.id}（草稿）</h2>
-  <p class="hint">逐项核对模型从简历事实归纳的匹配依据；只有确认后，扫描和岗位匹配才会使用它。</p>
+  <p class="hint">检查已保存的简历事实和匹配依据；确认后，扫描和岗位匹配才会使用这份资料。</p>
+  ${boundProfile ? renderMatchingProfileFacts(JSON.parse(boundProfile.profile_json)) : ""}
   <form class="form-stack" method="post" action="/api/match-card">
     <input type="hidden" name="profileId" value="${escapeAttr(profile.id)}">
     <input type="hidden" name="cardId" value="${escapeAttr(card.id)}">
-    <label>目标方向（每行一个）<textarea name="targetDirections">${escapeHtml((card.card.targetDirections || []).join("\n"))}</textarea></label>
-    <label>强证据（每行：名称 | 简历事实）<textarea name="strongEvidence">${escapeHtml((card.card.strongEvidence || []).map((item) => `${item.label} | ${item.evidence}`).join("\n"))}</textarea></label>
-    <label>可迁移能力（每行：名称 | 简历事实 | 尚未证明的部分）<textarea name="transferableCapabilities">${escapeHtml((card.card.transferableCapabilities || []).map((item) => [item.label, item.evidence, item.limitation].filter(Boolean).join(" | ")).join("\n"))}</textarea></label>
-    <label>需谨慎转向（每行：方向 | 原因）<textarea name="cautionTransitions">${escapeHtml((card.card.cautionTransitions || []).map((item) => `${item.direction} | ${item.reason}`).join("\n"))}</textarea></label>
-    <label>用户补充偏好（每行一条；会用于岗位匹配，不会直接发送给招聘方；不能代替简历证据）<textarea name="userNotes">${escapeHtml((card.card.userNotes || []).join("\n"))}</textarea></label>
+    <label>目标方向（每行一个）<textarea name="targetDirections">${escapeHtml(value("targetDirections", (card.card.targetDirections || []).join("\n")))}</textarea></label>
+    <label>强证据（每行：名称 | 简历事实）<textarea name="strongEvidence">${escapeHtml(value("strongEvidence", formatFieldLines((card.card.strongEvidence || []).map((item) => [item.label, item.evidence]))))}</textarea></label>
+    <label>可迁移能力（每行：名称 | 简历事实 | 尚未证明的部分）<textarea name="transferableCapabilities">${escapeHtml(value("transferableCapabilities", formatFieldLines((card.card.transferableCapabilities || []).map((item) => [item.label, item.evidence, item.limitation]))))}</textarea></label>
+    <label>需谨慎转向（每行：方向 | 原因）<textarea name="cautionTransitions">${escapeHtml(value("cautionTransitions", formatFieldLines((card.card.cautionTransitions || []).map((item) => [item.direction, item.reason]))))}</textarea></label>
+    <label>用户补充偏好（每行一条；会用于岗位匹配，不会直接发送给招聘方；不能代替简历证据）<textarea name="userNotes">${escapeHtml(value("userNotes", (card.card.userNotes || []).join("\n")))}</textarea></label>
     <div><button type="submit">保存草稿</button></div>
   </form>
   <form class="inline-form" method="post" action="/api/match-card/confirm">
@@ -2014,7 +2020,7 @@ function renderMatchCardPage({ db, searchParams }) {
   <p class="hint">确认后，旧的已确认卡会被替换；基于旧卡的筛选方案需要重新保存一次。</p>
 </section>`
       : card.status === "confirmed"
-        ? `<section class="panel"><h2>匹配偏好卡 #${card.id}（已确认）</h2><p class="hint">这张卡是当前扫描与岗位匹配的根据；如需调整，请编辑后另存或重新上传新简历生成草稿。</p>${renderMatchingCardSummary(card.card)}</section>`
+        ? `<section class="panel"><h2>匹配偏好卡 #${card.id}（已确认）</h2><p class="hint">这张卡是当前扫描与岗位匹配的根据。修改资料后，可以检查并确认新的匹配依据。</p><p><a class="button-link" href="/profile?profileId=${profile.id}">编辑资料</a></p>${renderMatchingCardSummary(card.card)}</section>`
         : `<section class="panel"><h2>匹配偏好卡 #${card.id}（历史版本 · 已被替换）</h2><p class="hint">这张卡已被更新的确认卡替换，仅作历史留档，不能重新确认；当前扫描与岗位匹配不使用它。</p>${renderMatchingCardSummary(card.card)}</section>`;
   return renderLegacyDashboardPage({ title: "匹配偏好卡", currentPath: planPath, todayPath: planPath, planId: activePlan?.id || "", stage: "匹配", body: `<main id="main-content">
   <h1>匹配偏好卡</h1>
@@ -2034,36 +2040,53 @@ function renderMatchingCardSummary(card = {}) {
 </dl>`;
 }
 
+function renderMatchingProfileFacts(profile) {
+  const labels = { name: "名称", school: "学校", degree: "学历", major: "专业", startDate: "开始", endDate: "结束", status: "状态", highlights: "实际内容", organization: "组织", role: "岗位", type: "类型", roleBoundary: "参与范围", technologies: "技术", evidence: "实际佐证", period: "时间", context: "背景", canSay: "完成的工作", results: "成果", avoidSaying: "表达边界", details: "说明" };
+  const sections = Object.entries(PROFILE_EDIT_FIELDS).map(([section, spec]) => {
+    const items = (profile[section] || []).map((item) => `<li>${spec.keys.map((key) => {
+      const value = profileFieldText(item, key, spec);
+      return value ? `<span>${labels[key]}：${escapeHtml(value)}</span>` : "";
+    }).filter(Boolean).join("<br>")}</li>`).join("");
+    return items ? `<h3>${spec.label}</h3><ul>${items}</ul>` : "";
+  }).join("");
+  return `<details open><summary>这张卡对应的资料</summary><p>方向：${escapeHtml((profile.candidate?.targetTitles || []).join("、"))}；城市：${escapeHtml(profile.candidate?.city || "")}；期望薪资：${escapeHtml(profile.candidate?.expectedSalary || "")}</p>${sections}<p>${escapeHtml((profile.strengths || []).join("；"))}</p></details>`;
+}
+
 function matchingCardFromForm(params = {}) {
   const lines = (value) => String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const segments = (line) => line.split("|").map((item) => item.trim());
   return {
     targetDirections: lines(params.targetDirections),
-    strongEvidence: lines(params.strongEvidence).map((line) => {
-      const [label, ...rest] = segments(line);
-      return { label, evidence: rest.join(" | ") };
+    strongEvidence: parseFieldLines(params.strongEvidence, { maxFields: 2, label: "强证据" }).map(([label, evidence]) => {
+      return { label, evidence };
     }),
-    transferableCapabilities: lines(params.transferableCapabilities).map((line) => {
-      const [label, evidence, ...rest] = segments(line);
-      return { label, evidence, limitation: rest.join(" | ") };
+    transferableCapabilities: parseFieldLines(params.transferableCapabilities, { maxFields: 3, label: "可迁移能力" }).map(([label, evidence, limitation]) => {
+      return { label, evidence, limitation };
     }),
-    cautionTransitions: lines(params.cautionTransitions).map((line) => {
-      const [direction, ...rest] = segments(line);
-      return { direction, reason: rest.join(" | ") };
+    cautionTransitions: parseFieldLines(params.cautionTransitions, { maxFields: 2, label: "需谨慎转向" }).map(([direction, reason]) => {
+      return { direction, reason };
     }),
     userNotes: lines(params.userNotes)
   };
 }
 
 async function handleMatchCardSave(req, res, { db, logger, requestId }) {
+  let params;
+  let existing;
   try {
-    const params = parseBody(await readBody(req), req.headers["content-type"] || "");
+    params = parseBody(await readBody(req), req.headers["content-type"] || "");
     const profileId = Number(params.profileId);
     const cardId = Number(params.cardId);
+    existing = getMatchingCard(db, cardId);
+    if (existing?.profileId !== profileId) throw new Error("matching card not found");
     const saved = saveMatchingCardDraftEdit(db, { profileId, cardId, card: matchingCardFromForm(params) });
     logger.info("matching_card_draft_saved", { requestId, profileId, cardId: saved.id });
     redirect(res, `/match-card?profileId=${profileId}&cardId=${saved.id}&saved=1`);
   } catch (error) {
+    if (existing?.status === "draft" && existing.profileId === Number(params?.profileId)) {
+      const issue = publicError(error, { fallbackCode: "MATCHING_CARD_SAVE_FAILED" });
+      logger.error("matching_card_save_failed", { requestId, error: errorMeta(error), errorCode: issue.code });
+      return sendHtml(res, renderMatchCardPage({ db, searchParams: new URLSearchParams({ profileId: String(existing.profileId), cardId: String(existing.id) }), formValues: params, validationError: issue.message }), issue.statusCode);
+    }
     respondUiError(res, error, "/match-card", { logger, requestId, event: "matching_card_save_failed", fallbackCode: "MATCHING_CARD_SAVE_FAILED" });
   }
 }
@@ -2130,10 +2153,12 @@ function modelTaskProfileIdentity(settings, taskProfile) {
 }
 
 async function handleProfileSave(req, res, db, { logger, requestId }) {
+  let params;
+  let existing;
   try {
-    const params = parseBody(await readBody(req), req.headers["content-type"] || "");
+    params = parseBody(await readBody(req), req.headers["content-type"] || "");
     const profileId = Number(params.profileId);
-    const existing = getCandidateProfile(db, profileId);
+    existing = getCandidateProfile(db, profileId);
     if (!existing) throw new Error("candidate profile not found");
     const profile = profileFromForm(existing.profile, params);
     updateCandidateProfile(db, {
@@ -2142,8 +2167,15 @@ async function handleProfileSave(req, res, db, { logger, requestId }) {
       displayName: String(params.name || existing.displayName || "").trim()
     });
     logger.info("candidate_profile_updated", { requestId, profileId, skillCount: profile.skills.length, projectCount: profile.projects.length });
-    redirect(res, `/profile?profileId=${profileId}&saved=1`);
+    const versionId = listProfileVersions(db, profileId, 1)[0]?.id;
+    const draft = listMatchingCards(db, profileId).find((card) => card.profileVersionId === versionId && card.status === "draft");
+    redirect(res, draft ? `/match-card?profileId=${profileId}&cardId=${draft.id}&profileSaved=1` : `/profile?profileId=${profileId}&saved=1`);
   } catch (error) {
+    if (existing && params) {
+      const issue = publicError(error, { fallbackCode: "PROFILE_SAVE_FAILED" });
+      logger.error("candidate_profile_update_failed", { requestId, error: errorMeta(error), errorCode: issue.code });
+      return sendHtml(res, renderProfilePage({ db, searchParams: new URLSearchParams({ profileId: String(existing.id) }), formValues: params, validationError: issue.message }), issue.statusCode);
+    }
     respondUiError(res, error, "/onboarding", { logger, requestId, event: "candidate_profile_update_failed", fallbackCode: "PROFILE_SAVE_FAILED" });
   }
 }
@@ -2238,68 +2270,119 @@ async function handlePlanRecommend(req, res, { db, modelConfig, modelReady, logg
   }
 }
 
+const PROFILE_EDIT_FIELDS = {
+  skills: { label: "技能", maxRows: 40, keys: ["name", "evidence"], arrays: { evidence: 8 } },
+  projects: { label: "项目", maxRows: 10, keys: ["name", "period", "context", "roleBoundary", "canSay", "technologies", "results", "avoidSaying"], arrays: { canSay: 16, technologies: 16, results: 10, avoidSaying: 8 } },
+  education: { label: "教育经历", maxRows: 6, keys: ["school", "degree", "major", "startDate", "endDate", "status", "highlights"], arrays: { highlights: 8 } },
+  experiences: { label: "工作经历", maxRows: 12, keys: ["organization", "role", "type", "startDate", "endDate", "roleBoundary", "highlights", "technologies"], arrays: { highlights: 16, technologies: 16 } },
+  credentials: { label: "证书 / 语言", maxRows: 12, keys: ["name", "details"], arrays: {} }
+};
+
+function profileFieldText(item, key, spec) {
+  if (typeof item === "string") return key === spec.keys[0] ? item : "";
+  return spec.arrays[key] ? (item?.[key] || []).join("、") : String(item?.[key] ?? "");
+}
+
+function profileSectionLines(section, items = []) {
+  const spec = PROFILE_EDIT_FIELDS[section];
+  return formatFieldLines((items || []).map((item) => spec.keys.map((key) => profileFieldText(item, key, spec))));
+}
+
+function parseProfileSection(section, value, existing = []) {
+  const spec = PROFILE_EDIT_FIELDS[section];
+  const sameText = (text) => String(text ?? "").replace(/\r\n/g, "\n");
+  if (sameText(value) === sameText(profileSectionLines(section, existing))) return existing;
+  const rows = parseFieldLines(value, { maxFields: spec.keys.length, label: spec.label });
+  if (rows.length > Math.max(spec.maxRows, existing.length)) throw new Error(`${spec.label}条目过多，请分开整理后保存。`);
+  const originals = existing.map((item) => spec.keys.map((key) => sameText(profileFieldText(item, key, spec))));
+  const values = rows.map((row) => spec.keys.map((_, column) => sameText(row[column] ?? "")));
+  const used = new Set();
+  const matches = values.map((row) => {
+    const exact = originals.map((original, index) => ({ original, index }))
+      .filter(({ original, index }) => !used.has(index) && original.every((text, column) => text === row[column]));
+    if (exact.length !== 1) return null;
+    used.add(exact[0].index);
+    return exact[0].index;
+  });
+  for (let index = 0; index < rows.length; index++) {
+    if (matches[index] !== null) continue;
+    const renamed = originals.map((original, priorIndex) => ({ original, priorIndex }))
+      .filter(({ original, priorIndex }) => !used.has(priorIndex) && original.slice(1).every((text, column) => text === values[index][column + 1]));
+    if (renamed.length === 1) { matches[index] = renamed[0].priorIndex; used.add(renamed[0].priorIndex); }
+  }
+  for (let index = 0; index < rows.length; index++) {
+    if (matches[index] !== null) continue;
+    const candidates = originals.map((original, priorIndex) => ({ priorIndex, original,
+      score: original.filter((text, column) => column > 0 && text && text === values[index][column]).length }))
+      .filter(({ original, priorIndex }) => !used.has(priorIndex) && original[0] === values[index][0]);
+    const best = candidates.filter((item) => item.score === Math.max(...candidates.map((candidate) => candidate.score)));
+    if (best.length > 1) throw new Error(`${spec.label}中有无法区分的原条目，请保留不同的岗位、时间或内容后再保存；此次没有修改资料。`);
+    const priorIndex = best[0]?.priorIndex ?? (rows.length === existing.length && !used.has(index) ? index : null);
+    matches[index] = priorIndex;
+    if (priorIndex !== null) used.add(priorIndex);
+  }
+  return rows.map((row, index) => {
+    const prior = matches[index] === null ? null : existing[matches[index]];
+    const result = prior && typeof prior === "object" ? { ...prior } : typeof prior === "string" ? { [spec.keys[0]]: prior } : {};
+    for (let column = 0; column < spec.keys.length; column++) {
+      const key = spec.keys[column];
+      const text = row[column] ?? "";
+      if (prior && sameText(text) === sameText(profileFieldText(prior, key, spec))) continue;
+      const next = spec.arrays[key] ? splitTerms(text) : text;
+      if (spec.arrays[key] ? next.length > spec.arrays[key] || next.some((item) => item.length > 1000) : next.length > 1000) {
+        throw new Error(`${spec.label}内容过长，请分开整理后保存；此次没有修改资料。`);
+      }
+      result[key] = next;
+    }
+    if (section === "skills" && !result.level) result.level = "manual";
+    return result;
+  });
+}
+
 function profileFromForm(existing, params) {
   const candidate = existing.candidate || {};
-  const profile = {
+  const preserveTerms = (value, previous = [], limit) => {
+    if (String(value ?? "") === previous.join("、")) return previous;
+    const terms = splitTerms(value);
+    if (terms.length > limit || terms.some((item) => item.length > 1000)) throw new Error("方向或薪资内容过长，请检查后保存。");
+    return terms;
+  };
+  const city = String(params.city ?? candidate.city ?? "").trim();
+  const expectedSalary = String(params.expectedSalary ?? candidate.expectedSalary ?? "").trim();
+  const strengths = String(params.strengths ?? "").replace(/\r\n/g, "\n") === (existing.strengths || []).join("\n")
+    ? existing.strengths || [] : splitLines(params.strengths);
+  if (city.length > 1000 || expectedSalary.length > 1000 || strengths.length > 12 || strengths.some((item) => item.length > 1000)) {
+    throw new Error("资料内容过长，请检查后保存；此次没有修改资料。");
+  }
+  return {
     ...existing,
     candidate: {
       ...candidate,
       name: "候选人",
-      city: String(params.city || candidate.city || "").trim(),
-      targetTitles: splitTerms(params.targetTitles),
-      expectedSalary: String(params.expectedSalary || "").trim(),
-      adjustableSalary: splitTerms(params.adjustableSalary)
+      city,
+      targetTitles: preserveTerms(params.targetTitles, candidate.targetTitles, 10),
+      expectedSalary,
+      adjustableSalary: preserveTerms(params.adjustableSalary, candidate.adjustableSalary, 4)
     },
-    education: parseEducationLines(params.education),
-    experiences: parseExperienceLines(params.experiences),
-    skills: parseSkillLines(params.skills),
-    projects: parseProjectLines(params.projects),
-    credentials: parseCredentialLines(params.credentials),
-    strengths: splitLines(params.strengths),
+    education: parseEducationLines(params.education, existing.education),
+    experiences: parseExperienceLines(params.experiences, existing.experiences),
+    skills: parseSkillLines(params.skills, existing.skills),
+    projects: parseProjectLines(params.projects, existing.projects),
+    credentials: parseCredentialLines(params.credentials, existing.credentials),
+    strengths,
     source: existing.source || {}
   };
-  return normalizeCandidateProfile(profile, {
-    provider: existing.source?.provider || "manual",
-    model: existing.source?.model || "manual",
-    resumeTextLength: existing.source?.resumeTextLength || 0,
-    allowRiskMessaging: true
-  });
 }
 
-function parseSkillLines(value) {
-  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name, ...evidence] = line.split("|").map((item) => item.trim());
-    return { name, level: "manual", evidence: splitTerms(evidence.join(",")) };
-  });
-}
+function parseSkillLines(value, existing) { return parseProfileSection("skills", value, existing); }
 
-function parseProjectLines(value) {
-  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name, period, context, roleBoundary, canSay, technologies, results, avoidSaying] = line.split("|").map((item) => item.trim());
-    return { name, period, context, roleBoundary: roleBoundary || "按实际参与边界表达", canSay: splitTerms(canSay), technologies: splitTerms(technologies), results: splitTerms(results), avoidSaying: splitTerms(avoidSaying) };
-  });
-}
+function parseProjectLines(value, existing) { return parseProfileSection("projects", value, existing); }
 
-function parseEducationLines(value) {
-  return splitLines(value).map((line) => {
-    const [school, degree, major, startDate, endDate, status, highlights] = line.split("|").map((item) => item.trim());
-    return { school, degree, major, startDate, endDate, status, highlights: splitTerms(highlights) };
-  });
-}
+function parseEducationLines(value, existing) { return parseProfileSection("education", value, existing); }
 
-function parseExperienceLines(value) {
-  return splitLines(value).map((line) => {
-    const [organization, role, type, startDate, endDate, roleBoundary, highlights, technologies] = line.split("|").map((item) => item.trim());
-    return { organization, role, type, startDate, endDate, roleBoundary, highlights: splitTerms(highlights), technologies: splitTerms(technologies) };
-  });
-}
+function parseExperienceLines(value, existing) { return parseProfileSection("experiences", value, existing); }
 
-function parseCredentialLines(value) {
-  return splitLines(value).map((line) => {
-    const [name, ...details] = line.split("|").map((item) => item.trim());
-    return { name, details: details.join(" | ") };
-  });
-}
+function parseCredentialLines(value, existing) { return parseProfileSection("credentials", value, existing); }
 
 function splitLines(value) {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -4920,7 +5003,7 @@ function parseKeywordLines(value) {
   }).filter((item) => item.word);
 }
 
-function renderProfilePage({ db, searchParams }) {
+function renderProfilePage({ db, searchParams, formValues = null, validationError = "" }) {
   const requestedId = Number(searchParams.get("profileId") || 0);
   const fallback = listCandidateProfiles(db)[0];
   const profile = getCandidateProfile(db, requestedId || fallback?.id);
@@ -4930,6 +5013,10 @@ function renderProfilePage({ db, searchParams }) {
   const activePlan = getActiveSearchPlan(db, profile.id);
   const planPath = `/plan?profileId=${profile.id}${activePlan ? `&planId=${activePlan.id}` : ""}`;
   const dependency = activePlan ? getSearchPlanDependency(db, activePlan.id) : null;
+  const latestVersion = listProfileVersions(db, profile.id, 1)[0];
+  const pending = listMatchingCards(db, profile.id).find((card) => card.status === "draft" && card.profileVersionId === latestVersion?.id);
+  const pendingNotice = pending ? `<p class="setup-warning">这份资料还未确认用于筛选。<a href="/match-card?profileId=${profile.id}&cardId=${pending.id}">检查并确认新资料</a></p>` : "";
+  const value = (key, fallback) => formValues?.[key] ?? fallback;
   const saved = searchParams.get("saved") ? `<p class="notice">画像已保存。搜索方案不会被静默改写，请在方案页按需确认。</p>` : "";
   const planNotice = !activePlan
     ? `<form class="inline-form" method="post" action="/api/plan/recommend"><input type="hidden" name="profileId" value="${profile.id}"><button>生成本地筛选方案</button></form>`
@@ -4937,21 +5024,24 @@ function renderProfilePage({ db, searchParams }) {
   return renderLegacyDashboardPage({ title: "画像摘要", currentPath: `/profile?profileId=${profile.id}`, todayPath: planPath, planId: activePlan?.id || "", stage: "画像", body: `<main id="main-content">
   <h1>画像摘要</h1>
   ${saved}
+  ${validationError ? `<p class="setup-warning" role="alert">保存未完成，输入内容已保留：${escapeHtml(validationError)}</p>` : ""}
+  ${pendingNotice}
   ${planNotice}
   <p class="hint">默认按你提供的内容使用；只在需要调整方向、薪资或项目表述时再编辑。</p>
   <form class="panel form-stack" method="post" action="/api/profile">
     <input type="hidden" name="profileId" value="${escapeAttr(profile.id)}">
-    <label>姓名<input name="name" value="${escapeAttr(profile.displayName || "候选人")}"></label>
-    <label>优先城市<input name="city" value="${escapeAttr(candidate.city || "")}" placeholder="例如：广州"></label>
-    <label>目标方向<input name="targetTitles" value="${escapeAttr((candidate.targetTitles || []).join("、"))}" placeholder="用顿号或逗号分隔"></label>
-    <label>期望薪资<input name="expectedSalary" value="${escapeAttr(candidate.expectedSalary || "")}" placeholder="例如：9-14K"></label>
-    <label>可调整范围<input name="adjustableSalary" value="${escapeAttr((candidate.adjustableSalary || []).join("、"))}" placeholder="例如：8-12K、9-13K"></label>
-    <label>教育经历（每行：学校 | 学历 | 专业 | 开始 | 结束 | 状态 | 亮点）<textarea name="education">${escapeHtml(profileEducationLines(profile.profile.education))}</textarea></label>
-    <label>工作 / 实习 / 协作经历（每行：组织 | 岗位 | 类型 | 开始 | 结束 | 贡献边界 | 工作内容 | 技术）<textarea name="experiences">${escapeHtml(profileExperienceLines(profile.profile.experiences))}</textarea></label>
-    <label>技能（每行：技能 | 佐证）<textarea name="skills">${escapeHtml(profileSkillLines(profile.profile.skills))}</textarea></label>
-    <label>项目（每行：项目名 | 时间 | 背景 | 贡献边界 | 可讲点 | 技术 | 结果 | 不主动讲）<textarea name="projects">${escapeHtml(profileProjectLines(profile.profile.projects))}</textarea></label>
-    <label>证书 / 语言（每行：名称 | 说明）<textarea name="credentials">${escapeHtml(profileCredentialLines(profile.profile.credentials))}</textarea></label>
-    <label>个人优势（每行一项）<textarea name="strengths">${escapeHtml((profile.profile.strengths || []).join("\n"))}</textarea></label>
+    <label>姓名<input name="name" value="${escapeAttr(value("name", profile.displayName || "候选人"))}"></label>
+    <label>优先城市<input name="city" value="${escapeAttr(value("city", candidate.city || ""))}" placeholder="例如：广州"></label>
+    <label>目标方向<input name="targetTitles" value="${escapeAttr(value("targetTitles", (candidate.targetTitles || []).join("、")))}" placeholder="用顿号或逗号分隔"></label>
+    <label>期望薪资<input name="expectedSalary" value="${escapeAttr(value("expectedSalary", candidate.expectedSalary || ""))}" placeholder="例如：9-14K"></label>
+    <label>可调整范围<input name="adjustableSalary" value="${escapeAttr(value("adjustableSalary", (candidate.adjustableSalary || []).join("、")))}" placeholder="例如：8-12K、9-13K"></label>
+    <p class="hint">名称或内容含“|”时，请保留包围它的双引号。</p>
+    <label>教育经历（每行：学校 | 学历 | 专业 | 开始 | 结束 | 状态 | 亮点）<textarea name="education">${escapeHtml(value("education", profileEducationLines(profile.profile.education)))}</textarea></label>
+    <label>工作 / 实习 / 协作经历（每行：组织 | 岗位 | 类型 | 开始 | 结束 | 贡献边界 | 工作内容 | 技术）<textarea name="experiences">${escapeHtml(value("experiences", profileExperienceLines(profile.profile.experiences)))}</textarea></label>
+    <label>技能（每行：技能 | 佐证）<textarea name="skills">${escapeHtml(value("skills", profileSkillLines(profile.profile.skills)))}</textarea></label>
+    <label>项目（每行：项目名 | 时间 | 背景 | 贡献边界 | 可讲点 | 技术 | 结果 | 不主动讲）<textarea name="projects">${escapeHtml(value("projects", profileProjectLines(profile.profile.projects)))}</textarea></label>
+    <label>证书 / 语言（每行：名称 | 说明）<textarea name="credentials">${escapeHtml(value("credentials", profileCredentialLines(profile.profile.credentials)))}</textarea></label>
+    <label>个人优势（每行一项）<textarea name="strengths">${escapeHtml(value("strengths", (profile.profile.strengths || []).join("\n")))}</textarea></label>
     <button>保存画像</button>
   </form>
   <section class="panel"><h2>解析诊断</h2><p class="hint">只展示本地解析元数据和前 360 字预览，不会上传简历文件。</p>${renderParseAttempts(attempts)}</section>
@@ -5013,23 +5103,23 @@ function renderResumeVersionFields(version = {}) {
 }
 
 function profileSkillLines(skills = []) {
-  return (skills || []).map((item) => `${item.name || item}${item.evidence?.length ? ` | ${item.evidence.join("、")}` : ""}`).join("\n");
+  return profileSectionLines("skills", skills);
 }
 
 function profileProjectLines(projects = []) {
-  return (projects || []).map((item) => [item.name || item, item.period || "", item.context || "", item.roleBoundary || "", (item.canSay || []).join("、"), (item.technologies || []).join("、"), (item.results || []).join("、"), (item.avoidSaying || []).join("、")].join(" | ")).join("\n");
+  return profileSectionLines("projects", projects);
 }
 
 function profileEducationLines(items = []) {
-  return (items || []).map((item) => [item.school, item.degree, item.major, item.startDate, item.endDate, item.status, (item.highlights || []).join("、")].join(" | ")).join("\n");
+  return profileSectionLines("education", items);
 }
 
 function profileExperienceLines(items = []) {
-  return (items || []).map((item) => [item.organization, item.role, item.type, item.startDate, item.endDate, item.roleBoundary, (item.highlights || []).join("、"), (item.technologies || []).join("、")].join(" | ")).join("\n");
+  return profileSectionLines("experiences", items);
 }
 
 function profileCredentialLines(items = []) {
-  return (items || []).map((item) => [item.name, item.details || ""].join(" | ")).join("\n");
+  return profileSectionLines("credentials", items);
 }
 
 function renderParseAttempts(attempts) {

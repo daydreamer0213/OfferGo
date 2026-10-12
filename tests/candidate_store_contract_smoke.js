@@ -290,10 +290,16 @@ try {
   assert.strictEqual(storage.getSearchPlanDependency(db, saved.planId).matchingCardId, revised.id);
 
   const updateSave = observeTransaction(() => storage.updateCandidateProfile(db, { profileId: saved.profileId, profile: profile("Candidate One Updated", ["增长产品经理"]) }));
-  assert.deepStrictEqual(updateSave.statements, ["BEGIN", "COMMIT"]);
+  assert.deepStrictEqual(updateSave.statements, ["BEGIN IMMEDIATE", "COMMIT"]);
   const updated = updateSave.value;
   assert.strictEqual(updated.displayName, "Candidate One Updated");
   assert(storage.compareProfileVersions(db, saved.profileId).changes.length > 0);
+  const editedProfileVersion = storage.listProfileVersions(db, saved.profileId)[0];
+  const editedProfileDraft = storage.listMatchingCards(db, saved.profileId).find((item) => item.profileVersionId === editedProfileVersion.id);
+  assert.strictEqual(editedProfileVersion.resumeDocumentId, saved.resumeDocumentId);
+  assert.strictEqual(editedProfileDraft.status, "draft");
+  assert.deepStrictEqual(editedProfileDraft.card.userNotes, revised.card.userNotes);
+  assert.strictEqual(storage.getActiveMatchingCard(db, saved.profileId).id, revised.id);
 
   const longValue = "x".repeat(2001);
   assert.deepStrictEqual(storage.saveCandidateFact(db, { profileId: saved.profileId, factKey: "contact preference!", factValue: longValue }), {

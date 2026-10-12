@@ -1,6 +1,7 @@
 const crypto = require("crypto");
+const { isDeepStrictEqual } = require("node:util");
 const { nowIso, parseJson } = require("./storage_shared");
-const { normalizeMatchingCard, matchingCardRevision } = require("../core/matching_card");
+const { normalizeMatchingCard, matchingCardRevision, matchingCardFromProfile } = require("../core/matching_card");
 const { maskResumeContacts, maskResumeFileName, maskResumeDiagnostics, prepareResumeTextForModel } = require("../core/resume_privacy");
 const { canonicalSearchPlanV2 } = require("../core/search_plan_schema");
 const { recordCandidateFactValue, listCandidateFacts } = require("./message_learning_store");
@@ -323,12 +324,26 @@ function updateCandidateProfile(db, { profileId, profile, displayName: requested
   if (!existing) throw new Error("candidate profile not found");
   const now = nowIso();
   const displayName = safeDisplayName(requestedDisplayName || profile?.candidate?.name || existing.displayName);
-  db.exec("BEGIN");
+  if (isDeepStrictEqual(existing.profile, profile)) {
+    if (displayName !== existing.displayName) db.prepare("UPDATE candidate_profiles SET display_name = ?, updated_at = ? WHERE id = ?").run(displayName, now, id);
+    return getCandidateProfile(db, id);
+  }
+  db.exec("BEGIN IMMEDIATE");
   try {
+    const document = existing.sourceHash ? db.prepare(`SELECT id FROM resume_documents
+      WHERE profile_id = ? AND content_hash = ? ORDER BY id DESC LIMIT 1`).get(id, existing.sourceHash) : null;
+    if (!existing.sourceHash) throw new Error("无法确认原简历来源，请重新上传基础简历后保存资料。");
+    const activeCard = getActiveMatchingCard(db, id);
     db.prepare("UPDATE candidate_profiles SET display_name = ?, profile_json = ?, updated_at = ? WHERE id = ?")
       .run(displayName, JSON.stringify(profile), now, id);
-    db.prepare("INSERT INTO profile_versions(profile_id, resume_document_id, profile_json, created_at) VALUES (?, NULL, ?, ?)")
-      .run(id, JSON.stringify(profile), now);
+    const versionId = Number(db.prepare("INSERT INTO profile_versions(profile_id, resume_document_id, profile_json, created_at) VALUES (?, ?, ?, ?)")
+      .run(id, document?.id || null, JSON.stringify(profile), now).lastInsertRowid);
+    createMatchingCardDraft(db, {
+      profileId: id, profileVersionId: versionId, resumeDocumentId: document?.id || null,
+      resumeContentHash: existing.sourceHash,
+      card: { ...matchingCardFromProfile(profile), userNotes: activeCard?.card.userNotes || [] },
+      source: "user"
+    });
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
