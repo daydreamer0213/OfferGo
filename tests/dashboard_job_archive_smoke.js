@@ -36,6 +36,7 @@ async function main() {
     let page = await request(base, activeUrl);
     assert.match(page.body, /归档测试岗位/);
     assert.match(page.body, /name="action" value="archive"/);
+    assertFullDescription(page.body, fixture.description);
 
     let response = await postForm(base, "/api/job-archive", archiveForm(fixture), activeUrl);
     assert.equal(response.status, 303);
@@ -48,6 +49,7 @@ async function main() {
     assert.doesNotMatch(page.body, /action="\/api\/communication"/);
     assert.doesNotMatch(page.body, /action="\/api\/progress"/);
     assert.match(page.body, /恢复后可继续处理/);
+    assertFullDescription(page.body, fixture.description);
 
     response = await postForm(base, "/api/mark", {
       profileId: fixture.profileId,
@@ -106,16 +108,25 @@ function seed(db) {
   const scanBatch = createBatch(db, "boss", "archive", "archive page", {
     profileId, searchPlanId: planId, startedAt: NOW, filterSnapshot: { execution: {} }
   });
+  const description = "负责内容运营、增长实验和复盘。".repeat(120)
+    + "末尾职责：保留完整输入 <tag> & 交付记录。";
   const jobId = upsertJob(db, {
     source: "boss", sourceId: "boss:archive-dashboard", keyword: "archive",
     title: "归档测试岗位", company: "示例公司", location: "广州", url: "https://example.test/archive",
-    description: "负责内容运营、增长实验和复盘。".repeat(10),
+    description,
     analysis: { semanticStatus: "complete", recommendation: "primary", recommendationSchemaVersion: 2 }
   }, scanBatch);
   const cardId = ensureProgressCard(db, {
     profileId, planId, jobId, source: "boss", now: NOW
   }).id;
-  return { profileId, planId, jobId, cardId, action: "archive" };
+  return { profileId, planId, jobId, cardId, description, action: "archive" };
+}
+
+function assertFullDescription(markup, description) {
+  const rendered = markup.match(/<div class="jd">([\s\S]*?)<\/div>/)?.[1];
+  const escaped = description.replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  assert.equal(rendered, escaped, "Expanded job details must retain the complete saved JD and escape markup");
 }
 
 function archiveForm(fixture, action = "archive") {
