@@ -134,6 +134,22 @@ async function testRealTransport() {
     choices: [{ message: { content }, finish_reason: finish }]
   }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
+    const generatedMetadata = { provider: 'anthropic', model: 'claude', usage: { inputTokens: 0, outputTokens: 0 } };
+    requests.length = 0;
+    global.fetch = async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return response(JSON.stringify({ ...good, ...generatedMetadata }));
+    };
+    assert.deepEqual(await adapter.selectJob(input), verify(good),
+      'Generated transport metadata must not change or reject the five grounded decision fields');
+    assert.equal(requests.length, 1, 'Generated metadata must not consume the single recovery');
+    assert.equal(adapter.provider, 'openai_compatible');
+    assert.equal(adapter.model, 'deepseek-v4-flash', 'Generated identity cannot replace configured transport identity');
+    assert(!JSON.stringify(events).includes('anthropic'), 'Generated metadata values must not enter diagnostics');
+    bad({ ...good, ...generatedMetadata, inventedQualification: 'an unknown nonempty assertion' });
+    bad({ ...good, ...generatedMetadata, selectedWork: { ...good.selectedWork, jdEvidenceRefs: [candidate] } });
+    const metadataMissingTier = { ...good, ...generatedMetadata }; delete metadataMissingTier.modelRecommendation;
+    bad(metadataMissingTier);
     for (const [field, empty] of [['decisionExplanation_note', ''], ['unrecognized_optional_text', '  \n']]) {
       requests.length = 0;
       global.fetch = async (_url, options) => {

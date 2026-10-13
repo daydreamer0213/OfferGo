@@ -51,6 +51,13 @@ function presentWorkMatchInput(input) {
 function normalizeWorkMatchOutput(value) {
   const raw = structuredClone(value), changes = [];
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    // Actual transport identity and usage are owned by configuration and HTTP telemetry.
+    for (const key of ['provider', 'model', 'usage']) {
+      if (Object.hasOwn(raw, key)) {
+        delete raw[key];
+        changes.push({ field: key, reason: 'generated transport metadata; no decision field changed' });
+      }
+    }
     for (const [key, empty] of [['type', 'json_object'], ['contractRepair', null], ['decisionExplanationNote', '']]) {
       if (Object.hasOwn(raw, key) && raw[key] === empty) {
         delete raw[key];
