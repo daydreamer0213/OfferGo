@@ -12,7 +12,14 @@ const {
   acquireSiteScanLease,
   releaseSiteScanLease,
   createWorkflowRun,
-  transitionWorkflowRun
+  transitionWorkflowRun,
+  getSearchPlan,
+  getCandidateProfile,
+  getCandidateMatchingContext,
+  listMatchingResumeVersions,
+  listMatchingCards,
+  updateCandidateProfile,
+  createBatch
 } = require("../src/core/storage");
 const { matchingCardFromProfile } = require("../src/core/matching_card");
 const { createDashboardServer } = require("../src/dashboard/server");
@@ -32,6 +39,7 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return "today-d
   await assertPriorityPanelStaysCompactAtDesktopWidth();
   assertScanStatusLabels();
   fs.mkdirSync(smokeDir, { recursive: true });
+  await assertPlanRescoreKeepsCurrentBatchAnalysis();
   await assertBrowserReadsAreSerialized();
   const db = openDb(dbPath);
   const privateFileNameContacts = ["13876543210", "上海市浦东新区今日页路66号"];
@@ -127,6 +135,95 @@ function assertDualPlatformActionRendering() {
   assert.match(html, /data-platform-selector/);
   assert.doesNotMatch(html, /dual-platform-start/);
   assert.doesNotMatch(html, />同时运行 BOSS \+ 智联<\/button>/);
+}
+
+async function assertPlanRescoreKeepsCurrentBatchAnalysis() {
+  const { loadConfigs } = require("../src/config");
+  const { profileToRuntimeConfigs } = require("../src/core/search_plan");
+  const { buildAnalysisRevision } = require("../src/core/analysis_revision");
+  const { saveModelTaskProfileParameters, resolveRuntimeModelConfig } = require("../src/core/model_settings");
+  const { upsertJob, listDecisionPool, sourceContentHash } = require("../src/storage/job_store");
+  const tempRoot = require("node:os").tmpdir();
+  const dataRoot = fs.mkdtempSync(path.join(tempRoot, "today-plan-rescore-"));
+  const db = openDb(":memory:");
+  const saved = seedProfile(db, { name: "Plan Rescore Candidate", confirmCard: true });
+  const fallbackModelConfig = loadConfigs(root).model;
+  saveModelTaskProfileParameters({ root: dataRoot, taskProfile: "batch_screening", fallbackModelConfig,
+    input: { preset: "deepseek", model: "deepseek-v4-flash", thinkingMode: "enabled", reasoningEffort: "high" } });
+  let runtimeResolutions = 0, foreignRequests = 0, baseUrl;
+  const nativeFetch = global.fetch;
+  global.fetch = (url, options) => {
+    assert(baseUrl && String(url).startsWith(baseUrl + "/"), "plan save must never request a model or recruitment platform");
+    return nativeFetch(url, options);
+  };
+  const server = createDashboardServer({ db, root, dataRoot, forceMock: false, allowOfflineMock: false, logger,
+    browserAuthority: { browserMode: "edge", cdpPort: null, profilePath: "" },
+    runtimeModelResolver: (input) => { runtimeResolutions += 1; return resolveRuntimeModelConfig(input); },
+    browserFactory: () => { foreignRequests += 1; throw Error("plan rescore must stay local"); },
+    spawnProcess: () => { foreignRequests += 1; throw Error("plan save must not start a model workflow"); } });
+  const job = { source: "zhaopin", sourceId: "today-native-plan-rescore", keyword: "RAG", title: "AI 应用开发工程师", company: "Fixture Company",
+    location: "上海", salary: "20-25K", experience: "1-3年", education: "本科", tags: ["1-3年", "本科"], qualityTags: [],
+    description: "负责企业知识库 RAG 检索、Python 后端接口和数据处理，完成需求分析、开发、测试和部署，持续跟进检索质量与服务稳定性。要求熟悉 Python、数据库和接口联调，能根据明确需求交付应用，与产品和测试协作定位实际问题，维护日志并完善回归检查。" };
+  let batchId, jobId;
+  function seedCurrentCompleteAnalysis() {
+    const context = getCandidateMatchingContext(db, saved.profileId, { includeResumeEvidence: true });
+    const plan = getSearchPlan(db, saved.planId);
+    const runtime = resolveRuntimeModelConfig({ root: dataRoot, taskProfile: "batch_screening", fallbackModelConfig, readOnly: true });
+    assert.equal(runtime.keyReadable, false, "local save must remain usable without a readable API key");
+    const configs = profileToRuntimeConfigs(loadConfigs(root), context.candidateProfile, plan.plan,
+      listMatchingResumeVersions(db, saved.profileId), context.matchingCard);
+    configs.model = runtime.modelConfig;
+    assert.notEqual(configs.model.provider, fallbackModelConfig.provider, "fixture runtime model must differ from the source-root mock model");
+    const analysis = { provider: configs.model.provider, model: configs.model.model, semanticMatchingMode: "whole_jd", semanticStatus: "complete",
+      decisionStatus: "decided", decisionSource: "model_work_match", recommendation: "apply", recommendationSchemaVersion: 2,
+      decisionExplanation: "已有 Python 和 RAG 项目证据支持这个岗位。", revision: buildAnalysisRevision(configs, sourceContentHash(job)) };
+    jobId = upsertJob(db, { ...job, analysis }, batchId);
+    return analysis;
+  }
+  const currentAnalysis = () => listDecisionPool(db, { planId: saved.planId }).find(row => row.id === jobId).analysis;
+  try {
+    baseUrl = await listen(server);
+    await savePlanAndAssertMode(baseUrl, db, saved, "generated");
+    batchId = createBatch(db, "zhaopin", "RAG", "today-plan-rescore", { profileId: saved.profileId, searchPlanId: saved.planId });
+    const originalAnalysis = seedCurrentCompleteAnalysis();
+    assert.equal(currentAnalysis().semanticStatus, "complete");
+    const unchangedPlan = getSearchPlan(db, saved.planId).plan;
+    await savePlanAndAssertMode(baseUrl, db, saved, "generated");
+    assert.deepEqual(getSearchPlan(db, saved.planId).plan, unchangedPlan, "resave must not change any screening condition");
+    assert.equal(currentAnalysis().semanticStatus, "complete", "unchanged native plan save must retain complete analysis from the actual batch model");
+    assert.deepEqual(currentAnalysis().revision, originalAnalysis.revision);
+
+    saveModelTaskProfileParameters({ root: dataRoot, taskProfile: "batch_screening", fallbackModelConfig,
+      input: { model: "deepseek-v4-pro", thinkingMode: "enabled", reasoningEffort: "high" } });
+    await savePlanAndAssertMode(baseUrl, db, saved, "generated");
+    assert.equal(currentAnalysis().semanticStatus, "stale");
+    assert.deepEqual(currentAnalysis().staleReasons, ["model_inference_changed"], "an actual batch model change must still invalidate the prior result");
+
+    seedCurrentCompleteAnalysis();
+    const changedProfile = structuredClone(getCandidateProfile(db, saved.profileId).profile);
+    changedProfile.projects[0].canSay = ["RAG 检索与接口测试"];
+    updateCandidateProfile(db, { profileId: saved.profileId, profile: changedProfile });
+    const draft = listMatchingCards(db, saved.profileId).find(card => card.status === "draft");
+    confirmMatchingCard(db, { profileId: saved.profileId, cardId: draft.id });
+    await savePlanAndAssertMode(baseUrl, db, saved, "generated");
+    assert.equal(currentAnalysis().semanticStatus, "stale");
+    assert.deepEqual(currentAnalysis().staleReasons, ["profile_changed"], "a confirmed change to real profile facts must still invalidate the prior result");
+
+    seedCurrentCompleteAnalysis();
+    createActiveWorkflow(db, saved);
+    const resolutionsBeforeDeferredSave = runtimeResolutions;
+    const analysisBeforeDeferredSave = currentAnalysis();
+    await savePlanAndAssertMode(baseUrl, db, saved, "generated");
+    assert.deepEqual(currentAnalysis(), analysisBeforeDeferredSave, "active workflow must continue to defer local rescore");
+    assert.equal(runtimeResolutions, resolutionsBeforeDeferredSave, "deferred plan save must not resolve a model unnecessarily");
+    assert.equal(foreignRequests, 0);
+  } finally {
+    global.fetch = nativeFetch;
+    if (server.listening) await close(server);
+    db.close();
+    assert(path.resolve(dataRoot).startsWith(path.resolve(tempRoot) + path.sep));
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
 }
 
 function assertEvaluationScriptExplainsMissingPlaywright() {

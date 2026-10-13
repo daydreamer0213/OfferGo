@@ -1686,7 +1686,7 @@ function createDashboardServer({
       if (req.method === "POST" && url.pathname === "/api/profile") return handleProfileSave(req, res, db, { logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/resume-version") return handleResumeVersionSave(req, res, { db, root, dataRoot, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
       if (req.method === "POST" && url.pathname === "/api/plan/recommend") return handlePlanRecommend(req, res, { db, modelConfig: getRuntimeModel("deep_analysis"), modelReady: modelReady("deep_analysis"), logger, requestId });
-      if (req.method === "POST" && url.pathname === "/api/plan") return handlePlanSave(req, res, db, { root, logger, requestId, rescore: planRescore });
+      if (req.method === "POST" && url.pathname === "/api/plan") return handlePlanSave(req, res, db, { root, getRuntimeModel, logger, requestId, rescore: planRescore });
       if (req.method === "POST" && ["/api/workflow-run", "/api/workflow-run/start"].includes(url.pathname)) {
         return workflowController.start(req, res, { requestId });
       }
@@ -2400,7 +2400,7 @@ function resumeVersionFromForm(fields) {
   };
 }
 
-async function handlePlanSave(req, res, db, { root, logger, requestId, rescore = rescorePlanObservations }) {
+async function handlePlanSave(req, res, db, { root, getRuntimeModel, logger, requestId, rescore = rescorePlanObservations }) {
   try {
     const params = parseBody(await readBody(req), req.headers["content-type"] || "");
     const profileId = Number(params.profileId);
@@ -2445,20 +2445,21 @@ async function handlePlanSave(req, res, db, { root, logger, requestId, rescore =
     const matchingContext = getCandidateMatchingContext(db, profileId);
     const planId = saveSearchPlan(db, { id: params.planId, profileId, profileVersionId: matchingContext?.profileVersionId || null, plan });
     const savedPlanRecord = getSearchPlan(db, planId);
-    const runtimeConfigs = profileToRuntimeConfigs(
-      loadConfigs(root),
-      matchingContext?.candidateProfile || profile.profile,
-      savedPlanRecord.plan,
-      listMatchingResumeVersions(db, profileId),
-      matchingContext?.matchingCard || null
-    );
     const activeWorkflow = getActiveWorkflowRun(db, {
       profileId: savedPlanRecord.profileId,
       planId: savedPlanRecord.id
     });
-    const rescoreResult = activeWorkflow
-      ? { rescored: 0, deferred: true }
-      : rescore(db, { planId, configs: runtimeConfigs });
+    let rescoreResult = { rescored: 0, deferred: true };
+    if (!activeWorkflow) {
+      const runtimeConfigs = profileToRuntimeConfigs(
+        { ...loadConfigs(root), model: getRuntimeModel("batch_screening") },
+        matchingContext?.candidateProfile || profile.profile,
+        savedPlanRecord.plan,
+        listMatchingResumeVersions(db, profileId),
+        matchingContext?.matchingCard || null
+      );
+      rescoreResult = rescore(db, { planId, configs: runtimeConfigs });
+    }
     logger.info("search_plan_saved", {
       requestId,
       profileId,
