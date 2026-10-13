@@ -19,6 +19,8 @@ const {
   countWorkflowJobTaskStatusesForRun,
   completedWorkflowAnalysisCount,
   claimWorkflowJobTask,
+  commitWorkflowJobTaskSuccess,
+  commitWorkflowJobTaskSkipped,
   commitWorkflowJobTaskFailure,
   listWorkflowJobTasks,
   listJobAnalysisAttempts
@@ -34,6 +36,7 @@ const {
 
 (async () => {
   try {
+  testWorkflowAnalysisCommitsPreserveSourceTime();
   testErrorKindConstants();
   testRetryableCodeMapping();
   testHttpStatusMapping();
@@ -80,6 +83,60 @@ const {
   process.exit(1);
 }
 })();
+
+function testWorkflowAnalysisCommitsPreserveSourceTime() {
+  const db = openDb(":memory:");
+  const jobStore = require("../src/storage/job_store");
+  const NativeDate = Date;
+  const observedAt = "2026-10-01T00:00:00.000Z";
+  const finishedAt = "2026-10-06T00:00:00.000Z";
+  let clock = observedAt;
+  global.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return NativeDate.parse(clock); }
+  };
+  try {
+    const checks = [];
+    for (const [index, outcome] of ["success", "skipped", "failure"].entries()) {
+      clock = observedAt;
+      const scenario = seedWorkflow(db, { analyses: [{ semanticStatus: "pending", decisionSource: "scan" }],
+        localDay: `2026-10-0${index + 1}`, modelConfigRevision: "source-time" });
+      const jobId = scenario.jobIds[0];
+      upsertJob(db, { ...jobStore.getJob(db, jobId), bossActiveText: "今日活跃", bossActiveDays: 0 }, scenario.batchId);
+      const entries = observationEntries(db, scenario.batchId);
+      initializeWorkflowJobTasks(db, { workflowRunId: scenario.workflowId, batchId: scenario.batchId,
+        jobs: entries, modelConfigRevision: "source-time", now: clock });
+      const identity = selectAttemptRuntime({ attemptInGeneration: 1, primaryRuntime: primaryRuntime(), backupRuntime: null }).identity;
+      const startedAt = "2026-10-05T23:59:00.000Z";
+      const claimed = claimWorkflowJobTask(db, { workflowRunId: scenario.workflowId, leaseOwner: "source-time-worker",
+        leaseTtlMs: 120_000, selectModelIdentity: () => identity, now: startedAt });
+      clock = finishedAt;
+      const resultJob = { ...claimed.job, analysis: { semanticStatus: "complete", recommendation: "primary", modelRecommendation: "caution",
+        recommendationSchemaVersion: 2, revision: { pipelineVersions: PIPELINE_VERSIONS } } };
+      const input = { taskId: claimed.task.id, leaseOwner: "source-time-worker", analyzedJob: resultJob,
+        modelIdentity: identity, startedAt, finishedAt };
+      if (outcome === "success") commitWorkflowJobTaskSuccess(db, input);
+      else if (outcome === "skipped") commitWorkflowJobTaskSkipped(db, { ...input, reasonCode: "LOCAL_RULES" });
+      else commitWorkflowJobTaskFailure(db, { ...input, errorCode: "MODEL_CONTRACT_INVALID", retryable: false, errorStage: "analyze" });
+      const observation = db.prepare("SELECT seen_at, analysis_json FROM job_observations WHERE id = ?").get(entries[0].observationId);
+      const pool = jobStore.listDecisionPool(db, { planId: scenario.planId })[0];
+      const single = jobStore.getJob(db, jobId);
+      checks.push({ outcome, actual: [observation.seen_at, pool.activityObservedAt, single.activityObservedAt, pool.effectiveBossActiveDays],
+        expected: [observedAt, observedAt, observedAt, 5] });
+      assert.equal(single.lastSeenAt, outcome === "failure" ? observedAt : finishedAt, "local processing timestamp remains available");
+      assert.equal(listJobAnalysisAttempts(db, { workflowRunId: scenario.workflowId, taskId: claimed.task.id })[0].finishedAt, finishedAt);
+      if (outcome !== "failure") {
+        assert.deepEqual(JSON.parse(observation.analysis_json), resultJob.analysis);
+        assert.equal(single.analysis.modelRecommendation, "caution");
+      }
+      jobStore.upsertScanCheckpointJob(db, { ...resultJob, detailRead: true }, scenario.batchId);
+      checks.push({ outcome: `${outcome}-real-checkpoint`, actual: [jobStore.listDecisionPool(db, { planId: scenario.planId })[0].activityObservedAt,
+        jobStore.getJob(db, jobId).activityObservedAt], expected: [finishedAt, finishedAt] });
+    }
+    console.log("workflow source observation checks", JSON.stringify(checks));
+    for (const check of checks) assert.deepEqual(check.actual, check.expected, check.outcome);
+  } finally { global.Date = NativeDate; db.close(); }
+}
 
 function testOldAnalysesBecomePending() {
   const db = openDb(':memory:');

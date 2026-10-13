@@ -303,7 +303,7 @@ function commitWorkflowJobTaskSuccess(db, {
     validateCommitIdentity(identity, attemptRow);
     validateStartedAtMatchesAttempt(started, attemptRow);
 
-    upsertJob(db, analyzedJob, Number(taskRow.batch_id));
+    upsertJob(db, analyzedJob, Number(taskRow.batch_id), { preserveObservationTime: true });
 
     const usage = normalizeTelemetry(telemetry);
     const latencyMs = latencyBetween(attemptRow.started_at, finished);
@@ -381,7 +381,7 @@ function commitWorkflowJobTaskSkipped(db, {
     if (analyzedJob) {
       requireAnalyzedJob(analyzedJob, "commitWorkflowJobTaskSkipped");
       validateAnalyzedJobIdentity(db, taskRow, analyzedJob, "commitWorkflowJobTaskSkipped");
-      upsertJob(db, analyzedJob, Number(taskRow.batch_id));
+      upsertJob(db, analyzedJob, Number(taskRow.batch_id), { preserveObservationTime: true });
     }
 
     finishJobAnalysisAttemptRow(db, {

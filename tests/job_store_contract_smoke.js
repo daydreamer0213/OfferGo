@@ -44,6 +44,7 @@ for (const name of CANDIDATE_EXPORTS.filter((name) => ![
 assert.strictEqual(warnings.filter((warning) => /circular/i.test(warning.message)).length, 0, "facade and direct stores must load without circular warnings");
 
 async function main() {
+activityObservationAnchorSmoke();
 const db = storage.openDb(":memory:");
 function observeExec(action) {
   const original = db.exec.bind(db);
@@ -225,6 +226,79 @@ try {
 } finally {
   db.close();
 }
+}
+
+function activityObservationAnchorSmoke() {
+  const db = storage.openDb(":memory:");
+  const NativeDate = Date;
+  let clock = "2026-10-01T00:00:00.000Z";
+  global.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return NativeDate.parse(clock); }
+  };
+  try {
+    const save = (name) => storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name, city: "Shanghai", targetTitles: ["PM"] }, skills: [], projects: [] },
+      document: { originalFileName: `${name}.txt`, format: "text", contentHash: name, text: "resume", diagnostics: {} },
+      searchPlan: { name, cities: ["Shanghai"], keywords: ["AI"] }
+    });
+    const owner = save("activity-owner");
+    const otherOwner = save("activity-other-owner");
+    const otherPlanId = candidateStore.saveSearchPlan(db, { profileId: owner.profileId, plan: { name: "activity-other-plan", cities: ["Shanghai"], keywords: ["AI"] } });
+    const analysis = { semanticStatus: "complete", recommendation: "primary", modelRecommendation: "caution", recommendationSchemaVersion: 2,
+      revision: { pipelineVersions: require("../src/core/analysis_revision").PIPELINE_VERSIONS } };
+    const fixture = { source: "boss", sourceId: "activity-anchor", title: "PM", company: "Anchor", location: "Shanghai", tags: [], matches: [],
+      description: "A complete job description. ".repeat(8), bossActiveText: "今日活跃", bossActiveDays: 0, analysis };
+    const observe = (keyword, at, job = fixture, binding = owner) => {
+      clock = at;
+      const batchId = storage.createBatch(db, "boss", keyword, keyword, { profileId: binding.profileId, searchPlanId: binding.planId });
+      const jobId = jobStore.upsertJob(db, job, batchId);
+      return { batchId, jobId };
+    };
+    const checks = [];
+    const inspect = (name, jobId, expectedAt, expectedDays, expectedLastSeenAt) => {
+      const pool = jobStore.listDecisionPool(db, { planId: owner.planId }).find((job) => job.id === jobId);
+      const report = jobStore.listReportJobs(db, { planId: owner.planId, profileId: owner.profileId, batch: "all" }).find((job) => job.id === jobId);
+      const single = jobStore.getJob(db, jobId);
+      checks.push({ name, actual: [pool.activityObservedAt, report.activityObservedAt, single.activityObservedAt, pool.effectiveBossActiveDays],
+        expected: [expectedAt, expectedAt, expectedAt, expectedDays] });
+      assert.strictEqual(pool.lastSeenAt, expectedLastSeenAt, "local observation time remains available");
+      assert.strictEqual(pool.analysis.recommendation, "primary");
+      assert.strictEqual(pool.analysis.modelRecommendation, "caution");
+      assert.deepStrictEqual(report.analysis, single.analysis);
+      if (expectedDays > 3 || expectedDays === null) checks.push({ name: `${name}-refresh`, actual: pool.decisionBucket, expected: "refresh" });
+    };
+    const live = observe("AI", clock);
+    const liveRow = db.prepare("SELECT * FROM job_observations WHERE batch_id = ?").get(live.batchId);
+    const retry = observe("analysis-retry", "2026-10-05T00:00:00.000Z");
+    clock = "2026-10-06T00:00:00.000Z";
+    inspect("local retry ages from original live source", live.jobId, liveRow.seen_at, 5, "2026-10-05T00:00:00.000Z");
+    observe("analysis-retry-bulk", "2026-10-05T12:00:00.000Z");
+    clock = "2026-10-06T00:00:00.000Z";
+    inspect("bulk retry ages from original live source", live.jobId, liveRow.seen_at, 5, "2026-10-05T12:00:00.000Z");
+    checks.push({ name: "bulk retry is not a new scan", actual: jobStore.listDecisionPool(db, { planId: owner.planId }).find((job) => job.id === live.jobId).latestScanBatchId, expected: live.batchId });
+    assert.deepStrictEqual(db.prepare("SELECT * FROM job_observations WHERE batch_id = ?").get(live.batchId), liveRow);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) AS count FROM job_observations WHERE job_id = ?").get(live.jobId).count, 3);
+    for (const [keyword, at] of [["detail-refresh", "2026-10-06T01:00:00.000Z"], ["activity-probe", "2026-10-06T02:00:00.000Z"], ["AI", "2026-10-06T03:00:00.000Z"]]) {
+      observe(keyword, at);
+      inspect(`${keyword} is a new real observation`, live.jobId, at, 0, at);
+    }
+    // A local snapshot must not borrow another plan/profile's date or a different displayed activity value.
+    observe("AI", "2026-10-06T04:00:00.000Z", fixture, { profileId: owner.profileId, planId: otherPlanId });
+    observe("AI", "2026-10-06T05:00:00.000Z", fixture, otherOwner);
+    observe("AI", "2026-10-06T06:00:00.000Z", { ...fixture, bossActiveText: "昨日活跃", bossActiveDays: 1 });
+    observe("analysis-retry", "2026-10-06T07:00:00.000Z");
+    inspect("retry keeps the displayed snapshot's own source", live.jobId, "2026-10-06T03:00:00.000Z", 0, "2026-10-06T07:00:00.000Z");
+    const historical = jobStore.listReportJobs(db, { batchId: retry.batchId })[0];
+    checks.push({ name: "historical retry does not borrow later live date", actual: historical.activityObservedAt, expected: liveRow.seen_at });
+    const unknown = observe("analysis-retry", "2026-10-06T08:00:00.000Z", { ...fixture, sourceId: "activity-unknown", company: "Unknown" });
+    inspect("analysis without a traceable live source is unknown", unknown.jobId, "", null, "2026-10-06T08:00:00.000Z");
+    console.log("activity observation anchor checks", JSON.stringify(checks));
+    for (const check of checks) assert.deepStrictEqual(check.actual, check.expected, check.name);
+  } finally {
+    global.Date = NativeDate;
+    db.close();
+  }
 }
 
 main().then(() => console.log("job_store_contract_smoke ok"), (error) => { console.error(error); process.exitCode = 1; });

@@ -145,8 +145,12 @@ function upsertKeywordSource(db, keyword, source = "cli") {
   `).run(keyword, source, nowIso());
 }
 
-function upsertJob(db, job, batchId) {
+function upsertJob(db, job, batchId, { preserveObservationTime = false } = {}) {
   const existing = db.prepare("SELECT id, first_seen_at FROM jobs WHERE source = ? AND source_id = ?").get(job.source, job.sourceId);
+  const observation = preserveObservationTime && existing
+    ? db.prepare("SELECT seen_at FROM job_observations WHERE job_id = ? AND batch_id = ?").get(existing.id, batchId)
+    : null;
+  if (preserveObservationTime && !observation) throw storageError("JOB_OBSERVATION_REQUIRED", "本地分析提交缺少原岗位观察记录");
   const now = nowIso();
   const params = [
     job.keyword || null, job.title, job.company || null, job.clientCompany || null, job.location || null, job.salary || null,
@@ -161,7 +165,7 @@ function upsertJob(db, job, batchId) {
       boss_active_text=?, boss_active_days=?, url=?, tags_json=?, description=?, score=?, level=?,
       matches_json=?, risks_json=?, quality_tags_json=?, greeting=?, analysis_json=?, last_seen_at=?, batch_id=? WHERE id=?
     `).run(...params, existing.id);
-    if (batchId) recordJobObservation(db, existing.id, batchId, job, now);
+    if (batchId) recordJobObservation(db, existing.id, batchId, job, preserveObservationTime ? observation.seen_at : now);
     return Number(existing.id);
   }
   const result = db.prepare(`
@@ -209,8 +213,25 @@ function upsertScanCheckpointJob(db, incoming, batchId) {
 }
 
 function getJob(db, jobId) {
-  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(Number(jobId));
+  const row = db.prepare(`SELECT jobs.*, ${activityObservedAtSql("jobs", "o.seen_at")} AS activity_observed_at
+    FROM jobs LEFT JOIN batches b ON b.id = jobs.batch_id
+    LEFT JOIN job_observations o ON o.job_id = jobs.id AND o.batch_id = jobs.batch_id
+    WHERE jobs.id = ?`).get(Number(jobId));
   return row ? rowToJob(row) : null;
+}
+
+function activityObservedAtSql(snapshot, seenAt) {
+  // Analysis retries retain a source snapshot; their local record time is not a new platform read.
+  return `CASE WHEN b.id IS NULL THEN NULL
+    WHEN COALESCE(b.keyword, '') IN ('analysis-retry', 'analysis-retry-bulk') THEN (
+      SELECT o2.seen_at FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id
+      WHERE o2.job_id = jobs.id
+        AND b2.profile_id IS b.profile_id AND b2.search_plan_id IS b.search_plan_id
+        AND o2.boss_active_text IS ${snapshot}.boss_active_text AND o2.boss_active_days IS ${snapshot}.boss_active_days
+        AND o2.seen_at <= ${seenAt}
+        AND COALESCE(b2.keyword, '') NOT IN ('analysis-retry', 'analysis-retry-bulk')
+      ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1
+    ) ELSE ${seenAt} END`;
 }
 
 function getJobIdentity(db, jobId) {
@@ -393,10 +414,11 @@ function listReportJobs(db, options = {}) {
       o.keyword, o.title, o.company, o.client_company, o.location, o.salary, o.experience, o.education,
       o.boss_active_text, o.boss_active_days, o.url, o.tags_json, o.description, o.score, o.level,
       o.matches_json, o.risks_json, o.quality_tags_json, o.greeting, o.analysis_json,
+      ${activityObservedAtSql("o", "o.seen_at")} AS activity_observed_at,
       (SELECT MIN(o2.seen_at) FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id${scopedObservation}) AS first_seen_at,
       (SELECT MAX(o2.seen_at) FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id${scopedObservation}) AS last_seen_at,
       (SELECT o2.batch_id FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id${scopedObservation} ORDER BY o2.seen_at ASC, o2.id ASC LIMIT 1) AS first_batch_id,
-      (SELECT o2.batch_id FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id${scopedObservation} AND COALESCE(b2.keyword, '') NOT IN ('detail-refresh', 'activity-probe', 'analysis-retry') ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1) AS latest_scan_batch_id,
+      (SELECT o2.batch_id FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id${scopedObservation} AND COALESCE(b2.keyword, '') NOT IN ('detail-refresh', 'activity-probe', 'analysis-retry', 'analysis-retry-bulk') ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1) AS latest_scan_batch_id,
       (SELECT o2.content_hash FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id WHERE o2.job_id = jobs.id AND o2.id <> o.id${scopedObservation} ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1) AS previous_content_hash,
       (SELECT result FROM job_refresh_attempts ra WHERE ra.job_id = jobs.id ORDER BY ra.created_at DESC, ra.id DESC LIMIT 1) AS refresh_result,
       (SELECT error_code FROM job_refresh_attempts ra WHERE ra.job_id = jobs.id ORDER BY ra.created_at DESC, ra.id DESC LIMIT 1) AS refresh_error_code,
@@ -729,6 +751,7 @@ function rowToJob(row) {
     url: row.url, tags: JSON.parse(row.tags_json || "[]"), description: row.description, score: row.score, level: row.level,
     matches: JSON.parse(row.matches_json || "[]"), risks: JSON.parse(row.risks_json || "[]"), qualityTags: parseJson(row.quality_tags_json, []),
     greeting: row.greeting, analysis, firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at,
+    activityObservedAt: row.activity_observed_at === undefined ? undefined : row.activity_observed_at || "",
     firstBatchId: Number(row.first_batch_id || 0) || null, latestScanBatchId: Number(row.latest_scan_batch_id || 0) || null,
     previousContentHash: row.previous_content_hash || "", refreshResult: row.refresh_result || "", refreshErrorCode: row.refresh_error_code || "",
     refreshAttemptNumber: Number(row.refresh_attempt_number || 0), refreshNextRetryAt: row.refresh_next_retry_at || "", refreshAttemptedAt: row.refresh_attempted_at || "",
@@ -757,14 +780,15 @@ function applyJobQualityGovernance(jobs, options = {}) {
     if (duplicates.length > 1 && !qualityTags.includes("possible_duplicate")) qualityTags.push("possible_duplicate");
     const changed = Boolean(job.previousContentHash && job.previousContentHash !== observationContentHash(job));
     if (changed && !qualityTags.includes("detail_changed")) qualityTags.push("detail_changed");
-    const seenAt = Date.parse(job.lastSeenAt || "");
+    const activityObservedAt = job.activityObservedAt ?? job.lastSeenAt ?? "";
+    const seenAt = Date.parse(activityObservedAt);
     const daysSinceLastSeen = Number.isFinite(seenAt) ? Math.floor((now - seenAt) / (24 * 60 * 60 * 1000)) : null;
     const hasActivitySnapshot = job.bossActiveDays !== null && job.bossActiveDays !== undefined && job.bossActiveDays !== "" && Number.isFinite(Number(job.bossActiveDays));
-    const effectiveBossActiveDays = hasActivitySnapshot && daysSinceLastSeen !== null ? Math.max(0, Number(job.bossActiveDays) + Math.max(0, daysSinceLastSeen)) : (hasActivitySnapshot ? Number(job.bossActiveDays) : null);
+    const effectiveBossActiveDays = hasActivitySnapshot && daysSinceLastSeen !== null ? Math.max(0, Number(job.bossActiveDays) + Math.max(0, daysSinceLastSeen)) : null;
     if (hasActivitySnapshot && daysSinceLastSeen > 0 && !qualityTags.includes("activity_snapshot_aged")) qualityTags.push("activity_snapshot_aged");
-    if (effectiveBossActiveDays !== null && effectiveBossActiveDays > maxActiveDays && !qualityTags.includes("stale_or_unknown_active")) qualityTags.push("stale_or_unknown_active");
+    if (hasActivitySnapshot && (effectiveBossActiveDays === null || effectiveBossActiveDays > maxActiveDays) && !qualityTags.includes("stale_or_unknown_active")) qualityTags.push("stale_or_unknown_active");
     if (daysSinceLastSeen !== null && daysSinceLastSeen >= 14 && !qualityTags.includes("needs_recheck")) qualityTags.push("needs_recheck");
-    const enriched = { ...job, qualityTags, weakDuplicateCount: duplicates.length, detailChanged: changed, daysSinceLastSeen, activityObservedAt: hasActivitySnapshot ? job.lastSeenAt : "", effectiveBossActiveDays };
+    const enriched = { ...job, qualityTags, weakDuplicateCount: duplicates.length, detailChanged: changed, daysSinceLastSeen, activityObservedAt: hasActivitySnapshot ? activityObservedAt : "", effectiveBossActiveDays };
     return { ...enriched, decisionBucket: decisionBucket(enriched) };
   });
 }
