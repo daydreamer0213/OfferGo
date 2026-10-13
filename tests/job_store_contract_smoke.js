@@ -45,6 +45,7 @@ assert.strictEqual(warnings.filter((warning) => /circular/i.test(warning.message
 
 async function main() {
 activityObservationAnchorSmoke();
+wholeJdPriorityMetadataSmoke();
 const db = storage.openDb(":memory:");
 function observeExec(action) {
   const original = db.exec.bind(db);
@@ -226,6 +227,105 @@ try {
 } finally {
   db.close();
 }
+}
+
+function wholeJdPriorityMetadataSmoke() {
+  const db = storage.openDb(":memory:");
+  const NativeDate = Date;
+  let clock = "2026-10-14T08:00:00.000Z";
+  global.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return NativeDate.parse(clock); }
+  };
+  try {
+    const owner = storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name: "Priority Contract", city: "Shanghai", targetTitles: ["PM"] }, skills: [], projects: [] },
+      document: { originalFileName: "priority.txt", format: "text", contentHash: "priority-v1", text: "resume", diagnostics: {} },
+      searchPlan: { name: "priority", cities: ["Shanghai"], keywords: ["AI"] }
+    });
+    const analysis = { semanticMatchingMode: "whole_jd", semanticStatus: "complete", decisionStatus: "decided",
+      decisionSource: "model_work_match", recommendation: "apply", recommendationSchemaVersion: 2,
+      revision: { semanticMatchingMode: "whole_jd", pipelineVersions: require("../src/core/analysis_revision").PIPELINE_VERSIONS } };
+    const base = { source: "boss", title: "PM", location: "Shanghai", tags: [], matches: [], qualityTags: [], risks: [],
+      description: "Complete duties and requirements for this PM opportunity. ".repeat(4),
+      bossActiveText: "今日活跃", bossActiveDays: 0, analysis };
+    const observe = (job, at, keyword = "AI") => {
+      clock = at;
+      const batchId = storage.createBatch(db, job.source, keyword, keyword, { profileId: owner.profileId, searchPlanId: owner.planId });
+      return jobStore.upsertJob(db, { ...job, url: `https://example.test/jobs/${job.sourceId}` }, batchId);
+    };
+    const checks = [];
+    const inspectOrder = (name, ids, expected) => {
+      clock = "2026-10-14T15:00:00.000Z";
+      const pool = jobStore.listDecisionPool(db, { planId: owner.planId }).filter(job => ids.includes(job.id));
+      const report = jobStore.listReportJobs(db, { planId: owner.planId, profileId: owner.profileId, batch: "all" }).filter(job => ids.includes(job.id));
+      assert.strictEqual(pool.length, ids.length, `${name}: all fixtures remain visible`);
+      checks.push({ name, actual: pool.map(job => job.sourceId), report: report.map(job => job.sourceId), expected });
+      return pool;
+    };
+    const pair = (name, patch, cleanFirst = false, common = {}) => {
+      const clean = { ...base, ...common, sourceId: `${name}-clean`, company: `${name}-clean` };
+      const reminded = { ...base, ...common, ...patch, sourceId: `${name}-reminded`, company: `${name}-reminded` };
+      const ids = [observe(clean, "2026-10-14T09:00:00.000Z"), observe(reminded, "2026-10-14T10:00:00.000Z")];
+      const rawBefore = db.prepare("SELECT analysis_json, risks_json, quality_tags_json FROM job_observations WHERE job_id IN (?,?) ORDER BY job_id").all(...ids);
+      const projected = inspectOrder(name, ids, cleanFirst ? [clean.sourceId, reminded.sourceId] : [reminded.sourceId, clean.sourceId]);
+      const savedReminder = jobStore.getJob(db, ids[1]);
+      assert.deepStrictEqual(savedReminder.risks, reminded.risks, `${name}: reminders remain saved`);
+      assert.deepStrictEqual(projected.find(job => job.id === ids[1]).risks, reminded.risks, `${name}: reminders remain projected`);
+      for (const tag of reminded.qualityTags) assert(savedReminder.qualityTags.includes(tag), `${name}: tags remain saved`);
+      assert.deepStrictEqual(db.prepare("SELECT analysis_json, risks_json, quality_tags_json FROM job_observations WHERE job_id IN (?,?) ORDER BY job_id").all(...ids), rawBefore);
+      return projected;
+    };
+    for (const [tag, risk] of [
+      ["experience_stretch", "经验范围可冲刺"], ["experience_stretch", "经验门槛偏高"],
+      ["experience_unverified", "经验待确认"], ["experience_overrange", "经验门槛明显偏高"],
+      ["experience_out_of_scope", "经验不在当前选择范围"]
+    ]) pair(`${tag}-${risk}`, { qualityTags: [tag], risks: [risk] });
+    for (const tag of ["experience_stretch", "experience_unverified"]) pair(`${tag}-tag-only`, { qualityTags: [tag] });
+    pair("unpaired-reminder", { risks: ["经验范围可冲刺"] }, true);
+    pair("wrong-tag-reminder", { qualityTags: ["experience_stretch"], risks: ["经验待确认"] }, true);
+    pair("mixed-salary-experience", { qualityTags: ["experience_stretch"], risks: ["经验门槛偏高，薪资明显超出偏好"] }, true);
+    pair("unknown-experience-risk", { qualityTags: ["experience_stretch"], risks: ["可能需要补充项目交付经验"] }, true);
+    pair("salary-preference", { qualityTags: ["experience_stretch", "salary_target_high"], risks: ["经验范围可冲刺"] }, true);
+    pair("salary-unverified", { qualityTags: ["experience_stretch", "salary_preference_unverified"], risks: ["经验范围可冲刺"] }, true);
+    pair("safety-risk", { qualityTags: ["experience_stretch", "low_value_risk"], risks: ["经验范围可冲刺", "存在收费风险"] }, true);
+    pair("work-schedule", { qualityTags: ["experience_stretch", "work_schedule_single"], risks: ["经验范围可冲刺"] }, true);
+    for (const [name, patch] of [
+      ["legacy-mode", { semanticMatchingMode: "layered" }], ["partial", { semanticStatus: "partial" }],
+      ["stale", { semanticStatus: "stale" }], ["undecided", { decisionStatus: "needs_retry" }],
+      ["rule-source", { decisionSource: "rule_gate" }], ["invalid-tier", { recommendation: "invalid" }],
+      ["old-pipeline", { revision: { ...analysis.revision, pipelineVersions: { ...analysis.revision.pipelineVersions, selectJob: "old" } } }]
+    ]) pair(name, { qualityTags: ["experience_stretch"], risks: ["经验范围可冲刺"] }, true, { analysis: { ...analysis, ...patch } });
+    pair("incomplete-jd", { qualityTags: ["experience_stretch"], risks: ["经验范围可冲刺"] }, true, { description: "short JD" });
+    for (const tier of ["primary", "caution", "not_recommended"]) {
+      const projected = pair(`tier-${tier}`, { qualityTags: ["experience_stretch"], risks: ["经验范围可冲刺"] }, false, { analysis: { ...analysis, recommendation: tier } });
+      assert(projected.every(job => job.analysis.recommendation === tier && job.decisionBucket === tier), "sorting does not change the final tier");
+    }
+    const oldLive = { ...base, sourceId: "date-old-live", company: "Date Old" }, newLive = { ...base, sourceId: "date-new-live", company: "Date New" };
+    observe(oldLive, "2026-10-14T08:00:00.000Z");
+    const oldId = observe(oldLive, "2026-10-14T09:00:00.000Z");
+    observe(newLive, "2026-10-14T08:00:00.000Z");
+    const newId = observe(newLive, "2026-10-14T10:00:00.000Z");
+    observe(newLive, "2026-10-14T13:00:00.000Z", "analysis-retry-bulk");
+    observe(oldLive, "2026-10-14T14:00:00.000Z", "analysis-retry");
+    const dates = inspectOrder("real source wins over later local retry", [oldId, newId], [newLive.sourceId, oldLive.sourceId]);
+    assert(dates.every(job => job.effectiveBossActiveDays === 0 && job.decisionBucket === "apply"));
+    assert.deepStrictEqual(dates[0].qualityTags, dates[1].qualityTags, "same duplicate metadata keeps the date comparison isolated");
+    assert.strictEqual(dates.find(job => job.id === oldId).activityObservedAt, "2026-10-14T09:00:00.000Z");
+    assert.strictEqual(dates.find(job => job.id === newId).activityObservedAt, "2026-10-14T10:00:00.000Z");
+    assert.strictEqual(dates.find(job => job.id === oldId).lastSeenAt, "2026-10-14T14:00:00.000Z");
+    const zlOld = { ...base, source: "zhaopin", bossActiveText: "", bossActiveDays: null, sourceId: "zl-date-old", company: "ZL Old" };
+    const zlNew = { ...zlOld, sourceId: "zl-date-new", company: "ZL New" };
+    inspectOrder("zhaopin retains local date compatibility", [observe(zlOld, "2026-10-14T09:00:00.000Z"), observe(zlNew, "2026-10-14T10:00:00.000Z")], [zlNew.sourceId, zlOld.sourceId]);
+    console.log("whole JD priority metadata checks", JSON.stringify(checks));
+    for (const check of checks) {
+      assert.deepStrictEqual(check.actual, check.expected, check.name);
+      assert.deepStrictEqual(check.report, check.expected, `${check.name}: report shares the order`);
+    }
+  } finally {
+    global.Date = NativeDate;
+    db.close();
+  }
 }
 
 function activityObservationAnchorSmoke() {

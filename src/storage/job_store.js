@@ -902,9 +902,35 @@ function compareReportJobs(a, b) {
     || workScheduleRank(a) - workScheduleRank(b)
     || (a.feedbackRank || 0) - (b.feedbackRank || 0)
     || qualityRank(a) - qualityRank(b)
-    || (a.risks || []).length - (b.risks || []).length
+    || priorityRiskCount(a) - priorityRiskCount(b)
     || activeRank(a.effectiveBossActiveDays ?? a.bossActiveDays) - activeRank(b.effectiveBossActiveDays ?? b.bossActiveDays)
-    || String(b.lastSeenAt || "").localeCompare(String(a.lastSeenAt || ""));
+    || priorityDate(b).localeCompare(priorityDate(a));
+}
+
+function hasFinalWholeJdDecision(job) {
+  const analysis = job.analysis || {};
+  return analysis.semanticMatchingMode === "whole_jd" && analysis.semanticStatus === "complete"
+    && analysis.decisionStatus === "decided" && analysis.decisionSource === "model_work_match"
+    && Boolean(recommendationTierForAnalysis(analysis)) && hasCompleteJobDescription(job);
+}
+
+function priorityRiskCount(job) {
+  const risks = job.risks || [];
+  if (!Array.isArray(risks) || !hasFinalWholeJdDecision(job)) return risks.length;
+  const tags = new Set(job.qualityTags || []);
+  const reminders = [
+    ["experience_stretch", "经验范围可冲刺"], ["experience_stretch", "经验门槛偏高"],
+    ["experience_unverified", "经验待确认"], ["experience_overrange", "经验门槛明显偏高"],
+    ["experience_out_of_scope", "经验不在当前选择范围"]
+  ];
+  return risks.filter(risk => !reminders.some(([tag, text]) => tags.has(tag) && risk === text)).length;
+}
+
+function priorityDate(job) {
+  // A per-job key keeps mixed-source comparisons consistent. Explicitly unknown
+  // BOSS source dates stay empty; old objects without the field retain compatibility.
+  return String(job.source === "boss" && hasFinalWholeJdDecision(job) && job.activityObservedAt !== undefined
+    ? job.activityObservedAt || "" : job.lastSeenAt || "");
 }
 
 function salaryPreferenceRank(job) {
@@ -922,6 +948,7 @@ function activeRank(days) { return days === null || days === undefined ? 99 : Nu
 
 function qualityRank(job) {
   const tags = new Set(job.qualityTags || []);
+  const finalWholeJd = hasFinalWholeJdDecision(job);
   let value = 0;
   if (tags.has("low_value_risk")) value += 20;
   if (tags.has("location_mismatch")) value += 12;
@@ -931,9 +958,9 @@ function qualityRank(job) {
   if (tags.has("needs_recheck")) value += 8;
   if (tags.has("possible_duplicate")) value += 6;
   if (tags.has("duplicate_seen")) value += 2;
-  if (tags.has("experience_stretch")) value += 1;
+  if (!finalWholeJd && tags.has("experience_stretch")) value += 1;
   if (tags.has("salary_preference_unverified")) value += 2;
-  if (tags.has("experience_unverified")) value += 2;
+  if (!finalWholeJd && tags.has("experience_unverified")) value += 2;
   if (tags.has("core_stack_mismatch")) value += 12;
   if (tags.has("java_backend_heavy")) value += 6;
   if (tags.has("senior_engineering_heavy")) value += 6;
