@@ -293,6 +293,35 @@ function activityObservationAnchorSmoke() {
     checks.push({ name: "historical retry does not borrow later live date", actual: historical.activityObservedAt, expected: liveRow.seen_at });
     const unknown = observe("analysis-retry", "2026-10-06T08:00:00.000Z", { ...fixture, sourceId: "activity-unknown", company: "Unknown" });
     inspect("analysis without a traceable live source is unknown", unknown.jobId, "", null, "2026-10-06T08:00:00.000Z");
+    const derivedSourceAt = "2026-10-01T00:00:00.000Z", derivedRetryAt = "2026-10-05T00:00:00.000Z";
+    for (const [name, keyword, sourceText, sourceDays, retryText, retryDays, expectedAt] of [
+      ["single retry derives source text days", "analysis-retry", "今日活跃", null, "今日活跃", 0, derivedSourceAt],
+      ["bulk retry derives source text days", "analysis-retry-bulk", "今日活跃", null, "今日活跃", 0, derivedSourceAt],
+      ["unknown source text cannot supply days", "analysis-retry", "近期活跃", null, "近期活跃", 0, ""],
+      ["explicit conflicting source days stay isolated", "analysis-retry", "今日活跃", 1, "今日活跃", 0, ""],
+      ["derived conflicting source days stay isolated", "analysis-retry", "昨日活跃", null, "昨日活跃", 0, ""],
+      ["invalid current days stay unknown", "analysis-retry", "今日活跃", null, "今日活跃", -1, ""],
+      ["changed activity text stays isolated", "analysis-retry", "昨日活跃", null, "今日活跃", 0, ""]
+    ]) {
+      const sourceJob = { ...fixture, sourceId: name, company: name, bossActiveText: sourceText, bossActiveDays: sourceDays };
+      const source = observe("AI", derivedSourceAt, sourceJob);
+      const original = db.prepare("SELECT * FROM job_observations WHERE batch_id = ?").get(source.batchId);
+      observe(keyword, derivedRetryAt, { ...sourceJob, bossActiveText: retryText, bossActiveDays: retryDays });
+      clock = "2026-10-06T00:00:00.000Z";
+      inspect(name, source.jobId, expectedAt, expectedAt ? 5 : null, derivedRetryAt);
+      assert.deepStrictEqual(db.prepare("SELECT * FROM job_observations WHERE batch_id = ?").get(source.batchId), original);
+    }
+    const strictJob = { ...fixture, sourceId: "strict-source-survives", company: "Strict", bossActiveText: "未说明", bossActiveDays: 1 };
+    const strictSource = observe("AI", derivedSourceAt, strictJob);
+    observe("AI", "2026-10-02T00:00:00.000Z", { ...strictJob, bossActiveDays: null });
+    observe("analysis-retry", derivedRetryAt, strictJob);
+    clock = "2026-10-06T00:00:00.000Z";
+    inspect("a later incompatible null source does not hide an earlier strict source", strictSource.jobId, derivedSourceAt, 6, derivedRetryAt);
+    const nullJob = { ...fixture, sourceId: "strict-null-source", company: "Strict Null", bossActiveText: "未说明", bossActiveDays: null };
+    const nullSource = observe("AI", derivedSourceAt, nullJob);
+    observe("analysis-retry", derivedRetryAt, nullJob);
+    checks.push({ name: "strict null equality retains the actual source date", actual: jobStore.getJob(db, nullSource.jobId).activityObservedAt, expected: derivedSourceAt });
+    assert.strictEqual(jobStore.listDecisionPool(db, { planId: owner.planId }).find(job => job.id === nullSource.jobId).effectiveBossActiveDays, null);
     console.log("activity observation anchor checks", JSON.stringify(checks));
     for (const check of checks) assert.deepStrictEqual(check.actual, check.expected, check.name);
   } finally {

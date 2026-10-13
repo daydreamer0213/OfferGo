@@ -105,9 +105,13 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
       const technicalError = 'understandJob 模型输出不符合契约：riskSignals.evidence evidence 必须以 JD：开头';
       const saved = [];
       for (const site of ['boss', 'zhaopin']) {
+        const sourceJob = { source: site, sourceId: 'failed-'+site, title: '待分析工程师', company: '模拟公司',
+          location: '广州', salary: '12-18K', description: '负责订单接口开发，参与联调和测试。', bossActiveDays: 1 };
+        const sourceBatch = storage.createBatch(db, site, 'audit', '测试采集', { profileId: owner.profileId, searchPlanId: owner.planId });
+        storage.upsertJob(db, { ...sourceJob,
+          analysis: { semanticStatus: 'pending', decisionSource: 'analysis_pending', revision: { pipelineVersions: PIPELINE_VERSIONS } } }, sourceBatch);
         const batch = storage.createBatch(db, site, 'analysis-retry', '失败分析', { profileId: owner.profileId, searchPlanId: owner.planId });
-        const id = storage.upsertJob(db, { source: site, sourceId: 'failed-'+site, title: '待分析工程师', company: '模拟公司',
-          location: '广州', salary: '12-18K', description: '负责订单接口开发，参与联调和测试。', bossActiveDays: 1,
+        const id = storage.upsertJob(db, { ...sourceJob,
           analysis: { semanticStatus: 'failed', errorCode: 'MODEL_CONTRACT_INVALID', error: technicalError,
             decisionSource: 'analysis_pending', revision: { pipelineVersions: PIPELINE_VERSIONS } } }, batch);
         saved.push(id);

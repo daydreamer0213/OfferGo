@@ -2,7 +2,7 @@ const crypto = require("node:crypto");
 const { getSearchPlan } = require("./candidate_store");
 const { ensureFunnelEntry } = require("./funnel_store");
 const { nowIso, parseJson, OUTCOME_STATUSES, storageError, optionalPositiveInteger, immediateTransaction } = require("./storage_shared");
-const { scoreJob, decisionState } = require("../core/scoring");
+const { scoreJob, decisionState, activeDays } = require("../core/scoring");
 const { parseBossActivityText } = require("../core/activity_status");
 const { mergeJobMetadata } = require("../core/job_metadata");
 const { NEGATIVE_FEEDBACK_STATUSES, normalizeFeedbackReason } = require("../core/feedback");
@@ -222,16 +222,32 @@ function getJob(db, jobId) {
 
 function activityObservedAtSql(snapshot, seenAt) {
   // Analysis retries retain a source snapshot; their local record time is not a new platform read.
-  return `CASE WHEN b.id IS NULL THEN NULL
-    WHEN COALESCE(b.keyword, '') IN ('analysis-retry', 'analysis-retry-bulk') THEN (
-      SELECT o2.seen_at FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id
+  const latestSource = (daysCondition) => `(SELECT o2.seen_at FROM job_observations o2 JOIN batches b2 ON b2.id = o2.batch_id
       WHERE o2.job_id = jobs.id
         AND b2.profile_id IS b.profile_id AND b2.search_plan_id IS b.search_plan_id
-        AND o2.boss_active_text IS ${snapshot}.boss_active_text AND o2.boss_active_days IS ${snapshot}.boss_active_days
+        AND o2.boss_active_text IS ${snapshot}.boss_active_text AND ${daysCondition}
         AND o2.seen_at <= ${seenAt}
         AND COALESCE(b2.keyword, '') NOT IN ('analysis-retry', 'analysis-retry-bulk')
-      ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1
+      ORDER BY o2.seen_at DESC, o2.id DESC LIMIT 1)`;
+  return `CASE WHEN b.id IS NULL THEN NULL
+    WHEN COALESCE(b.keyword, '') IN ('analysis-retry', 'analysis-retry-bulk') THEN json_object(
+      'strictAt', ${latestSource(`o2.boss_active_days IS ${snapshot}.boss_active_days`)},
+      'derivedAt', ${latestSource('o2.boss_active_days IS NULL')}
     ) ELSE ${seenAt} END`;
+}
+
+function activityObservedAtFromRow(row) {
+  if (row.activity_observed_at === undefined) return undefined;
+  const candidates = parseJson(row.activity_observed_at, null);
+  if (!candidates || typeof candidates !== "object") return row.activity_observed_at || "";
+  let observedAt = candidates.strictAt || "";
+  // A source may retain only activity text before native scoring derives its numeric days.
+  const days = row.boss_active_days;
+  if (Number.isFinite(days) && days >= 0 && activeDays(row.boss_active_text) === days) {
+    const derivedAt = candidates.derivedAt || "";
+    if (derivedAt > observedAt) observedAt = derivedAt;
+  }
+  return observedAt;
 }
 
 function getJobIdentity(db, jobId) {
@@ -751,7 +767,7 @@ function rowToJob(row) {
     url: row.url, tags: JSON.parse(row.tags_json || "[]"), description: row.description, score: row.score, level: row.level,
     matches: JSON.parse(row.matches_json || "[]"), risks: JSON.parse(row.risks_json || "[]"), qualityTags: parseJson(row.quality_tags_json, []),
     greeting: row.greeting, analysis, firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at,
-    activityObservedAt: row.activity_observed_at === undefined ? undefined : row.activity_observed_at || "",
+    activityObservedAt: activityObservedAtFromRow(row),
     firstBatchId: Number(row.first_batch_id || 0) || null, latestScanBatchId: Number(row.latest_scan_batch_id || 0) || null,
     previousContentHash: row.previous_content_hash || "", refreshResult: row.refresh_result || "", refreshErrorCode: row.refresh_error_code || "",
     refreshAttemptNumber: Number(row.refresh_attempt_number || 0), refreshNextRetryAt: row.refresh_next_retry_at || "", refreshAttemptedAt: row.refresh_attempted_at || "",
