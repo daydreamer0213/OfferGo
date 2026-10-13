@@ -186,7 +186,7 @@ function jobNarrativeUiSmoke({ profileId, planId }) {
   const main = completeArticle.slice(0, detailsStart);
   const details = completeArticle.slice(detailsStart);
   let previousIndex = -1;
-  for (const label of ["结论：", "岗位：", "公司与机会：", "匹配：", "薪资：", "需要确认："]) {
+  for (const label of ["结论：", "岗位：", "公司与机会：", "匹配：", "薪资：", '<div class="job-risk">']) {
     const index = main.indexOf(label);
     assert(index > previousIndex, `job main view must show ${label} in decision order`);
     previousIndex = index;
