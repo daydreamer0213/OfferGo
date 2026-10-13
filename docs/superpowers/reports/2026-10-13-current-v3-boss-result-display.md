@@ -37,4 +37,3 @@ BOSS 五词正式目标合并仍为 147 身份，其中 73 个历史完整身份
 显示修复首云端运行 [51d537a2](https://github.com/daydreamer0213/OfferGo/actions/runs/38330390719) 失败，完整日志需要账户登录，实际云端失败原因仍未核实，不能用本地第 191 项失败代替云端诊断。现已推送测试修正，新提交的 [准确 d839153f CI](https://github.com/daydreamer0213/OfferGo/actions/runs/38333618638) 已成功，官方任务与运行页均已核对，旧日志登录可暂缓。临时旧日志页已关闭，未修改认证资料或盲目重跑旧提交。
 
 私有证据目录：`D:/DevData/OfferGo-validation/2026-10-13/current-v3-operational-baseline-1791838935245/boss-current-quality-1791852353332`。包括完整输入输出、结构恢复、事前参考、人工判读、普通 Edge 画面、保护哈希、独立代码复核及准确源码检查记录；真实身份、公司、正文与账号材料不进入公开提交。
-
