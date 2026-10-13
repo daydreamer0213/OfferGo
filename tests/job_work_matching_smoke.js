@@ -180,7 +180,8 @@ async function testRealTransport() {
     assert.equal(JSON.parse(requests[1].messages[1].content).contractRepair.invalidResponseText, malformed,
       'Real parser error forwards the exact malformed response for the one recovery');
     assert(!JSON.stringify(events).includes(malformed), 'Raw candidate response must not enter diagnostic events');
-    assert.equal(requests[0].max_tokens, 4096);
+    assert.deepEqual(requests.map(request => request.max_tokens), [8192, 8192],
+      'A non-truncation parser repair uses the thinking-enabled initial capacity');
     assert.deepEqual(requests[0].thinking, { type: 'enabled' });
     assert.equal(requests[0].reasoning_effort, 'high');
     assert.equal(requests[0].temperature, undefined);
@@ -190,12 +191,32 @@ async function testRealTransport() {
     requests.length = 0;
     Object.assign(telemetry, createAttemptTelemetry());
     global.fetch = async (_url, options) => {
-      requests.push(JSON.parse(options.body));
-      return response(requests.length === 1 ? '' : JSON.stringify(good), requests.length === 1 ? 'length' : 'stop');
+      const request = JSON.parse(options.body);
+      requests.push(request);
+      return request.max_tokens > 8192
+        ? response(JSON.stringify(good))
+        : response('', 'length');
     };
     await adapter.selectJob(input);
-    assert.deepEqual(requests.map(request => request.max_tokens), [4096, 8192]);
+    assert.deepEqual(requests.map(request => request.max_tokens), [8192, 16384]);
+    assert.deepEqual(requests[1].messages, requests[0].messages,
+      'A truncation recovery must retain the exact original work-match materials');
+    assert.equal(requests.length, 2, 'A successful truncation recovery must not issue a third request');
     assert.equal(telemetry.modelCallCount, requests.length, 'A truncated response remains a counted request');
+
+    const disabledAdapter = new OpenAICompatibleAdapter({ baseUrl: 'https://api.deepseek.com', apiKey: 'fixture-key',
+      model: 'deepseek-v4-flash', thinkingMode: 'disabled', reasoningEffort: 'high', maxRetries: 3, maxTokens: 1700 });
+    requests.length = 0;
+    global.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      requests.push(request);
+      return response(requests.length === 1 ? '' : JSON.stringify(good), requests.length === 1 ? 'length' : 'stop');
+    };
+    await disabledAdapter.selectJob(input);
+    assert.deepEqual(requests.map(request => request.max_tokens), [4096, 8192],
+      'Thinking-disabled work matching retains the existing recovery limits');
+    assert.equal(requests.length, 2, 'Thinking-disabled recovery remains bounded to two requests');
+    assert.equal(disabledAdapter.maxRetries, 3, 'Operation-local limits do not change shared transport retries');
     requests.length = 0;
     Object.assign(telemetry, createAttemptTelemetry());
     global.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return response(malformed); };

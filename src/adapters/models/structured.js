@@ -294,7 +294,9 @@ class StructuredModelAdapter {
           const truncated = retryOf?.code === "MODEL_OUTPUT_TRUNCATED";
           try {
             return await this.chatJson(WORK_MATCH_PROMPT, payload, { kind: "selectJob", signal,
-              maxRetries: 0, maxTokens: truncated ? 8192 : 4096,
+              maxRetries: 0, maxTokens: this.thinkingMode === "enabled"
+                ? (truncated ? 16384 : 8192)
+                : (truncated ? 8192 : 4096),
               ...(truncated ? { timeoutMs: Math.min(300000, (this.transport.timeoutMs || 90000) * 2) } : {}),
               ...(retryOf?.code === "json_mode_unsupported" ? { jsonMode: false } : {}),
               allowJsonModeFallback: false });
