@@ -419,6 +419,7 @@ const PAGE_HELPERS = String.raw`
       || root;
     const activityText = decode(root.innerText || "");
     const onlineIcon = root.querySelector(".boss-online-icon, [class*='online-icon']");
+    const onlineLabel = decode(root.querySelector(".boss-online-tag")?.innerText || "").trim() === "在线";
     const metadata = (window.__bossJobMetadata || (() => ({})))(decode(header.innerText || ""));
     return {
       activeJobId,
@@ -428,7 +429,7 @@ const PAGE_HELPERS = String.raw`
       jobDetailLoading,
       title: decode(titleNode.innerText || "").split(/\n+/)[0].trim(),
       description: decode(descriptionNode.innerText || "").replace(/\s+/g, " ").slice(0, 12000),
-      bossActiveText: (window.__bossActivity || (() => ""))(activityText) || (onlineIcon ? "今日活跃" : ""),
+      bossActiveText: (window.__bossActivity || (() => ""))(activityText) || (onlineIcon || onlineLabel ? "今日活跃" : ""),
       ...metadata,
       hasRoot: true,
       canScroll: root.scrollHeight > root.clientHeight + 8,
