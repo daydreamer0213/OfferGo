@@ -555,10 +555,14 @@ async function assertCommunicationClient() {
   assert.match(plan.body, new RegExp(`/communication/new\\?planId=${fixture.planId}`));
   assert.match(queue.body, /批量沟通清单/);
   assert.match(queue.body, /薪资与目标贴合/);
+  const discoveryUtc = new Date();
+  discoveryUtc.setUTCDate(discoveryUtc.getUTCDate() - 1);
+  discoveryUtc.setUTCHours(23, 15, 25, 0);
+  const discoveryChinaDate = new Date(discoveryUtc.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
   db.prepare("UPDATE job_observations SET seen_at = ? WHERE job_id = ?")
-    .run("2026-10-09T23:15:25.000Z", fixture.eligibilityReviewId);
+    .run(discoveryUtc.toISOString(), fixture.eligibilityReviewId);
   const eligibilityQueue = await getText(baseUrl, `/queue?planId=${fixture.planId}&pool=primary`);
-  assert.match(eligibilityQueue.body, /首次 2026-10-10 07:15 · 最近 2026-10-10 07:15/,
+  assert.match(eligibilityQueue.body, new RegExp(`首次 ${discoveryChinaDate} 07:15 · 最近 ${discoveryChinaDate} 07:15`),
     "job discovery timestamps must show China local time, including midnight rollover");
   assert.match(eligibilityQueue.body, /资格条件待确认/);
   assert.doesNotMatch(eligibilityQueue.body, />eligibility_review</);
