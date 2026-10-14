@@ -57,7 +57,7 @@ async function main() {
     assert.match(lastInput.runtimeContext.analysisAsOfDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal((await analyze(job)).recommendation, 'primary');
     assert.equal(requests, 1, 'Canonical source-bound cache must be reused');
-    for (const priorVersion of ['whole-jd-work-v1-source-bound', 'whole-jd-work-v2-opportunity-bound']) {
+    for (const priorVersion of ['whole-jd-work-v1-source-bound', 'whole-jd-work-v2-opportunity-bound', 'whole-jd-work-v3-investment-facts']) {
       await testPriorWorkMethodRefresh(lastInput, result, priorVersion);
     }
 
