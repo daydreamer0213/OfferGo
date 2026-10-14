@@ -512,6 +512,23 @@ const offCityInJd = scoreJob(job({
 assert(offCityInJd.qualityTags.includes("location_mismatch"));
 assert.strictEqual(decisionState(offCityInJd), "blocked");
 
+const offCityInPlainJd = scoreJob(job({
+  location: "广州·番禺区",
+  description: "负责工业机器人与3D视觉应用技术。该职位工作地点在苏州。"
+}), configs);
+assert(offCityInPlainJd.qualityTags.includes("location_mismatch"), "明确工作地点在苏州，不能被广州卡片地址掩盖");
+assert(offCityInPlainJd.risks.includes("地点非目标城市：苏州"));
+assert.strictEqual(decisionState(offCityInPlainJd), "blocked");
+for (const description of [
+  "该职位工作地点在广州。",
+  "该职位工作地点在苏州/广州（可选）。",
+  "公司地址在苏州。负责广州客户的远程技术支持。"
+]) {
+  const allowedCity = scoreJob(job({ location: "广州", description }), configs);
+  assert(!allowedCity.qualityTags.includes("location_mismatch"), description);
+  assert.strictEqual(decisionState(allowedCity), "ready");
+}
+
 for (const cities of ["北京/杭州/上海/南京/成都/深圳/广州", "北京、上海、广州", "北京或广州", "北京/上海/广州市。", "北京/上海/广州（可选）。"]) {
   const selectableCity = scoreJob(job({
     location: "广州·海珠区",
