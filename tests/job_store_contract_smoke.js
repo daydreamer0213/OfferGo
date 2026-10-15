@@ -32,7 +32,7 @@ process.removeListener("warning", onWarning);
 
 assert.strictEqual(JOB_EXPORTS.length, 36);
 assert.strictEqual(CANDIDATE_EXPORTS.length, 32);
-assert.strictEqual(Object.keys(storage).length, 196);
+assert.strictEqual(Object.keys(storage).length, 201);
 assert.deepStrictEqual(Object.keys(jobStore).sort(), JOB_EXPORTS);
 assert.deepStrictEqual(Object.keys(candidateStore).sort(), CANDIDATE_EXPORTS);
 for (const name of JOB_EXPORTS.filter((name) => ![

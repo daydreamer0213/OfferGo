@@ -65,7 +65,7 @@ console.log("workflow_store_contract_smoke ok (5 owner contracts)");
 
 function contract01ExportsAndFacadeIdentity() {
   assert.deepEqual(Object.keys(workflowStore).sort(), WORKFLOW_EXPORTS);
-  assert.equal(Object.keys(storage).length, 196);
+  assert.equal(Object.keys(storage).length, 201);
   assert.equal(Object.keys(candidateStore).length, 32);
   assert.equal(Object.keys(jobStore).length, 36);
   assert.equal(Object.keys(scanStore).length, 39);
