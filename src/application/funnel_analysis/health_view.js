@@ -66,6 +66,9 @@ function buildPlatformFunnel(platform = {}) {
 }
 
 function buildDiagnosis(dashboard) {
+  const review = dashboard.feedbackReview?.primary;
+  if (review) return { title: review.title, detail: review.detail, priorityCheck: review.action,
+    siteLabel: PLATFORM_LABELS[review.site] || review.site, site: review.site, stage: '', reviewTarget: review.target };
   const advice = dashboard.advice;
   if (advice) {
     const site = String(advice.site || "");

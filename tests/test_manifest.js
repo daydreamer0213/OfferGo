@@ -1,4 +1,7 @@
 const all = Object.freeze([
+  "funnel_feedback_store_smoke.js",
+  "funnel_actionable_review_smoke.js",
+  "funnel_actionable_review_journey.js",
   "generation_operation_smoke.js",
   "message_learning_audit_regression.js",
   "dashboard_generation_audit_journey.js",
@@ -204,6 +207,8 @@ const all = Object.freeze([
 
 const groups = Object.freeze({
   fast: Object.freeze([
+  "funnel_feedback_store_smoke.js",
+  "funnel_actionable_review_smoke.js",
   "generation_operation_smoke.js",
   "message_learning_audit_regression.js",
   "candidate_evidence_smoke.js",
@@ -250,6 +255,7 @@ const groups = Object.freeze({
   "activity_status_smoke.js"
 ]),
   integration: Object.freeze([
+  "funnel_actionable_review_journey.js",
   "dashboard_learning_audit_journey.js",
   "dashboard_generation_audit_journey.js",
   "dashboard_audit_repairs_journey.js",

@@ -20,7 +20,7 @@ function renderFunnelPage({ plan = {}, dashboard = {}, view = 'current' } = {}) 
           <a href="${path}&amp;view=lifetime"${lifetime ? ' aria-current="true"' : ''}>累计记录</a>
         </nav><a class="feedback-message-link" href="/messages?planId=${planId}">查看消息</a></div>
         <p class="feedback-scope">${lifetime ? '所有方案的本地记录' : '从联系岗位到拿到 Offer，每一步都按已确认的信息统计。'}</p>
-        ${lifetime ? renderLifetimeFeedback(platforms) : renderCurrentHealth(health, dashboard.advice, planId)}
+        ${lifetime ? renderLifetimeFeedback(platforms) : renderCurrentHealth(health, dashboard.advice, planId, dashboard.feedbackReview)}
         ${!started ? `<p class="feedback-empty">${lifetime ? '还没有联系岗位。' : '当前方案还没有联系岗位。'}<a href="/plan?planId=${planId}">去发现岗位</a></p>` : ''}
       </section>
       ${renderIncomingContacts(dashboard.incomingContacts, planId)}
@@ -29,7 +29,7 @@ function renderFunnelPage({ plan = {}, dashboard = {}, view = 'current' } = {}) 
     </main>` });
 }
 
-function renderCurrentHealth(health, advice, planId) {
+function renderCurrentHealth(health, advice, planId, review = {}) {
   const overview = health.overview || {};
   const summaries = [
     ['联系岗位', overview.contacted],
@@ -39,11 +39,45 @@ function renderCurrentHealth(health, advice, planId) {
     ['完成面试', overview.interviewCompleted],
     ['收到 Offer', overview.offerReceived]
   ];
-  const destination = advice ? adviceDestination(advice, planId) : null;
+  const primary = review?.primary;
+  const destination = primary ? [
+    primary.target === 'interview' ? `/queue?planId=${planId}&site=${encodeURIComponent(primary.site)}&pool=interview`
+      : primary.target === 'resume' ? `/resume-optimization?planId=${planId}`
+        : feedbackMessageUrl(primary.evidence[0], primary.site, planId),
+    primary.target === 'interview' ? '查看面试与 Offer 记录' : primary.target === 'resume' ? '打开简历工作室' : '查看这条对话'
+  ] : advice ? adviceDestination(advice, planId) : null;
   return `<div class="health-summary" aria-label="求职进展概览">${summaries.map(([label, value]) => `<div><strong>${count(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('')}</div>
     <section class="health-diagnosis" aria-label="当前判断"><div><p class="section-label">${health.diagnosis?.siteLabel ? `${escapeHtml(health.diagnosis.siteLabel)} · ` : ''}现在最值得关注</p><h2>${escapeHtml(health.diagnosis?.title || '继续记录真实进展')}</h2><p>${escapeHtml(health.diagnosis?.detail || '')}</p>${health.diagnosis?.priorityCheck ? `<p>${escapeHtml(health.diagnosis.priorityCheck)}</p>` : ''}</div>${destination ? `<a href="${escapeAttr(destination[0])}">${escapeHtml(destination[1])}</a>` : ''}</section>
+    ${renderFeedbackReview(review, planId)}
     <div class="health-platforms">${(health.platformFunnels || []).map(renderHealthPlatform).join('')}</div>
     <p class="feedback-footnote">等待中的岗位还没有到判断时间；状态未知表示平台没有提供可靠信息，不会算作失败。${count(health.stale?.total) ? ` 另有 ${count(health.stale.total)} 个岗位超过 7 天没有新进展。` : ''}</p>`;
+}
+
+function feedbackMessageUrl(item = {}, site, planId) {
+  return `/messages?planId=${encodeURIComponent(planId)}&source=${encodeURIComponent(site)}&contact=${encodeURIComponent(item.contactKey || '')}&task=all`;
+}
+
+function renderFeedbackReview(review, planId) {
+  const topics = review?.topics || [];
+  return `<section class="feedback-review" data-feedback-review aria-labelledby="feedback-review-title">
+    <header><h2 id="feedback-review-title">根据实际反馈，先检查什么</h2><p class="hint">单条具体反馈也可以先处理。指标用来找检查方向，固定比例是内部提醒线，不是行业合格线。</p></header>
+    ${topics.length ? topics.map(topic => `<article class="feedback-review-topic" data-feedback-topic="${escapeAttr(topic.key)}">
+      <div class="feedback-review-topic-heading"><span>${escapeHtml(SITE_LABELS[topic.site] || topic.site)} · ${count(topic.jobCount)} 个岗位</span><h3>${escapeHtml(topic.title)}</h3></div>
+      <p>${escapeHtml(topic.action)}</p>
+      <details><summary>查看依据 · ${topic.evidence.some(item => item.quote) ? `${topic.evidence.filter(item => item.quote).length} 条 HR 消息` : '已记录进展'}</summary>
+        ${topic.evidence.map(item => `<section class="feedback-review-evidence"><h4>${escapeHtml(item.title || '已关联岗位')} · ${escapeHtml(item.company || '公司未记录')}</h4>
+          ${item.quote ? `<p class="section-label">HR 原话</p><blockquote>${escapeHtml(item.quote)}</blockquote>${item.replyText ? `<details class="feedback-review-context"><summary>随后观察到的本人消息</summary><p class="feedback-review-text">${escapeHtml(item.replyText)}</p></details>` : '<p class="hint">未获取到这条消息之后的本人回复；可进入原对话核对。</p>'}` : `<p>当前记录：${escapeHtml(item.cardStage === 'offer_received' ? '已收到 Offer' : item.cardStage === 'interview_completed' ? '已完成面试，后续结果待核对' : '发送简历动作成功，后续反馈待核对')}。</p>`}
+          <details class="feedback-review-context"><summary>本地岗位与参考简历</summary>
+            <p class="hint">岗位为当前本地记录；简历为联系岗位时绑定的本地版本。</p>
+            <h5>岗位说明</h5><p class="feedback-review-text">${escapeHtml(item.description || '没有可用的本地岗位正文。')}</p>
+            <h5>${item.resumeVersionId ? `参考简历 · 版本 ${escapeHtml(item.resumeVersionId)}` : '参考简历未记录'}</h5><p class="feedback-review-text">${escapeHtml(item.resumeText || '未获取到当时绑定的简历正文。')}</p>
+          </details>
+          <div class="button-row">${item.contactKey ? `<a href="${escapeAttr(feedbackMessageUrl(item, topic.site, planId))}">查看原对话</a>` : `<a href="/queue?planId=${escapeAttr(planId)}&amp;site=${escapeAttr(topic.site)}&amp;pool=interview">查看面试记录</a>`}${['responsibility', 'method', 'result', 'project_fact'].includes(topic.category) ? `<a href="/resume-optimization?planId=${escapeAttr(planId)}">检查项目经历描述</a>` : ''}</div>
+        </section>`).join('')}
+      </details>
+    </article>`).join('') : '<p class="feedback-review-empty">当前方案还没有可引用的具体反馈。可以先查看已有指标和实际对话，暂不据此判定需要改哪一段简历。</p>'}
+    <p class="feedback-review-next"><strong>改完怎么看：</strong>先处理一项，保留原版本和其他条件，记录本次调整；之后分平台、同类岗位观察回复、约面和后续进展。比例变化本身不能证明由这次修改造成。</p>
+  </section>`;
 }
 
 function adviceDestination(advice, planId) {
