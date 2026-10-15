@@ -3,6 +3,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
+const storage = require("../src/core/storage");
 const {
   openDb,
   SCHEMA_VERSION,
@@ -14,7 +15,7 @@ const {
   createWorkflowRun,
   getResumeOptimization,
   recordMessageReplyDrafts
-} = require("../src/core/storage");
+} = storage;
 const MATCHING_CARD_VERSION = 5;
 const DURABLE_WORKFLOW_VERSION = 6;
 const CANDIDATE_PROGRESS_VERSION = 7;
@@ -95,10 +96,11 @@ try {
       { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1", backup_path: null },
       { version: MESSAGE_PLATFORM_ACTION_VERSION, name: "message_platform_actions_v1", backup_path: null },
       { version: 36, name: "confirmed_candidate_evidence_v1", backup_path: null },
-      { version: 37, name: "resume_optimization_modes_v1", backup_path: null }
+      { version: 37, name: "resume_optimization_modes_v1", backup_path: null },
+      { version: 38, name: "mock_interview_preparations_v1", backup_path: null }
     ]
   );
-  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "resume_optimization_modes_v1");
+  assert.strictEqual(freshMigrations[freshMigrations.length - 1].name, "mock_interview_preparations_v1");
   assert.strictEqual(freshMigrations[freshMigrations.length - 1].version, SCHEMA_VERSION);
   assert(db.prepare("PRAGMA table_info(resume_optimizations)").all()
     .some((column) => column.name === "plan_id"));
@@ -255,7 +257,7 @@ try {
   assert(SCHEMA_VERSION >= 3);
   assert.strictEqual(SHARED_BOSS_PACING_VERSION, 16);
   assert.strictEqual(MESSAGE_REPLY_LEARNING_VERSION, 17);
-  assert.strictEqual(SCHEMA_VERSION, 37);
+  assert.strictEqual(SCHEMA_VERSION, 38);
   assert.strictEqual(
     db.prepare("SELECT count(*) AS n FROM workspace_platform_preferences").get().n,
     0,
@@ -797,7 +799,8 @@ try {
       { version: MESSAGE_REPLY_SEND_PLATFORM_VERSION, name: "message_reply_send_platform_v1" },
       { version: MESSAGE_PLATFORM_ACTION_VERSION, name: "message_platform_actions_v1" },
       { version: 36, name: "confirmed_candidate_evidence_v1" },
-      { version: 37, name: "resume_optimization_modes_v1" }
+      { version: 37, name: "resume_optimization_modes_v1" },
+      { version: 38, name: "mock_interview_preparations_v1" }
     ]
   );
   assert.strictEqual(db.prepare("SELECT source FROM keyword_sources WHERE keyword = 'v1-preserved'").get().source, "migration-smoke");
@@ -1760,6 +1763,61 @@ try {
   assert.strictEqual(unresolvedV29.prepare("SELECT count(*) AS n FROM message_preview_states").get().n, 1);
   assert.strictEqual(unresolvedV29.prepare("SELECT count(*) AS n FROM message_reply_drafts").get().n, 1);
   unresolvedV29.close();
+
+  const preparationV37Path = path.join(root, "preparation-v37.sqlite");
+  db = openDb(preparationV37Path);
+  const preparationOwner = saveProfileAnalysis(db, {
+    profile: { candidate: { name: "准备稿迁移样例", city: "广州", targetTitles: ["工程师"] } },
+    document: { originalFileName: "preparation.txt", format: "text", contentHash: "preparation-v37", text: "负责接口联调", diagnostics: {} },
+    searchPlan: { name: "准备稿迁移", cities: ["广州"], directions: ["工程师"], keywords: [{ word: "接口", priority: "A" }] }
+  });
+  const preparationScope = { profileId: preparationOwner.profileId, planId: preparationOwner.planId };
+  const preparationContext = {
+    sessionKind: "resume_general", job: null,
+    resume: { versionId: preparationOwner.resumeVersionId, text: "负责接口联调" },
+    resumeEvidenceCatalog: [{ id: "R1", kind: "resume", text: "负责接口联调" }]
+  };
+  const oldSession = storage.createMockInterviewSession(db, {
+    ...preparationScope, resumeVersionId: preparationOwner.resumeVersionId, sessionKind: "resume_general",
+    context: preparationContext, settings: { plannedQuestions: 1 },
+    initialQuestion: { text: "请介绍接口联调经历。", focus: "experience", resumeEvidenceIds: ["R1"] }
+  });
+  storage.answerMockInterviewTurn(db, {
+    ...preparationScope, sessionId: oldSession.id, turnNumber: 1, answerText: "我负责接口联调。", answerReview: { conclusion: "待补充结果" }
+  });
+  storage.completeMockInterviewSession(db, {
+    ...preparationScope, sessionId: oldSession.id, report: { conclusion: "保留历史复盘" }
+  });
+  storage.recordMockInterviewRetry(db, {
+    ...preparationScope, sessionId: oldSession.id, turnNumber: 1, answerText: "我核对接口约定，完成了联调。", review: { improved: true }
+  });
+  const oldSessionBeforeMigration = storage.getMockInterviewSession(db, { ...preparationScope, sessionId: oldSession.id });
+  db.exec("DROP TABLE mock_interview_preparations; DELETE FROM schema_migrations WHERE version = 38; PRAGMA user_version = 37");
+  db.close();
+  db = openDb(preparationV37Path);
+  assert.deepStrictEqual(storage.getMockInterviewSession(db, { ...preparationScope, sessionId: oldSession.id }),
+    oldSessionBeforeMigration, "v38 must preserve historical questions, answers, reports and retries");
+  assert.deepStrictEqual(storage.listMockInterviewPreparations(db, preparationScope), []);
+  assert.deepStrictEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  const generatedStory = { id: "S1", title: "接口联调", resumeEvidenceIds: ["R1"], text: "我负责接口联调。", missingDetails: ["联调结果是什么？"] };
+  const diskPreparation = storage.createMockInterviewPreparation(db, {
+    ...preparationScope, resumeVersionId: preparationOwner.resumeVersionId,
+    context: preparationContext, stories: [generatedStory],
+    modelIdentity: { operationId: "disk-create", operationInputHash: "disk-input" }
+  });
+  const diskEdit = storage.updateMockInterviewPreparation(db, {
+    ...preparationScope, preparationId: diskPreparation.id, expectedRevision: 1,
+    stories: [{ ...generatedStory, text: "我核对接口约定后完成了接口联调。", missingDetails: [] }],
+    operationIdentity: { operationId: "disk-refine", operationInputHash: "disk-refine-input" }
+  });
+  db.close();
+  db = openDb(preparationV37Path);
+  assert.deepStrictEqual(storage.getMockInterviewPreparation(db, { ...preparationScope, preparationId: diskPreparation.id }), diskEdit,
+    "reopening the database must retain the edited stories and original generation separately");
+  assert.strictEqual(storage.findMockInterviewPreparationOperation(db, { ...preparationScope, operationId: "disk-create" }).preparation.id, diskPreparation.id);
+  assert.strictEqual(storage.findMockInterviewPreparationOperation(db, { ...preparationScope, operationId: "disk-refine" }).identity.operationInputHash, "disk-refine-input");
+  assert.strictEqual(db.prepare("SELECT count(*) AS n FROM schema_migrations WHERE version = 38").get().n, 1);
+  db.close();
 
   const futurePath = path.join(root, "future.sqlite");
   db = openDb(futurePath);

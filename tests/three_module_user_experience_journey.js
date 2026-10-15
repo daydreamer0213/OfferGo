@@ -5,6 +5,7 @@ const path = require('node:path');
 const storage = require('../src/core/storage');
 const { MockModelAdapter } = require('../src/adapters/models/mock');
 const { createMockInterviewService } = require('../src/application/mock_interview');
+const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
 const { createResumeOptimizationService } = require('../src/application/resume_optimization');
 const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
 const { ensureProgressCard } = require('../src/core/candidate_progress');
@@ -31,7 +32,7 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     const owner = storage.saveProfileAnalysis(db, {
       profile: { candidate: { name: '林晓（虚拟用户）', city: '广州', targetTitles: ['初级产品经理'] } },
       document: { contentHash: 'virtual-ux', format: 'text', originalFileName: 'virtual.txt',
-        text: '林晓（虚拟用户）\n信息管理本科\n产品实习：参与客服工单改版，整理用户反馈、流程原型、分配规则文档，协助研发验收。\n技能：Axure、Figma、Excel、简单SQL。\n英语：能阅读英文文档，协助过英文需求会议。' },
+        text: '林晓（虚拟用户）\n信息管理本科\n项目：客服工单改版\n产品实习：参与客服工单改版，整理用户反馈、流程原型、分配规则文档，协助研发验收。\n项目：需求验收\n参与研发验收，按分配规则核对工单结果，记录问题并交给研发复查。\n技能：Axure、Figma、Excel、简单SQL。\n英语：能阅读英文文档，协助过英文需求会议。' },
       searchPlan: { name: '初级产品经理', directions: ['初级产品经理'], cities: ['广州'], keywords: [{ word: '产品经理', priority: 'A' }] }
     });
     const batch = storage.createBatch(db, 'boss', '产品经理', 'virtual UX', { profileId: owner.profileId, searchPlanId: owner.planId });
@@ -60,11 +61,25 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     await discover('期望薪资多少？最快什么时候到岗？', { messageCategory: 'salary', messageSummary: '确认薪资和到岗',
       missingFact: { key: 'expected_salary', question: '你的期望薪资是多少？' }, messages: [] });
     const adapter = new MockModelAdapter();
+    const preparationInputs = [];
+    const prepareStories = adapter.generateMockInterviewPreparation.bind(adapter);
+    adapter.generateMockInterviewPreparation = async input => {
+      preparationInputs.push(JSON.parse(JSON.stringify(input)));
+      return prepareStories(input);
+    };
+    const interviewInputs = [];
+    const generateInterviewStep = adapter.generateMockInterviewStep.bind(adapter);
+    adapter.generateMockInterviewStep = async input => {
+      interviewInputs.push(JSON.parse(JSON.stringify(input)));
+      return generateInterviewStep(input);
+    };
     const reviewInterview = adapter.reviewMockInterview.bind(adapter);
     adapter.reviewMockInterview = async input => {
       const report = await reviewInterview(input);
+      const answer = input.turns[0].answer;
       return { ...report, answerStructures: report.answerStructures.map(item =>
-        ({ ...item, outline: item.outline.join(" → ") })) };
+        ({ ...item, outline: item.outline.join(" → ") })),
+        evidenceCandidates: [{ turnNumber: 1, subject: '工单协作经历', sourceQuote: answer, text: answer }] };
     };
     const optimizeResume = adapter.generateResumeOptimization.bind(adapter);
     adapter.generateResumeOptimization = async input => {
@@ -95,7 +110,7 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
       if (new URL(route.request().url()).origin !== base) { result.externalRequests.push(route.request().url()); return route.abort(); }
       return route.continue();
     });
-    const page = await context.newPage();
+    let page = await context.newPage();
     page.on('pageerror', error => result.pageErrors.push(error.message));
     const shot = async name => { if (evidenceRoot) await page.screenshot({ path: path.join(root, `${name}.png`), fullPage: true }); };
     await page.goto(`${base}/messages?profileId=${owner.profileId}`);
@@ -117,7 +132,112 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     await shot('02-current-reply');
 
     await page.goto(`${base}/interview?planId=${owner.planId}`);
-    await page.locator('select[name=plannedQuestions]').selectOption('3');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const narrowOperation = async (locator, label) => {
+      await locator.scrollIntoViewIfNeeded();
+      assert(await locator.isVisible(), `${label} must be visible after normal scrolling`);
+      assert(await locator.isEnabled(), `${label} must be enabled`);
+      const geometry = await locator.evaluate(node => {
+        const box = node.getBoundingClientRect();
+        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+          width: innerWidth, height: innerHeight,
+          contentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) };
+      });
+      assert(geometry.contentWidth <= geometry.width && geometry.left >= 0 && geometry.right <= geometry.width
+        && geometry.top >= 0 && geometry.bottom <= geometry.height, `${label} must fit the 390px viewport: ${JSON.stringify(geometry)}`);
+    };
+    const prepareButton = page.getByRole('button', { name: '根据简历准备故事', exact: true });
+    await narrowOperation(prepareButton, 'prepare stories');
+    assert.equal(preparationInputs.length, 0, 'opening the story page must not generate content');
+    await prepareButton.click();
+    await page.waitForURL(url => url.searchParams.has('preparationId'));
+    await page.locator('.interview-story').first().waitFor();
+    const preparationId = Number(new URL(page.url()).searchParams.get('preparationId'));
+    const preparationOwner = { profileId: owner.profileId, planId: owner.planId, preparationId };
+    const originalPreparation = interview.getPreparation(preparationOwner);
+    assert.equal(originalPreparation.stories.length, 2, 'the controlled resume supplies two work blocks');
+    assert.equal(interview.listSessions(owner).length, 0, 'preparation does not create an interview answer or session');
+    const selectedStoryId = originalPreparation.stories[1].id;
+    const unchangedStory = originalPreparation.stories[0];
+    const editedText = '我参与研发验收，先按分配规则整理检查场景，核对工单的实际结果，再记录问题并交给研发复查。';
+    const storyPanel = () => page.locator('.interview-story').filter({ has: page.locator(`input[name=storyId][value='${selectedStoryId}']`) });
+    await storyPanel().locator(':scope>summary').click();
+    await storyPanel().getByText('修改这条故事', { exact: true }).click();
+    const editForm = () => storyPanel().locator("form[action='/api/interview/preparation/save']");
+    await editForm().locator('textarea[name=storyText]').fill(editedText);
+    await narrowOperation(editForm().getByRole('button', { name: '保存这条故事', exact: true }), 'save story');
+    await shot('story-01-edit-390');
+    await editForm().getByRole('button', { name: '保存这条故事', exact: true }).click();
+    await page.waitForFunction(expected => [...document.querySelectorAll('.interview-story-text')]
+      .some(node => node.textContent === expected), editedText);
+    const savedPreparation = interview.getPreparation(preparationOwner);
+    assert.equal(savedPreparation.revision, originalPreparation.revision + 1);
+    assert.equal(savedPreparation.stories[1].text, editedText);
+    assert.deepEqual(savedPreparation.stories[0], unchangedStory);
+    assert.equal(preparationInputs.length, 1, 'saving a manual edit does not call the model');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await storyPanel().locator(':scope>summary').click();
+    await shot('story-preparation-controlled-offline-desktop');
+    result.storyPreparationPreview = 'story-preparation-controlled-offline-desktop.png (controlled/offline example; not real-model writing quality)';
+    await page.close();
+    page = await context.newPage();
+    page.on('pageerror', error => result.pageErrors.push(error.message));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${base}/interview?planId=${owner.planId}`);
+    assert.equal(await storyPanel().locator('.interview-story-text').textContent(), editedText);
+    assert.equal(preparationInputs.length, 1, 'closing and reopening reads the saved draft without generating again');
+    await storyPanel().locator(':scope>summary').click();
+    await storyPanel().getByText('补充情况，让系统重新整理这一条', { exact: true }).click();
+    const refineForm = () => storyPanel().locator("form[action='/api/interview/preparation/refine']");
+    const supplement = '我对照规则检查不同类型的工单，发现条件遗漏后补齐说明，再请研发确认。';
+    await refineForm().locator('textarea[name=supplement]').fill(supplement);
+    await narrowOperation(refineForm().getByRole('button', { name: '补充并重新整理这一条', exact: true }), 'refine selected story');
+    await refineForm().getByRole('button', { name: '补充并重新整理这一条', exact: true }).click();
+    await page.waitForFunction(expected => [...document.querySelectorAll('.interview-story-text')]
+      .some(node => node.textContent.includes(expected)), supplement);
+    const refinedPreparation = interview.getPreparation(preparationOwner);
+    assert.equal(refinedPreparation.revision, savedPreparation.revision + 1);
+    assert.deepEqual(refinedPreparation.stories[0], unchangedStory, 'refining one story preserves its neighbor');
+    assert(refinedPreparation.stories[1].text.includes(editedText) && refinedPreparation.stories[1].text.includes(supplement));
+    assert.equal(preparationInputs.length, 2);
+    assert.equal(preparationInputs[1].storyId, selectedStoryId);
+    assert.equal(preparationInputs[1].preparation.revision, savedPreparation.revision);
+    const preparedStart = page.locator('.interview-prepared-start');
+    const optionalJob = preparedStart.locator('details.interview-prepared-job-option');
+    assert.equal(await optionalJob.getAttribute('open'), null, 'job customization remains optional and collapsed');
+    assert(await preparedStart.locator('input[name=sessionKind][value=resume_general]').isChecked());
+    await narrowOperation(optionalJob.locator(':scope>summary'), 'optional job customization');
+    await preparedStart.locator('input[name=storyIds]').first().uncheck();
+    await preparedStart.locator(`input[name=storyIds][value='${selectedStoryId}']`).check();
+    await preparedStart.locator('select[name=plannedQuestions]').selectOption('3');
+    const startStories = preparedStart.getByRole('button', { name: '开始深入练习', exact: true });
+    await narrowOperation(startStories, 'start from selected story');
+    await shot('story-02-selected-390');
+    await startStories.click();
+    await page.waitForURL(url => url.searchParams.has('sessionId'));
+    await page.locator("form[action='/api/interview/answer'] textarea").waitFor();
+    const preparedSessionId = Number(new URL(page.url()).searchParams.get('sessionId'));
+    const preparedSession = interview.getSession({ profileId: owner.profileId, planId: owner.planId, sessionId: preparedSessionId });
+    assert.deepEqual(preparedSession.context.storyPreparation, { id: preparationId, revision: refinedPreparation.revision,
+      stories: [refinedPreparation.stories[1]] });
+    assert.deepEqual(interviewInputs.at(-1).context.storyPreparation, preparedSession.context.storyPreparation);
+    assert.deepEqual(interviewInputs.at(-1).turns, [], 'the prepared text is not a fabricated user answer');
+    assert.equal(preparedSession.turns[0].questionFocus, selectedStoryId);
+    assert.equal(preparedSession.turns[0].answerText, '');
+    assert((await page.locator('.interview-current-question').textContent()).includes(refinedPreparation.stories[1].title));
+    await narrowOperation(page.getByRole('button', { name: '提交回答并继续', exact: true }), 'answer the selected story');
+    await shot('story-03-first-question-390');
+    result.storyPreparation = { preparationId, originalRevision: originalPreparation.revision,
+      savedRevision: savedPreparation.revision, selectedRevision: refinedPreparation.revision,
+      selectedStoryIds: [selectedStoryId], sessionId: preparedSessionId };
+    result.checks.push('offline story preparation saves an edit across tab reopen, refines only one story, and freezes the selected revision into training');
+    result.checks.push('story generation, save, refine, selection and answer controls are visible without horizontal overflow at 390px');
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${base}/interview?planId=${owner.planId}`);
+    await page.getByText('直接开始简历或岗位练习', { exact: true }).click();
+    const directPractice = page.locator('details.interview-new-session').filter({ has: page.getByRole('button', { name: '开始模拟面试', exact: true }) });
+    await directPractice.locator('select[name=plannedQuestions]').selectOption('3');
     await page.getByRole('button', { name: '开始模拟面试', exact: true }).click();
     for (let turn = 1; turn <= 3; turn++) {
       await page.locator(`form[action='/api/interview/answer'] input[name=turnNumber][value='${turn}']`).waitFor({ state: 'attached' });
@@ -135,7 +255,24 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     assert((await conclusion.innerText()).trim().length > 0);
     assert(await conclusion.evaluate(node => parseFloat(getComputedStyle(node).fontSize)
       < parseFloat(getComputedStyle(document.querySelector('#interview-report-title')).fontSize)));
+    assert(await page.locator('.interview-report').evaluate(node => parseFloat(getComputedStyle(node).rowGap) >= 16),
+      'report sections need visible space instead of a one-pixel divider');
+    const reportColumns = page.locator('.interview-report-grid>section');
+    const desktopColumns = await reportColumns.evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, right: box.right, bottom: box.bottom };
+    }));
+    assert.equal(desktopColumns.length, 2);
+    assert(Math.abs(desktopColumns[0].y - desktopColumns[1].y) < 2 && desktopColumns[1].x - desktopColumns[0].right >= 16,
+      'desktop highlights use two separate columns with room between them');
     result.checks.push('paragraph outline produces a saved interview report without retrying the user action');
+    const disclosures = page.locator('details.interview-report-disclosure');
+    assert.equal(await disclosures.count(), 2);
+    assert.equal(await page.locator('details.interview-report-disclosure[open]').count(), 0);
+    assert(await page.locator('.interview-report-practice [data-interview-retry-link]').first().isVisible());
+    const evidencePanel = page.locator('details#interview-evidence.interview-evidence-panel');
+    assert.equal(await evidencePanel.getAttribute('open'), null);
+    assert(await evidencePanel.evaluate(node => Boolean(document.querySelector('.interview-transcript')
+      .compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)), 'optional evidence belongs after the transcript');
     assert.equal(await page.locator('.interview-turn-detail[open]').count(), 0);
     const structures = page.locator('details.interview-answer-structure');
     assert(await structures.count() > 0);
@@ -143,20 +280,84 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     const firstOutline = structures.first().locator('ul');
     assert(!(await firstOutline.isVisible()));
     const completeOutline = await firstOutline.textContent();
+    const outlineDisclosure = disclosures.filter({ has: page.locator('details.interview-answer-structure') });
+    await outlineDisclosure.locator(':scope>summary').click();
+    assert(!(await firstOutline.isVisible()), 'opening the report section preserves the detailed outline choice');
     await structures.first().locator('summary').click();
     assert(await firstOutline.isVisible());
     assert.equal(await firstOutline.textContent(), completeOutline);
     assert(completeOutline.trim().length > 0);
     await structures.first().locator('summary').click();
+    await outlineDisclosure.locator(':scope>summary').click();
     result.checks.push('detailed report outlines start collapsed and reveal complete text without hiding retry links');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const narrowColumns = await reportColumns.evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, bottom: box.bottom };
+    }));
+    assert(Math.abs(narrowColumns[0].x - narrowColumns[1].x) < 2 && narrowColumns[1].y - narrowColumns[0].bottom >= 16,
+      'narrow highlights stack with visible separation');
+    assert(await page.locator('.interview-report').evaluate(node => node.scrollWidth <= node.clientWidth
+      && node.getBoundingClientRect().right <= innerWidth), 'narrow report must fit its viewport');
     await page.getByRole('link', { name: '重练这题', exact: true }).first().click();
     const retry = page.locator('.interview-turn-detail[open] textarea[name=answerText]');
     await retry.waitFor();
     assert(await retry.evaluate(field => document.activeElement === field));
+    const source = page.locator('.interview-turn-detail[open] details.interview-question-source');
+    assert.equal(await source.getAttribute('open'), null);
+    const sourceText = await source.locator('.interview-question-evidence').textContent();
+    assert(!(await source.locator('.interview-question-evidence').isVisible()));
+    await source.locator(':scope>summary').click();
+    assert(await source.locator('.interview-question-evidence').isVisible());
+    assert.equal(await source.locator('.interview-question-evidence').textContent(), sourceText);
     await retry.fill('我把工单反馈按查询和分配分类，画了流程原型，并按确认后的规则协助验收。方案由产品经理决定。');
     await page.locator('.interview-turn-detail[open]').getByRole('button', { name: '保存重答并比较', exact: true }).click();
     await page.getByText('重答对比', { exact: true }).waitFor();
     result.checks.push('feedback visible after each answer; retry link opens and focuses form; retry saved');
+    await page.goto(page.url().split('#')[0] + '#interview-evidence');
+    await page.reload();
+    await evidencePanel.locator('textarea[name=sourceQuote]').first().waitFor({ state: 'visible' });
+    assert.notEqual(await evidencePanel.getAttribute('open'), null, 'fresh GET evidence anchor opens the root details');
+    const evidenceForm = evidencePanel.locator('form').first();
+    assert(await evidenceForm.evaluate(node => getComputedStyle(node).display === 'grid'
+      && parseFloat(getComputedStyle(node).rowGap) >= 12), 'evidence fields need distinct rows');
+    assert(await evidenceForm.locator('label').first().evaluate(node => parseFloat(getComputedStyle(node).rowGap) >= 6));
+    assert((await evidenceForm.locator('textarea[name=sourceQuote]').inputValue()).includes('我参与工单改版'));
+    result.checks.push('390px report stacks; source details preserve text; evidence GET anchor reveals spaced confirmation fields');
+    await shot('04-interview-report-mobile');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const sourceQuote = await evidenceForm.locator('textarea[name=sourceQuote]').inputValue();
+    const evidenceSave = page.waitForResponse(response => new URL(response.url()).pathname === '/api/interview/evidence'
+      && response.request().method() === 'POST');
+    await evidenceForm.getByRole('button', { name: '确认并保存这段经历', exact: true }).click();
+    assert.equal((await evidenceSave).status(), 303);
+    await evidencePanel.getByText(/已保存 1 条经历/).waitFor();
+    assert.equal(new URL(page.url()).hash, '#interview-evidence');
+    assert.notEqual(await evidencePanel.getAttribute('open'), null, 'saving returns to the expanded evidence panel');
+    assert(await evidenceForm.locator('textarea[name=sourceQuote]').isVisible());
+    const confirmed = listCandidateEvidence(db, { profileId: owner.profileId }).filter(item => item.sourceKind === 'interview_turn');
+    assert.equal(confirmed.length, 1);
+    assert.equal(confirmed[0].sourceQuote, sourceQuote);
+    result.checks.push('saving a synthetic interview fact persists the exact source and returns to the expanded panel');
+    const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme || 'light');
+    result.interviewContrast = {};
+    for (const theme of ['dark', 'light']) {
+      if (await page.evaluate(() => document.documentElement.dataset.theme) !== theme) await page.locator('[data-theme-toggle]').click();
+      await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme);
+      result.interviewContrast[theme] = {};
+      for (const [name, surface, children] of [
+        ['practice', page.locator('.interview-report-practice'), 'h4,p,a'],
+        ['disclosure', page.locator('.interview-report-disclosure').first(), 'summary'],
+        ['evidence', page.locator('.interview-evidence-item').first(), 'h4,label']
+      ]) {
+        const contrasts = await surfaceContrast(surface, children);
+        assert(contrasts.length > 0 && contrasts.every(ratio => ratio >= 4.5), `${theme} interview ${name} must remain readable: ${contrasts}`);
+        result.interviewContrast[theme][name] = contrasts;
+      }
+      await shot(`interview-review-${theme}`);
+    }
+    if (await page.evaluate(() => document.documentElement.dataset.theme) !== originalTheme) await page.locator('[data-theme-toggle]').click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), originalTheme);
+    result.checks.push('interview practice, disclosure, and evidence text remain readable in both themes; original theme restored');
     await shot('04-interview-report');
 
     await page.goto(`${base}/resume-optimization?planId=${owner.planId}`);
@@ -174,18 +375,7 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     for (const theme of ['dark', 'light']) {
       await page.locator('[data-theme-toggle]').click();
       await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme);
-      const contrasts = await page.locator('.resume-opt-conclusion').evaluate(node => {
-        const luminance = color => {
-          const channels = color.match(/\d+/g).slice(0, 3).map(Number).map(value => value / 255)
-            .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-          return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-        };
-        const background = luminance(getComputedStyle(node).backgroundColor);
-        return [...node.querySelectorAll('h2,p')].map(child => {
-          const text = luminance(getComputedStyle(child).color);
-          return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
-        });
-      });
+      const contrasts = await surfaceContrast(page.locator('.resume-opt-conclusion'), 'h2,p');
       assert(contrasts.length > 0 && contrasts.every(ratio => ratio >= 4.5),
         `${theme} resume conclusion must remain readable: ${contrasts}`);
       await shot(`resume-conclusion-${theme}`);
@@ -211,7 +401,9 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     await page.getByRole('button', { name: '启用为新版本', exact: true }).click();
     await page.getByText('已启用新版本', { exact: true }).waitFor();
     await page.goto(`${base}/interview?planId=${owner.planId}`);
-    const choices = await page.locator('select[name=resumeVersionId] option').allTextContents();
+    await page.getByText('直接开始简历或岗位练习', { exact: true }).click();
+    const choices = await page.locator('details.interview-new-session').filter({ has: page.getByRole('button', { name: '开始模拟面试', exact: true }) })
+      .locator('select[name=resumeVersionId] option').allTextContents();
     assert(choices.length >= 2);
     assert.equal(choices.filter(text => text.includes('默认参考')).length, 1);
     assert(choices[0].includes('通用整理版'));
@@ -227,3 +419,18 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     if (!evidenceRoot) fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
+
+function surfaceContrast(surface, children) {
+  return surface.evaluate((node, selector) => {
+    const luminance = color => {
+      const channels = color.match(/\d+/g).slice(0, 3).map(Number).map(value => value / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const background = luminance(getComputedStyle(node).backgroundColor);
+    return [...node.querySelectorAll(selector)].map(child => {
+      const text = luminance(getComputedStyle(child).color);
+      return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+    });
+  }, children);
+}

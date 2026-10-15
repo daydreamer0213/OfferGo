@@ -118,3 +118,13 @@
   .today-discovery-grid .today-discovery-wide { grid-column:auto; }
   .today-discovery-foot { align-items:flex-start; flex-direction:column; padding:14px 18px; }
 }
+
+/* Story text keeps its plain-text source; only explicit sections and lists gain hierarchy. */
+.interview-story-text { white-space:normal; }
+.interview-story-text>section+section { margin-top:22px; }
+.interview-story-text h4 { margin:0 0 8px; color:var(--rf-teal); font-size:16px; font-weight:700; line-height:1.5; }
+.interview-story-text p { margin:0; white-space:pre-wrap; }
+.interview-story-text p+p,.interview-story-text ul+p { margin-top:12px; }
+.interview-story-text ul { margin:8px 0 0; padding-left:22px; }
+.interview-story-text li { white-space:pre-wrap; }
+.interview-story-text li+li { margin-top:7px; }

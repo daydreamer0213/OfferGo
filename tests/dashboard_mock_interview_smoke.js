@@ -96,14 +96,12 @@ const logger = {
     assert.match(page.body, /<title>模拟面试训练<\/title>/);
     assert.match(page.body, /class="[^"]*interview-workbench/);
     assert.match(page.body, /aria-current="page">面试训练<\/a>/);
-    assert.match(page.body, /无需面试邀请/);
     assert.match(page.body, /简历通用面试/);
     assert.match(page.body, /岗位专项面试/);
     assert.match(page.body, /题目侧重/);
     assert.match(page.body, /自我介绍与沟通/);
     assert.doesNotMatch(page.body, /面试类型/);
     assert.match(page.body, /value="resume_general" checked/);
-    assert.match(page.body, /这道题来自简历/);
     assert.match(page.body, /参与知识库开发/);
     assert.deepEqual(calls.dashboard, [{ profileId: owner.profileId, planId: owner.planId, sessionId: 51 }]);
     assert.match(page.body, /基础简历/);
@@ -224,6 +222,8 @@ const logger = {
     assert.equal(unhandled.length, 0, "interview failure must not become an unhandled rejection");
     await interviewDraftClientSmoke(MOCK_INTERVIEW_SCRIPT);
     await verifyDefaultServiceConcurrency();
+    await verifyStoryPreparationFlow();
+    await verifyPreparationClientRecovery();
 
     console.log("dashboard_mock_interview_smoke ok");
   } finally {
@@ -322,6 +322,174 @@ async function verifyDefaultServiceConcurrency() {
     await close(server);
     db.close();
   }
+}
+
+async function verifyStoryPreparationFlow() {
+  const db = openDb(':memory:');
+  const owner = saveProfileAnalysis(db, {
+    profile: { candidate: { name: '故事页面候选人', city: '广州', targetTitles: ['开发工程师'] }, skills: [], projects: [{ name: '检索项目' }] },
+    document: { originalFileName: 'stories.txt', format: 'text', contentHash: 'story-page-resume',
+      text: '检索项目\n负责检索链路，组合两种召回方式。\n维护评估样例。\n交付查询接口。', diagnostics: {} },
+    searchPlan: { name: '故事页面', cities: ['广州'], directions: ['开发工程师'], keywords: [{ word: '检索', priority: 'A' }] }
+  });
+  let generations = 0;
+  let failRefine = false;
+  let frozenStory = null;
+  const structuredStory = [
+    '【我负责什么】', '我负责检索链路的实现。', '',
+    '【当时要解决的问题】', '需要处理两种召回结果。', '',
+    '【我做了什么】', '- 我组合了两种召回方式。', '- 我核对了 <script>unsafe()</script> 样例。', '',
+    '【为什么这样做】', '组合两种方式，可以覆盖不同类型的查询。', '',
+    '【结果如何】', '检索链路已交付，效果数据仍需补充。', '',
+    '【复盘与启发】', '待核实思路：回想评估样例是否帮助发现问题。'
+  ].join('\n');
+  const legacyStory = '我负责评估样例。\n为什么这样做：这行是旧稿原话。\n\n【用户自己的标题】\n原文和空行后的内容都要保留。';
+  const adapter = { provider: 'controlled', model: 'story-flow',
+    async generateMockInterviewPreparation({ preparation, storyId, supplement }) {
+      generations += 1;
+      if (failRefine) throw Error('controlled preparation unavailable');
+      if (storyId) return { stories: [{ ...preparation.stories.find(story => story.id === storyId), text: `补充后的故事：${supplement}`, missingDetails: [] }] };
+      return { stories: ['检索链路', '评估样例', '查询接口'].map((title, i) => ({ id: `S${i + 1}`, title,
+        resumeEvidenceIds: [`R${i + 2}`], text: i === 0 ? structuredStory : i === 1 ? legacyStory : `我负责${title}，会比较已有做法，并记录实际结果。`,
+        missingDetails: i === 0 ? ['当时为什么选择这套做法？'] : [] })) };
+    },
+    async generateMockInterviewStep({ context }) {
+      frozenStory = context.storyPreparation;
+      const story = frozenStory.stories[0];
+      return { nextQuestion: { questionKind: 'topic_transition', text: `请介绍${story.title}这部分工作。`, focus: story.id,
+        resumeEvidenceIds: story.resumeEvidenceIds, basedOnTurnNumber: null, answerEvidence: '' }, complete: false };
+    }
+  };
+  const server = createDashboardServer({ db, forceMock: true, allowOfflineMock: true, logger,
+    browserAuthority: { browserMode: 'edge', cdpPort: null, profilePath: '' }, mockInterviewAdapterResolver: () => adapter });
+  const baseUrl = await listen(server);
+  const post = (route, values) => request(baseUrl, route, { method: 'POST', body: new URLSearchParams({ planId: String(owner.planId), ...values }).toString() });
+  try {
+    const landing = await request(baseUrl, `/interview?planId=${owner.planId}`);
+    assert.equal(landing.status, 200);
+    assert.equal(generations, 0, 'opening the preparation page never calls a model');
+    const made = await post('/api/interview/prepare', { resumeVersionId: String(owner.resumeVersionId), operationId: 'http-story-preparation' });
+    assert.equal(made.status, 303, 'the preparation form must create and save a story draft');
+    assert.match(made.headers.location, /preparationId=\d+/);
+    const preparationId = Number(new URL(made.headers.location, baseUrl).searchParams.get('preparationId'));
+    const page = await request(baseUrl, made.headers.location);
+    assert.match(page.body, /id="interview-preparation"/);
+    assert.match(page.body, /检索链路/);
+    assert.match(page.body, /评估样例/);
+    assert.match(page.body, /查询接口/);
+    assert.match(page.body, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
+    assert.doesNotMatch(page.body, /<script>unsafe\(\)<\/script>/);
+    assert.match(page.body, /action="\/api\/interview\/preparation\/save"/);
+    assert.match(page.body, /name="storyIds"/);
+    const previews = [...page.body.matchAll(/<summary><strong>[^<]+<\/strong><span>([\s\S]*?)<\/span><\/summary>/g)].map(match => match[1]);
+    assert.match(previews[0], /^我负责检索链路的实现。 需要处理两种召回结果。 - 我组合了两种召回方式。/,
+      'the preview keeps body lines while omitting the recognized standalone headings');
+    assert.doesNotMatch(previews[0], /【(?:我负责什么|当时要解决的问题|我做了什么|为什么这样做|结果如何|复盘与启发)】/);
+    assert.match(previews[1], /【用户自己的标题】/, 'unknown legacy headings remain in the preview');
+    const storyBodies = [...page.body.matchAll(/<(p|div) class="interview-story-text">([\s\S]*?)<\/\1>/g)].map(match => match[2]);
+    assert.equal(storyBodies.length, 3, 'each story must render its own readable body');
+    assert.deepEqual([...storyBodies[0].matchAll(/<h4>([^<]+)<\/h4>/g)].map(match => match[1]),
+      ['我负责什么', '当时要解决的问题', '我做了什么', '为什么这样做', '结果如何', '复盘与启发']);
+    assert.equal((storyBodies[0].match(/<section\b/g) || []).length, 6, 'the explicit headings must create semantic sections');
+    assert.match(storyBodies[0], /<ul><li>我组合了两种召回方式。<\/li><li>我核对了 &lt;script&gt;unsafe\(\)&lt;\/script&gt; 样例。<\/li><\/ul>/,
+      'the two concrete actions must be a list and escape embedded HTML');
+    assert.deepEqual([...storyBodies[1].matchAll(/<p>([\s\S]*?)<\/p>/g)].map(match => match[1]),
+      ['我负责评估样例。\n为什么这样做：这行是旧稿原话。', '【用户自己的标题】\n原文和空行后的内容都要保留。'],
+      'legacy paragraphs retain all content without inferring section meaning');
+    assert.doesNotMatch(storyBodies[1], /<h4>/);
+    const editedStory = structuredStory.replace('我负责检索链路的实现。', '我先比较两种召回，再确定组合方式。');
+    const saved = await post('/api/interview/preparation/save', { preparationId, expectedRevision: 1, storyId: 'S1', storyText: editedStory });
+    assert.equal(saved.status, 303);
+    assert.equal(generations, 1, 'saving an edit must not regenerate the stories');
+    const reopened = await request(baseUrl, saved.headers.location);
+    assert.match(reopened.body, /我先比较两种召回，再确定组合方式。/);
+    const reopenedEditor = reopened.body.match(/<textarea name="storyText"[^>]*>([\s\S]*?)<\/textarea>/)?.[1];
+    assert.equal(reopenedEditor, editedStory.replace('<script>unsafe()</script>', '&lt;script&gt;unsafe()&lt;/script&gt;'),
+      'formatting must not rewrite the editable text after save and reopen');
+    assert.equal(storage.getMockInterviewPreparation(db, { profileId: owner.profileId, planId: owner.planId, preparationId }).stories[0].text,
+      editedStory, 'the stored story remains exactly the submitted plain text');
+    const refined = await post('/api/interview/preparation/refine', { preparationId, expectedRevision: 2, storyId: 'S1', supplement: '比较了失败查询。', operationId: 'http-story-refine' });
+    assert.equal(refined.status, 303);
+    const operation = await request(baseUrl, `/api/interview/preparation/operation?planId=${owner.planId}&operationId=http-story-refine`);
+    assert.equal(operation.status, 200);
+    assert.equal(JSON.parse(operation.body).resultId, preparationId);
+    failRefine = true;
+    const failed = await post('/api/interview/preparation/refine', { preparationId, expectedRevision: 3, storyId: 'S1', supplement: '失败不得覆盖。', operationId: 'http-failed-refine' });
+    assert.equal(failed.status, 500);
+    const afterFailure = await request(baseUrl, refined.headers.location);
+    assert.match(afterFailure.body, /补充后的故事：比较了失败查询。/);
+    assert.match(afterFailure.body, /我负责评估样例/);
+    const started = await post('/api/interview/start', { resumeVersionId: owner.resumeVersionId, preparationId, preparationRevision: 3,
+      storyIds: 'S1', sessionKind: 'resume_general', type: 'mixed', difficulty: 'standard', plannedQuestions: 3 });
+    assert.equal(started.status, 303);
+    assert.equal(frozenStory.stories.length, 1);
+    assert.equal(frozenStory.stories[0].text, '补充后的故事：比较了失败查询。');
+  } finally { await close(server); db.close(); }
+}
+
+async function verifyPreparationClientRecovery() {
+  const scope = '7:1:91:2:S1';
+  const fieldKey = `roleflow:interview-preparation-draft:${scope}:supplement`;
+  const values = new Map([[fieldKey, '同一版本尚未提交的补充']]);
+  function client({ revisionScope = scope, mode = 'saved' } = {}) {
+    const handlers = new Map();
+    const inputHandlers = new Map();
+    const field = { value: '服务器当前正文', addEventListener(type, fn) { inputHandlers.set(type, fn); } };
+    const button = { disabled: false, textContent: '补充并重新整理这一条' };
+    const error = { textContent: '' };
+    const form = {
+      action: '/api/interview/preparation/refine',
+      dataset: { interviewDraft: 'preparation', interviewDraftField: 'supplement', interviewDraftScope: revisionScope,
+        interviewOperationUrl: '/api/interview/preparation/operation', interviewResultParam: 'preparationId', interviewSuccessTarget: 'interview-preparation' },
+      elements: { planId: { value: '1' }, preparationId: { value: '91' }, expectedRevision: { value: revisionScope.split(':')[3] }, storyId: { value: 'S1' }, supplement: field },
+      querySelector(selector) {
+        if (selector === 'textarea[name="supplement"]') return field;
+        if (selector === 'button') return button;
+        if (selector === '[data-interview-error]') return error;
+        return null;
+      },
+      addEventListener(type, fn) { handlers.set(type, fn); }
+    };
+    const requests = [];
+    const navigations = [];
+    class FormDataFixture {
+      constructor(source) { this.source = source; }
+      *[Symbol.iterator]() { for (const [name, control] of Object.entries(this.source.elements)) yield [name, control.value]; }
+    }
+    vm.runInNewContext(MOCK_INTERVIEW_SCRIPT.replace(/^<script>|<\/script>$/g, ''), {
+      document: { readyState: 'complete', getElementById() { return null; },
+        querySelectorAll(selector) { return selector === '[data-interview-submit]' ? [form] : []; } },
+      localStorage: { getItem(key) { return values.get(key) ?? null; }, setItem(key, value) { values.set(key, String(value)); }, removeItem(key) { values.delete(key); } },
+      FormData: FormDataFixture, URLSearchParams, setTimeout, console,
+      location: { href: 'http://127.0.0.1/interview?planId=1&preparationId=91', hash: '', assign(url) { navigations.push(url); }, reload() {} },
+      fetch: async (url, options = {}) => {
+        requests.push({ url, method: options.method || 'GET' });
+        if (mode === 'unknown') throw Error('network interrupted');
+        return { ok: true, async text() { return JSON.stringify({ saved: true, resultId: 91 }); } };
+      }
+    });
+    return { field, button, error, requests, navigations, handlers, inputHandlers };
+  }
+  const saved = client();
+  assert.equal(saved.field.value, '同一版本尚未提交的补充', 'only the matching story revision restores its pending edit');
+  await saved.handlers.get('submit')({ preventDefault() {}, submitter: saved.button });
+  assert.equal(saved.requests.length, 1);
+  assert.equal(saved.requests[0].method, 'GET', 'a saved generation is reopened without another POST or provider call');
+  assert.match(saved.navigations[0], /preparationId=91#interview-preparation$/);
+  assert.equal(values.has(fieldKey), false, 'completed recovery clears only the submitted draft');
+  values.set(fieldKey, '旧版本输入');
+  const newer = client({ revisionScope: '7:1:91:3:S1', mode: 'unknown' });
+  assert.equal(newer.field.value, '服务器当前正文', 'an old revision must not overwrite a newer saved story');
+  newer.field.value = '网络中断后要保留的补充';
+  newer.inputHandlers.get('input')();
+  await newer.handlers.get('submit')({ preventDefault() {}, submitter: newer.button });
+  assert.equal(newer.requests.length, 1);
+  assert.equal(newer.requests[0].method, 'GET', 'unknown operation status must not issue a new generation');
+  assert.equal(newer.field.value, '网络中断后要保留的补充');
+  assert.equal(values.get('roleflow:interview-preparation-draft:7:1:91:3:S1:supplement'), newer.field.value);
+  assert([...values.keys()].some(key => key.startsWith('offergo:pending-generation:')), 'unknown outcome keeps the original operation id');
+  assert.match(newer.error.textContent, /无法确认/);
+  assert.equal(newer.button.disabled, false);
 }
 
 function listen(server) {

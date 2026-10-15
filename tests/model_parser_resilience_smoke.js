@@ -27,12 +27,13 @@ async function testLongStructuredTaskTokenLimits() {
     const adapter = makeAdapter({ maxTokens: 4096, maxRetries: 0 });
     await adapter.chatJson("return json", { test: true }, { kind: "analyzeResume" });
     await adapter.chatJson("return json", { test: true }, { kind: "recommendSearchPlan" });
+    await adapter.chatJson("return json", { test: true }, { kind: "generateMockInterviewPreparation" });
     await adapter.chatJson("return json", { test: true }, { kind: "understandJob" });
   });
   assert.deepStrictEqual(
     requested.map((body) => body.max_tokens),
-    [8192, 8192, 4096],
-    "only the two observed long onboarding tasks should start at 8192 response tokens"
+    [8192, 8192, 32768, 4096],
+    "multi-story preparation keeps the long structured response budget without increasing ordinary tasks"
   );
 }
 

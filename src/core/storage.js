@@ -17,6 +17,7 @@ const {
   FUNNEL_STRATEGY_ROUNDS_SCHEMA,
   RESUME_OPTIMIZATION_SCHEMA,
   MOCK_INTERVIEW_V1_SCHEMA,
+  MOCK_INTERVIEW_PREPARATIONS_SCHEMA,
   CANDIDATE_EVIDENCE_SCHEMA
 } = require("../storage/schema");
 const { currentSchemaVersion } = require("../storage/migrations");
@@ -696,6 +697,11 @@ const MIGRATIONS = [
         db.exec("ALTER TABLE resume_optimizations ADD COLUMN optimization_mode TEXT NOT NULL DEFAULT 'direction' CHECK(optimization_mode IN ('general','job_specific','direction'))");
       }
     }
+  },
+  {
+    version: 38,
+    name: 'mock_interview_preparations_v1',
+    apply(db) { db.exec(MOCK_INTERVIEW_PREPARATIONS_SCHEMA); }
   }
 ];
 
@@ -1665,6 +1671,11 @@ module.exports = {
   saveResumeOptimizationDraft: resumeOptimizationStore.saveResumeOptimizationDraft,
   activateResumeOptimization: resumeOptimizationStore.activateResumeOptimization,
   createMockInterviewSession: mockInterviewStore.createMockInterviewSession,
+  createMockInterviewPreparation: mockInterviewStore.createMockInterviewPreparation,
+  getMockInterviewPreparation: mockInterviewStore.getMockInterviewPreparation,
+  listMockInterviewPreparations: mockInterviewStore.listMockInterviewPreparations,
+  updateMockInterviewPreparation: mockInterviewStore.updateMockInterviewPreparation,
+  findMockInterviewPreparationOperation: mockInterviewStore.findMockInterviewPreparationOperation,
   getMockInterviewSession: mockInterviewStore.getMockInterviewSession,
   listMockInterviewSessions: mockInterviewStore.listMockInterviewSessions,
   appendMockInterviewQuestion: mockInterviewStore.appendMockInterviewQuestion,

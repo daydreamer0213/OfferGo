@@ -277,17 +277,67 @@ class MockModelAdapter {
     };
   }
 
+  async generateMockInterviewPreparation({ context = {}, preparation, storyId, supplement = '' } = {}) {
+    if (storyId !== undefined) {
+      const story = preparation?.stories?.find(item => item.id === storyId);
+      if (!story) throw new Error('离线 Mock 找不到指定故事');
+      return { stories: [{ ...story,
+        text: `${story.text}${String(supplement).trim() ? `\n本人补充：${String(supplement).trim()}` : ''}`
+      }] };
+    }
+    // ponytail: offline grouping follows explicit work headings, not semantic completeness; real-model review verifies story quality.
+    const groups = [];
+    let current = null;
+    let ignoredSection = false;
+    for (const item of context.resumeEvidenceCatalog || []) {
+      const text = String(item?.text || '').trim();
+      if (!item?.id || !text) continue;
+      if (/^(?:项目|工作|实习|实践|任职)(?:经历|经验)[:：]?$/.test(text)) {
+        current = null;
+        ignoredSection = false;
+        continue;
+      }
+      if (/^(?:教育(?:经历|背景)?|学历|毕业院校|(?:专业|技术|职业)?技能|技能清单|求职意向|目标岗位|联系方式)(?:[:：].*)?$/.test(text)) {
+        current = null;
+        ignoredSection = true;
+        continue;
+      }
+      const explicitTitle = text.match(/^(?:项目|工作|职责)(?:名称)?[:：]\s*(.+)/)?.[1];
+      const numberedWork = /^\d+[.、)）]\s*(?:负责|参与|承担|建立|搭建|实现|完成|优化)/.test(text);
+      const plainTitle = !ignoredSection && text.length <= 80 && !/[。；;，,]/.test(text)
+        && /项目|系统|平台|链路|接口/.test(text) && !mockInterviewWorkEvidence(item);
+      if (explicitTitle || numberedWork || plainTitle) {
+        ignoredSection = false;
+        current = { title: clip(explicitTitle || text.replace(/^\d+[.、)）]\s*/, ''), 160), evidence: [] };
+        groups.push(current);
+      }
+      if (ignoredSection) continue;
+      if (!current && mockInterviewWorkEvidence(item)) {
+        current = { title: clip(text, 160), evidence: [] };
+        groups.push(current);
+      }
+      if (current) current.evidence.push({ id: String(item.id), text });
+    }
+    if (!groups.length) throw new Error('离线 Mock 故事准备需要实际工作或项目材料，教育和技能不能充当工作经历。');
+    return { stories: groups.map((group, index) => ({
+      id: `S${index + 1}`,
+      title: group.title,
+      resumeEvidenceIds: group.evidence.map(item => item.id),
+      text: `离线 Mock 故事示例（仅整理原文，未评估内容质量）：关于${group.title}，现有简历记载：“${group.evidence.map(item => item.text).join(' ')}”这些材料可作为讲述起点；具体的问题情境、选择原因、实际结果与经验仍需结合真实经历补充。`,
+      missingDetails: [`${group.title}当时遇到了什么具体问题？`,
+        '为什么采用简历所述的做法，当时考虑过哪些选择？', '实际怎样验证结果，这件事带来了什么经验？']
+    })) };
+  }
+
   async generateMockInterviewStep({ context = {}, settings = {}, turns = [] } = {}) {
     const job = context.job || {};
+    const storyPreparation = context.storyPreparation || context.interviewBrief?.storyPreparation;
+    const selectedStory = storyPreparation?.stories?.find(story => story.id === turns.at(-1)?.focus)
+      || storyPreparation?.stories?.[0];
     // Only choose a line describing an action for the fixed practice question.
     // This is not a semantic assessment of the resume or the user's answer.
-    const resumeEvidence = (Array.isArray(context.resumeEvidenceCatalog) ? context.resumeEvidenceCatalog : []).find((item) => {
-      const text = String(item?.text || "").trim();
-      return item?.id && text
-        && !/^(?:[\[【（(].*(?:已隐藏|已遮盖).*?[\]】）)]|个人总结|项目经历|工作经历|教育经历|技能)$/.test(text)
-        && !/^(?:姓名|联系方式|手机|电话|邮箱|求职意向|目标岗位|教育经历|毕业院校)[:：]/.test(text)
-        && /(?<!未|没有|不曾|尚未)(?:参与|负责|完成|实现|搭建|设计|优化|整理|(?:测试|开发).*(?:接口|系统|应用|服务|项目|功能))/.test(text);
-    });
+    const resumeEvidence = (Array.isArray(context.resumeEvidenceCatalog) ? context.resumeEvidenceCatalog : [])
+      .find(item => (!selectedStory || selectedStory.resumeEvidenceIds?.includes(item.id)) && mockInterviewWorkEvidence(item));
     if (!resumeEvidence?.id || !String(resumeEvidence.text || "").trim()) {
       throw new Error("离线 Mock 模拟面试需要一条描述实际工作或项目行动的简历证据，姓名和栏目标题不能作为经历。");
     }
@@ -295,14 +345,16 @@ class MockModelAdapter {
     const resumeExcerpt = clip(String(resumeEvidence.text).replace(/\s+/g, " "), 800);
     const history = Array.isArray(turns) ? turns : [];
     if (!history.length) {
-      const questionText = context.sessionKind === "resume_general" || !context.job
+      const questionText = selectedStory
+        ? `离线 Mock 练习题：请介绍“${selectedStory.title}”这部分工作，说明实际承担的内容、当时的问题以及行动与结果。`
+        : context.sessionKind === "resume_general" || !context.job
         ? `离线 Mock 练习题：简历中写到“${resumeExcerpt}”，请介绍这段经历以及你具体做了什么。`
         : `离线 Mock 练习题：简历中写到“${resumeExcerpt}”，请结合真实经历介绍你为什么适合${job.company ? `${job.company}的` : ""}${job.title || "该岗位"}。`;
       return {
         answerReview: null,
         nextQuestion: {
           text: questionText,
-          focus: "intro",
+          focus: selectedStory?.id || "intro",
           resumeEvidenceIds,
           basedOnTurnNumber: null,
           answerEvidence: ""
@@ -315,7 +367,7 @@ class MockModelAdapter {
     const answerExcerpt = clip(answer.replace(/\s+/g, " "), 36);
     const complete = history.length >= Number(settings.plannedQuestions || 6);
     const focusOrder = ["motivation", "project", "technical", "behavioral", "pressure", "questions"];
-    const focus = focusOrder[(history.length - 1) % focusOrder.length];
+    const focus = selectedStory?.id || focusOrder[(history.length - 1) % focusOrder.length];
     return {
       answerReview: {
         conclusion: "离线 Mock 已记录回答，未评估是否切题、事实真实性或内容质量。",
@@ -324,7 +376,9 @@ class MockModelAdapter {
         turnNumbers: [Number(last.turnNumber)]
       },
       nextQuestion: complete ? null : {
-        text: context.sessionKind === "resume_general" || !context.job
+        text: selectedStory
+          ? `离线 Mock 练习题：你刚才提到“${answerExcerpt}”，请围绕“${selectedStory.title}”继续说明你的具体行动、选择原因和实际验证结果。`
+          : context.sessionKind === "resume_general" || !context.job
           ? `离线 Mock 练习题：你刚才提到“${answerExcerpt}”，请结合简历中的“${resumeExcerpt}”继续说明你的个人行动和取舍。`
           : `离线 Mock 练习题：你刚才提到“${answerExcerpt}”，请结合${job.title || "该岗位"}继续说明你的个人行动和取舍。`,
         focus,
@@ -359,6 +413,14 @@ class MockModelAdapter {
       remainingImprovements: []
     };
   }
+}
+
+function mockInterviewWorkEvidence(item) {
+  const text = String(item?.text || '').trim();
+  return item?.id && text
+    && !/^(?:[\[【（(].*(?:已隐藏|已遮盖).*?[\]】）)]|个人总结|项目经历|工作经历|教育经历|技能)$/.test(text)
+    && !/^(?:姓名|联系方式|手机|电话|邮箱|求职意向|目标岗位|教育经历|毕业院校)[:：]/.test(text)
+    && /(?<!未|没有|不曾|尚未)(?:参与|负责|完成|实现|搭建|设计|优化|整理|(?:测试|开发).*(?:接口|系统|应用|服务|项目|功能))/.test(text);
 }
 
 function requiredCommunicationFact(message) {

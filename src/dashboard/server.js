@@ -70,6 +70,7 @@ const {
   restoreCandidateJob,
   isCandidateJobArchived,
   recordCandidateJobEvent,
+  listCandidateJobEvents,
   recordRecommendationFeedback,
   saveCandidateFact,
   listCandidateFacts,
@@ -1343,6 +1344,7 @@ function createDashboardServer({
         }
         return sendHtml(res, page);
       }
+      if (req.method === "GET" && url.pathname === "/communication/greeting") return handleSavedGreeting(res, db, url.searchParams);
       if (req.method === "GET" && url.pathname === "/communication/new") return sendHtml(res, renderCommunicationBuilderPage({ db, searchParams: url.searchParams, browserAuthority: frozenBrowserAuthority }));
       if (req.method === "GET" && url.pathname === "/communication") return sendHtml(res, renderCommunicationCenterPage({ db, searchParams: url.searchParams }));
       if (req.method === "GET" && url.pathname === "/jobs/export.csv") return handleFilteredJobExport(res, db, url.searchParams);
@@ -1607,6 +1609,15 @@ function createDashboardServer({
         return sendJson(res, 200, { ok: true, ...getMockInterviewService().getOperation({
           profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get("operationId")
         }) });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/interview/preparation/operation') {
+        const plan = requiredMockInterviewPlan(db, url.searchParams.get('planId'));
+        return sendJson(res, 200, { ok: true, ...getMockInterviewService().getPreparationOperation({
+          profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get('operationId')
+        }) });
+      }
+      if (req.method === 'POST' && ['/api/interview/prepare', '/api/interview/preparation/save', '/api/interview/preparation/refine'].includes(url.pathname)) {
+        return await handleMockInterviewPreparation(req, res, { db, mockInterview: getMockInterviewService(), path: url.pathname });
       }
       if (req.method === "POST" && url.pathname === "/api/interview/start") return await handleMockInterviewStart(req, res, {
         db,
@@ -4310,6 +4321,37 @@ function messageDiscoveryViewHelpers() {
   };
 }
 
+function savedGreetingPath(planId, jobId) {
+  return `/communication/greeting?planId=${encodeURIComponent(planId)}&jobId=${encodeURIComponent(jobId)}`;
+}
+
+function completeGreeting(result) {
+  return result?.kind === "greeting" && !result.missingFact
+    && Array.isArray(result.messages) && result.messages.length > 0
+    && result.messages.every((message) => typeof message === "string" && message.trim());
+}
+
+function latestSavedGreeting(db, { profileId, planId, jobId }) {
+  return listCandidateJobEvents(db, { profileId, planId, jobId, eventType: "communication_greeting", limit: 200 })
+    .find((event) => event.profileId === profileId && event.jobId === jobId
+      && event.planId !== null && event.planId === planId && event.eventType === "communication_greeting"
+      && completeGreeting(event.payload?.result));
+}
+
+function handleSavedGreeting(res, db, searchParams) {
+  const plan = getSearchPlan(db, Number(searchParams.get("planId")));
+  const profile = plan && getCandidateProfile(db, plan.profileId);
+  const job = profile && listDecisionPool(db, { planId: plan.id, site: "boss" })
+    .find((item) => Number(item.id) === Number(searchParams.get("jobId")));
+  if (!job) return sendHtml(res, renderErrorPage("岗位不存在或不属于当前筛选方案。", "/queue"), 404);
+  const saved = latestSavedGreeting(db, { profileId: profile.id, planId: plan.id, jobId: job.id });
+  return sendHtml(res, renderCommunicationResult({
+    result: saved?.payload.result || { kind: "greeting", messages: [], missingFact: null },
+    job, profile, plan, hrMessage: "", savedAt: saved?.createdAt,
+    emptyMessage: "还没有保存的招呼语。可返回岗位记录后生成。"
+  }));
+}
+
 async function handleCommunication(req, res, { db, modelConfig, modelReady, logger, requestId }) {
   let params = {};
   try {
@@ -4323,7 +4365,7 @@ async function handleCommunication(req, res, { db, modelConfig, modelReady, logg
     if (!job) throw new Error("岗位不存在或不属于当前筛选方案。");
     if (job.archived) throw new Error("岗位已归档，请先恢复后再生成沟通草稿。");
     const mode = ["greeting", "hr_reply", "follow_up"].includes(params.mode) ? params.mode : "greeting";
-    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有证据完整的主投或可投岗位可以生成定制招呼语；其他岗位请使用 BOSS 通用招呼语。");
+    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有岗位详情和支持证据完整的投递候选可以生成定制招呼语；请先补齐资料或完成分析。");
     if (mode === "follow_up" && job.applicationStatus !== "no_reply") throw new Error("只有已标记为“无回复待跟进”的岗位可以生成跟进文案。");
     if (mode === "hr_reply" && !String(params.hrMessage || "").trim()) throw new Error("请粘贴 HR 的原话。");
     if (params.factKey && params.factValue) saveCandidateFact(db, { profileId: profile.id, factKey: params.factKey, factValue: params.factValue, source: "user_provided" });
@@ -4357,6 +4399,7 @@ async function handleCommunication(req, res, { db, modelConfig, modelReady, logg
       payload: { result, hrMessage: mode === "hr_reply" ? String(params.hrMessage || "").trim().slice(0, 2000) : "" }
     });
     logger.info("communication_draft_generated", { requestId, profileId: profile.id, planId: plan.id, jobId: job.id, mode, missingFact: result.missingFact?.key || "", messageCount: result.messages.length });
+    if (mode === "greeting" && completeGreeting(result)) return redirect(res, savedGreetingPath(plan.id, job.id));
     sendHtml(res, renderCommunicationResult({ result, job, profile, plan, hrMessage: params.hrMessage || "" }));
   } catch (error) {
     const planId = Number(params.planId || 0);
@@ -4567,7 +4610,7 @@ async function handleProgress(req, res, db, messageDiscovery = null, replyLearni
 
 function canGenerateGreeting(job) {
   const analysis = job.analysis || {};
-  if (!["primary", "apply"].includes(job.decisionBucket) || analysis.semanticStatus !== "complete") return false;
+  if (!defaultSelectedForBatch(job.decisionBucket) || analysis.semanticStatus !== "complete") return false;
   if (analysis.semanticMatchingMode === "whole_jd") {
     return hasCompleteJobDescription(job)
       && Array.isArray(analysis.selectedWork?.jdEvidenceRefs) && analysis.selectedWork.jdEvidenceRefs.length > 0
@@ -4578,7 +4621,7 @@ function canGenerateGreeting(job) {
   return Boolean(analysis.evidence?.jd?.length && analysis.evidence?.resume?.length);
 }
 
-function renderCommunicationResult({ result, job, profile, plan, hrMessage }) {
+function renderCommunicationResult({ result, job, profile, plan, hrMessage, savedAt = "", emptyMessage = "没有生成可发送文案。" }) {
   const title = { greeting: "定制招呼语", hr_reply: "HR 回复", follow_up: "无回复跟进" }[result.kind] || "沟通草稿";
   const messages = (result.messages || []).map((message, index) => {
     const editor = `<label>${index ? "另一种说法" : "回复草稿"}<textarea id="communication-${index}" rows="7" readonly>${escapeHtml(message)}</textarea></label><button type="button" onclick="copyCommunication('communication-${index}')">复制这段回复</button>`;
@@ -4586,7 +4629,7 @@ function renderCommunicationResult({ result, job, profile, plan, hrMessage }) {
   }).join("");
   const missing = result.missingFact ? `<section class="panel"><p>${escapeHtml(result.missingFact.question)}</p><form class="form-stack" method="post" action="/api/communication"><input type="hidden" name="mode" value="${escapeAttr(result.kind)}"><input type="hidden" name="jobId" value="${job.id}"><input type="hidden" name="profileId" value="${profile.id}"><input type="hidden" name="planId" value="${plan.id}"><input type="hidden" name="hrMessage" value="${escapeAttr(hrMessage)}"><input type="hidden" name="factKey" value="${escapeAttr(result.missingFact.key)}"><label>你的真实情况<textarea name="factValue" required></textarea></label><button>保存事实并生成回复</button></form></section>` : "";
   return renderLegacyDashboardPage({ title, currentPath: `/queue?planId=${plan.id}`, todayPath: `/plan?planId=${plan.id}`, planId: plan.id, stage: title,
-    body: `<main id="main-content"><h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}。文案只生成到本页，不会自动发送。</p>${hrMessage ? `<section class="card pad"><h2>HR 的消息</h2><p>${escapeHtml(hrMessage)}</p></section>` : ""}${missing}${messages || (!missing ? '<section class="card pad">没有生成可发送文案。</section>' : "")}<p><a href="/queue?planId=${escapeAttr(plan.id)}">返回岗位记录</a></p></main><script>async function copyCommunication(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}</script>` });
+    body: `<main id="main-content"><h1>${escapeHtml(title)}</h1><p class="hint">${escapeHtml(job.title)} · ${escapeHtml(job.company || "")}。文案只生成到本页，不会自动发送。</p>${savedAt ? `<p class="hint">保存时间：${escapeHtml(compactDateTime(savedAt))}</p>` : ""}${hrMessage ? `<section class="card pad"><h2>HR 的消息</h2><p>${escapeHtml(hrMessage)}</p></section>` : ""}${missing}${messages || (!missing ? `<section class="card pad">${escapeHtml(emptyMessage)}</section>` : "")}<p><a href="/queue?planId=${escapeAttr(plan.id)}">返回岗位记录</a></p></main><script>async function copyCommunication(id){const el=document.getElementById(id);if(el)await navigator.clipboard.writeText(el.value);}</script>` });
 }
 
 function parseBody(rawBody, contentType) {
@@ -6162,12 +6205,32 @@ function renderMockInterviewDashboardPage({ db, searchParams, mockInterview, mod
   const plan = getSearchPlan(db, searchParams.get("planId"));
   if (!plan) return renderErrorPage("找不到这份筛选方案，请从今日任务重新进入模拟面试。", "/plan");
   const sessionId = Number(searchParams.get("sessionId") || 0) || null;
+  const preparationId = Number(searchParams.get('preparationId') || 0) || null;
   const dashboard = mockInterview.dashboard({
     profileId: plan.profileId,
     planId: plan.id,
-    sessionId
+    sessionId,
+    ...(preparationId ? { preparationId } : {})
   });
   return renderPage("模拟面试训练", `${renderMockInterviewPage({ dashboard, modelReady })}${MOCK_INTERVIEW_SCRIPT}`);
+}
+
+async function handleMockInterviewPreparation(req, res, { db, mockInterview, path }) {
+  const params = parseBody(await readBody(req), req.headers['content-type'] || '');
+  const plan = requiredMockInterviewPlan(db, params.planId);
+  const owner = { profileId: plan.profileId, planId: plan.id };
+  let preparation;
+  if (path === '/api/interview/prepare') {
+    preparation = await mockInterview.prepareStories({ ...owner, resumeVersionId: Number(params.resumeVersionId),
+      ...(params.operationId === undefined ? {} : { operationId: params.operationId }) });
+  } else {
+    const input = { ...owner, preparationId: Number(params.preparationId), expectedRevision: Number(params.expectedRevision), storyId: params.storyId };
+    preparation = path.endsWith('/save')
+      ? mockInterview.savePreparation({ ...input, storyText: params.storyText })
+      : await mockInterview.refineStory({ ...input, supplement: params.supplement,
+        ...(params.operationId === undefined ? {} : { operationId: params.operationId }) });
+  }
+  return redirect(res, `/interview?planId=${encodeURIComponent(plan.id)}&preparationId=${encodeURIComponent(preparation.id)}#interview-preparation`);
 }
 
 async function handleMockInterviewStart(req, res, { db, mockInterview }) {
@@ -6181,6 +6244,8 @@ async function handleMockInterviewStart(req, res, { db, mockInterview }) {
     ...(params.operationId === undefined ? {} : { operationId: params.operationId }),
     jobId: sessionKind === "job_specific" ? Number(params.jobId) : null,
     resumeVersionId: Number(params.resumeVersionId),
+    ...(params.preparationId ? { preparationId: Number(params.preparationId), preparationRevision: Number(params.preparationRevision),
+      storyIds: Array.isArray(params.storyIds) ? params.storyIds : params.storyIds ? [params.storyIds] : [] } : {}),
     settings: {
       type: params.type,
       difficulty: params.difficulty,
@@ -6281,7 +6346,6 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
   counts.waiting_reply = scopedProgress.filter((job) => job.progressCard.stage === "waiting_reply").length;
   counts.needs_user_action = scopedProgress.filter((job) => ["needs_user_action", "reply_ready"].includes(job.progressCard.stage)).length;
   counts.interview = scopedProgress.filter((job) => ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard.stage)).length;
-  const wanted = pool === "focus" ? new Set(["primary", "apply"]) : new Set([pool]);
   const filtered = candidates.filter((job) => {
     const tags = job.qualityTags || [];
     if (pool === "no_reply") return true;
@@ -6290,12 +6354,15 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
     if (pool === "waiting_reply") return job.progressCard?.stage === "waiting_reply";
     if (pool === "needs_user_action") return ["needs_user_action", "reply_ready"].includes(job.progressCard?.stage);
     if (pool === "interview") return ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard?.stage);
-    return wanted.has(job.decisionBucket);
+    return pool === "focus" ? defaultSelectedForBatch(job.decisionBucket) : job.decisionBucket === pool;
   });
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const page = Math.min(totalPages, Math.max(1, Number(searchParams.get("page")) || 1));
-  const jobs = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const jobs = filtered.slice((page - 1) * pageSize, page * pageSize).map((job) => ({ ...job,
+    savedGreetingUrl: job.source === "boss" && latestSavedGreeting(db, { profileId: plan.profileId, planId: plan.id, jobId: job.id })
+      ? savedGreetingPath(plan.id, job.id) : ""
+  }));
   return renderCompactDashboard({
     jobs,
     filters: { site: source, status: "all", level: "all", fresh: "all", decision: "all", q: "", planId: plan.id, batch: "latest", batchId: null, queuePool: pool, queueScope: scope, queuePage: page, latestMainBatchId },
@@ -6621,7 +6688,7 @@ function jobExportFilterInputs(filters) {
 
 function renderCompactPoolTabs(queue, planId, profileId = "") {
   const scopes = [["all", "全部待处理", queue.scopeCounts.all || 0], ["new", "本轮新增", queue.scopeCounts.new || 0], ["repeated", "本轮重复", queue.scopeCounts.repeated || 0], ["backlog", "历史未处理", queue.scopeCounts.backlog || 0]];
-  const tabs = [["focus", "主投 + 可投", (queue.counts.primary || 0) + (queue.counts.apply || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "等待分析", queue.counts.analysis_pending || 0], ["detail_pending", "等待补齐资料", queue.counts.detail_pending || 0], ["activity_pending", "等待确认招聘状态", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
+  const tabs = [["focus", "投递候选", (queue.counts.primary || 0) + (queue.counts.apply || 0) + (queue.counts.caution || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "等待分析", queue.counts.analysis_pending || 0], ["detail_pending", "等待补齐资料", queue.counts.detail_pending || 0], ["activity_pending", "等待确认招聘状态", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
   const scopeLinks = scopes.map(([key, label, count]) => `<a class="pool-tab ${queue.scope === key ? "active" : ""}" href="${queueHref(planId, queue.pool, key, 1, queue.site)}">${escapeHtml(label)} ${count}</a>`).join("")
     + `<a class="pool-tab" href="/communication/new?planId=${escapeAttr(planId)}${queue.site === 'zhaopin' ? '&site=zhaopin' : ''}">${queue.site === 'zhaopin' ? '选择岗位打招呼' : '批量沟通清单'}</a>`
     + (profileId ? `<a class="pool-tab" href="/messages?profileId=${escapeAttr(profileId)}${queue.site === 'zhaopin' ? '&workSite=zhaopin' : ''}">消息发现</a>` : "");
@@ -6675,6 +6742,7 @@ function renderCompactJobBase(job, filters) {
   const salaryLabel = job.salary || ((job.qualityTags || []).includes("salary_unverified") ? "薪资待确认" : "薪资未说明");
   const experienceLabel = job.experience || ((job.qualityTags || []).includes("experience_unverified") ? "经验待确认" : "经验未说明");
   const greetingAction = canGenerateGreeting(job) ? `<form class="detail-actions" method="post" action="/api/communication">${jobContext}<input type="hidden" name="mode" value="greeting"><button>生成定制招呼语</button></form>` : "";
+  const savedGreetingAction = job.savedGreetingUrl ? `<p class="line"><a href="${escapeAttr(job.savedGreetingUrl)}">查看上次招呼</a></p>` : "";
   const followUpAction = job.applicationStatus === "no_reply" ? `<form class="detail-actions" method="post" action="/api/communication">${jobContext}<input type="hidden" name="mode" value="follow_up"><button>生成一次跟进文案</button></form>` : "";
   const hrReplyAction = `<form class="follow" method="post" action="/api/communication">${jobContext}<input type="hidden" name="mode" value="hr_reply"><textarea name="hrMessage" placeholder="粘贴 HR 原话" aria-label="HR 原话" required></textarea><button>生成 HR 回复</button></form>`;
   const feedbackAction = `<form class="follow" method="post" action="/api/feedback${query}">${jobContext}${feedbackReasonSelect("", true)}<input name="note" placeholder="具体哪里推荐错了（可选）" aria-label="推荐反馈说明"><button>提交推荐反馈</button></form>`;
@@ -6688,7 +6756,7 @@ function renderCompactJobBase(job, filters) {
   if (job.archived) {
     return `<article class="job"><div class="job-top"><div><div class="job-title">${escapeHtml(job.title)} · 已归档${job.url ? ` · <a href="${escapeAttr(job.url)}" target="_blank">打开岗位</a>` : ""}</div><div class="job-meta">${escapeHtml(job.company || "")} · ${escapeHtml(job.location || "")} · ${escapeHtml(salaryLabel)} · ${escapeHtml(experienceLabel)} · ${escapeHtml(compactActivityLabel(job))}${escapeHtml(status)}</div><div class="job-meta">${escapeHtml(compactSeenLabel(job, filters.latestMainBatchId))}</div></div><div class="job-side"><span class="decision ${escapeAttr(job.decisionBucket || "backup")}">${escapeHtml(compactDecisionLabel(job.decisionBucket))}</span>${exportSelection}</div></div><div class="job-reason"><strong>结论：</strong>${escapeHtml(narrative.conclusion)}</div><div class="line"><strong>岗位：</strong>${escapeHtml(narrative.role)}</div><div class="line"><strong>公司与机会：</strong>${escapeHtml(narrative.companyOpportunity)}</div><div class="line"><strong>匹配：</strong>${escapeHtml(narrative.fit)}</div><div class="line"><strong>薪资：</strong>${escapeHtml(narrative.salary)}</div><div class="job-risk"><strong>${riskLabel}：</strong>${escapeHtml(narrative.risk)}</div><p class="line">这是只读归档记录，恢复后可继续处理。</p>${archiveAction}<details class="details"><summary>查看 JD 与分析记录</summary><div class="detail-body">${roleEvidenceSummary}<div class="line">决策来源：${escapeHtml(compactDecisionSource(analysis))} · 工作节奏：${escapeHtml(compactScheduleLabel(analysis))} · 推荐简历：${escapeHtml(analysis.recommendedResumeVersionName || analysis.recommendedResumeVersion || "待确认")} · 主推项目：${escapeHtml((analysis.primaryProjects || []).join("、") || "待确认")}</div><div class="chips">${chips(visibleRisks, "risk")}${chips(job.qualityTags, "tag")}</div><div class="jd">${escapeHtml(String(job.description || "暂无完整 JD"))}</div></div></details></article>`;
   }
-  return `<article class="job"><div class="job-top"><div><div class="job-title">${escapeHtml(job.title)}${job.archived ? " · 已归档" : ""}${job.url ? ` · <a href="${escapeAttr(job.url)}" target="_blank">打开岗位</a>` : ""}</div><div class="job-meta">${escapeHtml(job.company || "")} · ${escapeHtml(job.location || "")} · ${escapeHtml(salaryLabel)} · ${escapeHtml(experienceLabel)} · ${escapeHtml(compactActivityLabel(job))}${escapeHtml(status)}</div><div class="job-meta">${escapeHtml(compactSeenLabel(job, filters.latestMainBatchId))}</div></div><div class="job-side"><span class="decision ${escapeAttr(job.decisionBucket || "backup")}">${escapeHtml(compactDecisionLabel(job.decisionBucket))}</span>${exportSelection}</div></div><div class="job-reason"><strong>结论：</strong>${escapeHtml(narrative.conclusion)}</div><div class="line"><strong>岗位：</strong>${escapeHtml(narrative.role)}</div><div class="line"><strong>公司与机会：</strong>${escapeHtml(narrative.companyOpportunity)}</div><div class="line"><strong>匹配：</strong>${escapeHtml(narrative.fit)}</div><div class="line"><strong>薪资：</strong>${escapeHtml(narrative.salary)}</div><div class="job-risk"><strong>${riskLabel}：</strong>${escapeHtml(narrative.risk)}</div>${retryAnalysisAction}${job.followUpNote ? `<div class="line"><strong>沟通记录：</strong>${escapeHtml(job.followUpNote)}</div>` : ""}<form class="quick-actions" method="post" action="/api/mark${query}">${jobContext}<button class="apply" name="status" value="applied">已投</button><button name="status" value="review">待确认</button><button name="status" value="later">7 天后再看</button><button class="skip" name="status" value="skipped">跳过</button></form>${archiveAction}<details class="details"><summary>查看 JD、沟通与完整记录</summary><div class="detail-body">${roleEvidenceSummary}<div class="line">决策来源：${escapeHtml(compactDecisionSource(analysis))} · 工作节奏：${escapeHtml(compactScheduleLabel(analysis))} · 推荐简历：${escapeHtml(analysis.recommendedResumeVersionName || analysis.recommendedResumeVersion || "待确认")} · 主推项目：${escapeHtml((analysis.primaryProjects || []).join("、") || "待确认")}</div><div class="chips">${chips(visibleRisks, "risk")}${chips(job.qualityTags, "tag")}</div><div class="jd">${escapeHtml(String(job.description || "暂无完整 JD"))}</div>${greetingAction}${followUpAction}${hrReplyAction}<form class="detail-actions" method="post" action="/api/mark${query}">${jobContext}<input name="note" placeholder="状态备注（可选）" aria-label="岗位状态备注"><button name="status" value="no_reply">无回复待跟进</button><button name="status" value="interview">约面</button><button name="status" value="rejected">拒绝</button><button name="status" value="invalid">岗位无效</button><button name="status" value="salary_mismatch">薪资不匹配</button></form><form class="follow" method="post" action="/api/follow-up${query}">${jobContext}<input name="note" placeholder="记录沟通进展" aria-label="沟通跟进备注"><button>记录备注</button></form>${feedbackAction}</div></details></article>`;
+  return `<article class="job"><div class="job-top"><div><div class="job-title">${escapeHtml(job.title)}${job.archived ? " · 已归档" : ""}${job.url ? ` · <a href="${escapeAttr(job.url)}" target="_blank">打开岗位</a>` : ""}</div><div class="job-meta">${escapeHtml(job.company || "")} · ${escapeHtml(job.location || "")} · ${escapeHtml(salaryLabel)} · ${escapeHtml(experienceLabel)} · ${escapeHtml(compactActivityLabel(job))}${escapeHtml(status)}</div><div class="job-meta">${escapeHtml(compactSeenLabel(job, filters.latestMainBatchId))}</div></div><div class="job-side"><span class="decision ${escapeAttr(job.decisionBucket || "backup")}">${escapeHtml(compactDecisionLabel(job.decisionBucket))}</span>${exportSelection}</div></div><div class="job-reason"><strong>结论：</strong>${escapeHtml(narrative.conclusion)}</div><div class="line"><strong>岗位：</strong>${escapeHtml(narrative.role)}</div><div class="line"><strong>公司与机会：</strong>${escapeHtml(narrative.companyOpportunity)}</div><div class="line"><strong>匹配：</strong>${escapeHtml(narrative.fit)}</div><div class="line"><strong>薪资：</strong>${escapeHtml(narrative.salary)}</div><div class="job-risk"><strong>${riskLabel}：</strong>${escapeHtml(narrative.risk)}</div>${savedGreetingAction}${retryAnalysisAction}${job.followUpNote ? `<div class="line"><strong>沟通记录：</strong>${escapeHtml(job.followUpNote)}</div>` : ""}<form class="quick-actions" method="post" action="/api/mark${query}">${jobContext}<button class="apply" name="status" value="applied">已投</button><button name="status" value="review">待确认</button><button name="status" value="later">7 天后再看</button><button class="skip" name="status" value="skipped">跳过</button></form>${archiveAction}<details class="details"><summary>查看 JD、沟通与完整记录</summary><div class="detail-body">${roleEvidenceSummary}<div class="line">决策来源：${escapeHtml(compactDecisionSource(analysis))} · 工作节奏：${escapeHtml(compactScheduleLabel(analysis))} · 推荐简历：${escapeHtml(analysis.recommendedResumeVersionName || analysis.recommendedResumeVersion || "待确认")} · 主推项目：${escapeHtml((analysis.primaryProjects || []).join("、") || "待确认")}</div><div class="chips">${chips(visibleRisks, "risk")}${chips(job.qualityTags, "tag")}</div><div class="jd">${escapeHtml(String(job.description || "暂无完整 JD"))}</div>${greetingAction}${followUpAction}${hrReplyAction}<form class="detail-actions" method="post" action="/api/mark${query}">${jobContext}<input name="note" placeholder="状态备注（可选）" aria-label="岗位状态备注"><button name="status" value="no_reply">无回复待跟进</button><button name="status" value="interview">约面</button><button name="status" value="rejected">拒绝</button><button name="status" value="invalid">岗位无效</button><button name="status" value="salary_mismatch">薪资不匹配</button></form><form class="follow" method="post" action="/api/follow-up${query}">${jobContext}<input name="note" placeholder="记录沟通进展" aria-label="沟通跟进备注"><button>记录备注</button></form>${feedbackAction}</div></details></article>`;
 }
 
 function compactAnalysisFailure(job) {

@@ -7,6 +7,7 @@ const HISTORY_EVENT_TYPES = new Set([
   'resume_requested',
   'interview_invited',
   'interview_scheduled',
+  'recruiter_rejected',
   'incoming_message_classified',
   'message_group_classified'
 ]);
@@ -16,11 +17,22 @@ const {
   listClassifiedMessageHistory,
   listRawUnresolvedMessageItems
 } = require("../../storage/message_discovery_store");
+const { listMessageEvents } = require('../../storage/message_timeline_store');
 
 function listIncomingContacts(db, { profileId } = {}) {
   const profile = positiveInteger(profileId, 'profileId');
   const contacts = new Map();
+  const timelines = new Map();
   const add = input => addContact(contacts, input);
+  const originalMessages = (row, metadata) => {
+    if (metadata.threadKey !== row.thread_key || metadata.platform !== row.platform || !DIGEST.test(metadata.messageKey || '')) return [];
+    const identity = `${row.platform}\0${row.thread_key}`;
+    if (!timelines.has(identity)) timelines.set(identity, listMessageEvents(db, {
+      profileId: profile, platform: row.platform, conversationKey: row.thread_key, limit: 1000
+    }));
+    return safeInboundMessages(timelines.get(identity).filter(message => message.messageKey === metadata.messageKey
+      && message.direction === 'friend'));
+  };
 
   for (const row of linkedContexts(db, profile)) {
     add({
@@ -57,6 +69,7 @@ function listIncomingContacts(db, { profileId } = {}) {
       title: row.title,
       company: row.company,
       observedAt: row.occurred_at,
+      inboundMessages: originalMessages(row, metadata),
       resumeRequested: row.type === 'resume_requested',
       interviewInvited,
       messageIntent: metadata.messageIntent,

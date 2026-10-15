@@ -319,6 +319,24 @@ server.listen(0, "127.0.0.1", async () => {
     await structuredBudgetAdapter.chatJson("return json", { test: true }, { kind: "matchResponsibilities" });
     assert.deepStrictEqual(structuredBudgets.at(-1), { maxTokens: 8192, timeoutMs: 240000 });
 
+    const preparationBudgets = [];
+    structuredBudgetAdapter.requestJson = async ({ maxTokens, timeoutMs }) => {
+      preparationBudgets.push({ maxTokens, timeoutMs });
+      if (preparationBudgets.length === 1) throw Object.assign(new Error("story preparation truncated"), {
+        code: "MODEL_OUTPUT_TRUNCATED", retryable: true, requestedMaxTokens: maxTokens
+      });
+      return { value: { stories: [] }, usage: null, httpStatus: 200,
+        providerRequestId: "preparation-budget", contentLength: 14 };
+    };
+    assert.deepStrictEqual(
+      await structuredBudgetAdapter.chatJson("return json", { test: true }, { kind: "generateMockInterviewPreparation" }),
+      { stories: [] }
+    );
+    assert.deepStrictEqual(preparationBudgets, [
+      { maxTokens: 32768, timeoutMs: 600000 },
+      { maxTokens: 65536, timeoutMs: 600000 }
+    ], "multi-story thinking output must have room to finish and a genuinely larger truncation recovery");
+
     const ordinaryBudgets = [];
     const ordinaryBudgetAdapter = new OpenAICompatibleAdapter({
       baseUrl,

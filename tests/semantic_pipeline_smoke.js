@@ -2329,7 +2329,7 @@ function staleAnalysisSmoke() {
   assert.deepStrictEqual(PIPELINE_VERSIONS, {
     understandJob: "job-understanding-v21-conditions",
     matchJob: "match-decision-v55-grounded-conditions",
-    selectJob: "whole-jd-work-v4-source-scope",
+    selectJob: "whole-jd-work-v5-related-major-scope",
     decisionRules: "four-tier-v5-whole-jd-work",
     communication: "communication-v3-candidate-speaker"
   });

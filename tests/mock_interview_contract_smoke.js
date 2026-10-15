@@ -4,6 +4,7 @@ const {
   buildInterviewBrief,
   buildInterviewProgress,
   buildResumeInterviewEvidenceCatalog,
+  validateInterviewPreparation,
   validateInterviewStep,
   validateInterviewReport,
   validateRetryReview
@@ -13,6 +14,34 @@ const resumeEvidenceCatalog = buildResumeInterviewEvidenceCatalog("个人总结\
 assert.deepStrictEqual(resumeEvidenceCatalog.map((item) => item.id), ["R1", "R2", "R3"]);
 assert.throws(() => buildResumeInterviewEvidenceCatalog(" \n "), /简历证据/);
 const stepContext = { resumeEvidenceCatalog, sessionKind: "resume_general" };
+
+// A preparation is a usable story draft, independent from interview answers.
+const preparation = validateInterviewPreparation({ stories: [{
+  id: 'S1', title: ' 知识库检索链路 ', resumeEvidenceIds: ['R2', 'R2'],
+  text: ' 我参与知识库开发，整理了现有检索链路。具体的决策原因和验证结果还需要我补充。 ',
+  missingDetails: [' 当时为什么选择这个方案？ ']
+}] }, { resumeEvidenceCatalog });
+assert.deepStrictEqual(preparation, { stories: [{
+  id: 'S1', title: '知识库检索链路', resumeEvidenceIds: ['R2'],
+  text: '我参与知识库开发，整理了现有检索链路。具体的决策原因和验证结果还需要我补充。',
+  missingDetails: ['当时为什么选择这个方案？']
+}] });
+const story = preparation.stories[0];
+assert.deepStrictEqual(validateInterviewPreparation({ stories: [story] }, { resumeEvidenceCatalog, storyId: 'S1' }), preparation);
+for (const stories of [[], [null], [{ ...story, id: 'S0' }], [{ ...story, id: 'random' }],
+  [story, story], [{ ...story, text: '' }], [{ ...story, title: '' }],
+  [{ ...story, text: {} }], [{ ...story, title: [] }], [{ ...story, missingDetails: [{}] }],
+  [{ ...story, resumeEvidenceIds: [] }], [{ ...story, resumeEvidenceIds: ['R99'] }],
+  [{ ...story, missingDetails: ['1', '2', '3', '4'] }]]) {
+  assert.throws(() => validateInterviewPreparation({ stories }, { resumeEvidenceCatalog }), /故事|简历证据|补充/);
+}
+assert.throws(() => validateInterviewPreparation({ stories: [story] }, { resumeEvidenceCatalog, storyId: 'S2' }), /故事/);
+assert.throws(() => validateInterviewPreparation({ stories: [story, { ...story, id: 'S2' }] },
+  { resumeEvidenceCatalog, storyId: 'S1' }), /故事/);
+const manyStories = Array.from({ length: 61 }, (_, index) => ({ ...story, id: `S${index + 1}` }));
+assert.strictEqual(validateInterviewPreparation({ stories: manyStories.slice(0, 21) }, { resumeEvidenceCatalog }).stories.length, 21);
+assert.throws(() => validateInterviewPreparation({ stories: manyStories }, { resumeEvidenceCatalog }), /故事/,
+  'an oversized draft must fail explicitly rather than silently dropping work');
 
 const fullJd = '负责企业知识库开发和检索评估。\n任职要求：Node.js、检索质量评估与跨团队交付。';
 const specificBrief = buildInterviewBrief({ sessionKind: 'job_specific', job: {
@@ -43,6 +72,20 @@ assert.deepStrictEqual(legacyBrief.jobFocus.requirements, ['旧岗位要求']);
 assert.deepStrictEqual(legacyBrief.jobFocus.matchingEvidence, { resume: ['旧证据'] });
 
 const generalBrief = buildInterviewBrief({ sessionKind: 'resume_general' });
+const selectedPreparation = { id: 8, revision: 2, stories: [story, {
+  ...story, id: 'S2', title: '知识库发布验证', resumeEvidenceIds: ['R3']
+}] };
+const storyBrief = buildInterviewBrief({ sessionKind: 'resume_general', resumeEvidenceCatalog,
+  storyPreparation: selectedPreparation });
+assert.deepStrictEqual(storyBrief.generalThemes, ['S1：知识库检索链路', 'S2：知识库发布验证']);
+assert.deepStrictEqual(storyBrief.storyPreparation, selectedPreparation);
+assert.deepStrictEqual(buildInterviewProgress(storyBrief, [
+  { focus: 'S1', question: '请介绍知识库检索链路这部分工作。', answer: '我参与梳理了检索链路。' },
+  { focus: 'technical', question: '你如何解决验证问题？', answer: '先复现现象。' }
+]).remainingThemes, ['S2：知识库发布验证'], 'generic technical language cannot mark another story as already covered');
+assert.deepStrictEqual(buildInterviewProgress(storyBrief, [
+  { focus: 'S2', question: '请介绍这项工作。' }
+]).coveredThemes, ['S2：知识库发布验证']);
 for (const questionKind of ['behavioral', 'arbitrary_invalid_kind']) {
   assert.throws(() => validateInterviewStep({ answerReview: null, complete: false,
     nextQuestion: { text: '请讲一次与同学协作解决问题的经历。', focus: 'collaboration',

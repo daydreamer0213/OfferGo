@@ -14,6 +14,8 @@ const { listUnresolvedMessageDiscoveryItems } = require("../../core/message_prev
 const { listIncomingContacts } = require("./incoming_contacts");
 const { listCandidateResumeVersionLabels } = require("../../storage/candidate_store");
 const { buildHealthView } = require("./health_view");
+const { listFunnelFeedbackEvidence } = require('../../storage/funnel_feedback_store');
+const { buildFeedbackReview } = require('./feedback_review');
 
 function createFunnelAnalysisService({ db, now = () => new Date().toISOString() } = {}) {
   if (!db) throw new Error("funnel analysis database is required");
@@ -45,19 +47,21 @@ function dashboard(db, { profileId, planId, now }) {
   syncVerifiedCommunicationFunnelEntries(db, { profileId });
   const entries = listFunnelEntries(db, { profileId });
   const rounds = listFunnelStrategyRounds(db, { profileId, planId, limit: null }).reverse();
+  const feedbackEntries = [];
   const platforms = ['boss', 'zhaopin'].map(site => {
     const history = platformRounds(rounds, site);
     const latest = history.at(-1);
     const previous = history.at(-2) || null;
     const siteEntries = entries.filter(entry => entry.site === site);
-    const build = group => {
+    const build = (group, collectFeedback = false) => {
       const selected = siteEntries.filter(entry => entry.planId === Number(planId) && group.revisionIds.has(entry.strategyRoundId));
+      if (collectFeedback) feedbackEntries.push(...selected);
       const samplePolicy = roundPolicy(group.round);
       const snapshot = snapshotFor(db, selected, { profileId, now, policy: samplePolicy });
       const analysis = analyze(db, selected, snapshot, samplePolicy, profileId, site);
       return { snapshot, summary: roundSummary(group.round, snapshot, analysis, samplePolicy, now) };
     };
-    const currentResult = build(latest);
+    const currentResult = build(latest, true);
     const previousResult = previous ? build(previous) : null;
     const lifetime = snapshotFor(db, siteEntries, { profileId, now, policy });
     return {
@@ -112,6 +116,9 @@ function dashboard(db, { profileId, planId, now }) {
       "反馈计数包含刚联系的岗位；诊断按平台、当前有效策略与成熟规则独立计算。"
     ]
   };
+  result.feedbackReview = buildFeedbackReview({ profileId: Number(profileId), samples: listFunnelFeedbackEvidence(db, {
+    profileId: Number(profileId), planId: Number(planId), entries: feedbackEntries, now
+  }) });
   return { ...result, health: buildHealthView(result) };
 }
 
@@ -289,7 +296,7 @@ function diagnose(snapshot, policy, site) {
     ["read", 0.4, "发起沟通到已读", "优先检查招聘活跃度、岗位选择、发送时机和招呼语。"],
     ["replied", 0.35, "已读到回复", "优先检查岗位匹配和开场表达，不必立即重写简历。"],
     ["effectiveConversation", 0.5, "回复到有效沟通", "优先检查消息回答质量和候选人事实是否完整。"],
-    ["interviewInvited", 0.25, "有效沟通到简历或约面", "优先检查定向简历、项目证据和岗位资格表达。"]
+    ["interviewInvited", 0.25, "有效沟通到面试邀请", "先核对简历是否发送和后续沟通，再结合 HR 反馈检查对应项目或技能表达。"]
   ];
   for (const [stage, threshold, label, priorityCheck] of checks) {
     if (site === 'zhaopin' && ['read', 'replied'].includes(stage)) continue;

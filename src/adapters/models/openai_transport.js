@@ -6,6 +6,7 @@ const ALWAYS_LONG_STRUCTURED_TASKS = new Set([
   "analyzeResume",
   "recommendSearchPlan",
   "generateResumeOptimization",
+  "generateMockInterviewPreparation",
   "reviewMockInterview"
 ]);
 const THINKING_LONG_STRUCTURED_TASKS = new Set([
@@ -125,8 +126,10 @@ class OpenAICompatibleTransport {
     let jsonModeFallback = false;
     let structuredJsonModeFallback = false;
     const longStructuredTask = usesLongStructuredBudget(kind, this.thinkingMode);
+    const preparationTask = kind === 'generateMockInterviewPreparation';
+    const initialStructuredBudget = preparationTask ? 32768 : LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS;
     let responseTokenLimit = longStructuredTask
-      ? Math.max(maxTokens, LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS)
+      ? Math.max(maxTokens, initialStructuredBudget)
       : maxTokens;
     const startedAt = Date.now();
     try {
@@ -140,7 +143,8 @@ class OpenAICompatibleTransport {
             timeoutMs,
             maxTokens,
             responseTokenLimit,
-            longStructuredTask
+            longStructuredTask,
+            preparationTask ? 600000 : MAX_ADAPTIVE_TIMEOUT_MS
           );
           try {
             const response = await this.requestHttpJson({
@@ -188,7 +192,7 @@ class OpenAICompatibleTransport {
               responseTokenLimit = adaptiveResponseTokenLimit(
                 responseTokenLimit,
                 error,
-                longStructuredTask ? MAX_ADAPTIVE_RESPONSE_TOKENS : DEFAULT_MAX_ADAPTIVE_RESPONSE_TOKENS
+                preparationTask ? 65536 : longStructuredTask ? MAX_ADAPTIVE_RESPONSE_TOKENS : DEFAULT_MAX_ADAPTIVE_RESPONSE_TOKENS
               );
               await delay(retryDelayMs(error, attempt), signal);
               continue;
@@ -393,12 +397,12 @@ function adaptiveResponseTokenLimit(current, error, maximum = DEFAULT_MAX_ADAPTI
   return Math.max(value, Math.min(maximum, value * 2));
 }
 
-function adaptiveRequestTimeoutMs(baseTimeoutMs, baseTokens, responseTokens, longStructuredTask) {
+function adaptiveRequestTimeoutMs(baseTimeoutMs, baseTokens, responseTokens, longStructuredTask, maximumMs = MAX_ADAPTIVE_TIMEOUT_MS) {
   const timeout = Math.max(1, Number(baseTimeoutMs) || 1);
   if (!longStructuredTask) return timeout;
   const baseline = Math.max(1, Number(baseTokens) || 1);
   const requested = Math.max(baseline, Number(responseTokens) || baseline);
-  return Math.min(MAX_ADAPTIVE_TIMEOUT_MS, Math.max(timeout, Math.round(timeout * (requested / baseline))));
+  return Math.min(maximumMs, Math.max(timeout, Math.round(timeout * (requested / baseline))));
 }
 
 function usesLongStructuredBudget(kind, thinkingMode) {

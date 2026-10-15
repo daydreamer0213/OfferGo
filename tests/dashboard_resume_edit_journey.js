@@ -17,7 +17,19 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
   const db = storage.openDb(':memory:');
   let browser, server;
   try {
-    const original = '陈亦航\n求职方向：Node.js 后端开发\n工作经历：负责订单查询、退款接口与支付回调的实现和测试。\n项目：使用 PostgreSQL 事务和交易号唯一约束处理重复回调，联调覆盖重复请求与并发请求。\n技能：Node.js、TypeScript、PostgreSQL、Redis。';
+    const skillText = 'Node.js、TypeScript、PostgreSQL、Redis。';
+    const original = [
+      '陈亦航', '求职方向：Node.js 后端开发', '',
+      '个人优势', '围绕订单接口实现与测试积累开发实践。', '',
+      '专业技能', skillText, '',
+      '工作经历', '示例科技 后端开发 2023-2025', '负责订单查询、退款接口与支付回调的实现和测试。', '',
+      '项目经历', '订单平台 2024-2025', '内容:',
+      '使用 PostgreSQL 事务和交易号唯一约束处理重复回调。', '联调覆盖重复请求与并发请求。', '',
+      '退款工具 2023-2024', '内容:', '使用 Node.js 和 Redis 实现退款结果查询。',
+      '保留失败记录并支持按交易号核对结果。', '',
+      '教育经历', '示例大学 本科 2019-2023', '计算机科学与技术', '',
+      '资格证书', '英语六级', '', '## 开源贡献', '维护订单接口示例与使用说明。'
+    ].join('\n');
     const owner = storage.saveProfileAnalysis(db, {
       profile: { candidate: { name: '陈亦航', city: '杭州', targetTitles: ['后端开发'] }, skills: [{ name: 'Node.js' }] },
       document: { originalFileName: 'resume.txt', format: 'text', contentHash: 'edit-journey', text: original, diagnostics: {} },
@@ -28,7 +40,9 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     server = createDashboardServer({ db, forceMock: true, allowOfflineMock: true, logger,
       browserAuthority: { browserMode: 'edge', cdpPort: null, profilePath: '' } });
     const base = await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
+    if (process.env.OFFERGO_UX_ARTIFACT_DIR) fs.mkdirSync(process.env.OFFERGO_UX_ARTIFACT_DIR, { recursive: true });
+    browser = await chromium.launch({ channel: 'msedge', headless: true,
+      ...(process.env.OFFERGO_UX_ARTIFACT_DIR ? { downloadsPath: process.env.OFFERGO_UX_ARTIFACT_DIR } : {}) });
     const context = await browser.newContext();
     const page = await context.newPage();
     const errors = [];
@@ -36,9 +50,55 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     await page.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
     const url = `${base}/resume-optimization?planId=${owner.planId}&draftId=${draft.id}`;
     const editor = page.locator('#resume-opt-final-text');
+    const skills = page.locator('[data-resume-section-field][aria-label="专业技能"]');
     await page.goto(url);
-    const latest = original + '\n求职意向：后端开发。';
-    await editor.fill(latest);
+    assert.equal(await skills.count(), 1, 'a structured resume must expose its original skill section as an editable field');
+    assert.equal(await skills.isVisible(), true);
+    const expectedHeadings = ['个人优势', '专业技能', '工作经历', '项目经历', '教育经历', '资格证书', '开源贡献'];
+    const headings = (await page.locator('[data-resume-section] h3').allTextContents()).map(value => value.trim());
+    assert.deepEqual(headings.filter(title => expectedHeadings.includes(title)), expectedHeadings,
+      'original section titles, including an unknown explicit heading, must keep their source order');
+    const projects = page.locator('[data-resume-section]').filter({ has: page.getByRole('heading', { name: '项目经历', exact: true, level: 3 }) });
+    assert.deepEqual((await projects.locator('h4').allTextContents()).map(value => value.trim()),
+      ['订单平台 2024-2025', '退款工具 2023-2024'], 'two explicitly titled projects must remain independently editable');
+    assert.equal(await page.locator('[data-resume-section-field][aria-label="订单平台 2024-2025"]').count(), 1);
+    assert.equal(await page.locator('[data-resume-section-field][aria-label="退款工具 2023-2024"]').count(), 1);
+    assert.equal(await editor.inputValue(), original, 'opening the section editor must preserve every source character');
+    assert.equal(await editor.isVisible(), false, 'the full text editor belongs in a collapsed optional entry');
+    assert.equal(await editor.locator('xpath=ancestor::details').count(), 1);
+    const initialSkillValue = await skills.inputValue();
+    assert(initialSkillValue.includes(skillText));
+    const fillSkills = async text => skills.fill(text);
+    const latestSkills = 'TypeScript、Node.js、PostgreSQL、Redis。';
+    const latest = original.replace(skillText, latestSkills);
+    let releaseExportSave;
+    const exportSaveGate = new Promise(resolve => { releaseExportSave = resolve; });
+    await page.route('**/api/resume-optimization/save', async route => { await exportSaveGate; await route.continue(); });
+    await fillSkills(latestSkills);
+    assert.equal(await editor.inputValue(), latest,
+      'replacing a whole section must preserve paragraph boundaries and every other source character');
+    assert((await editor.inputValue()).includes('\n\n项目经历\n'));
+    const downloading = page.waitForEvent('download');
+    await page.getByRole('button', { name: '下载文字版', exact: true }).click();
+    const download = await downloading;
+    assert.equal(fs.readFileSync(await download.path(), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'), latest,
+      'an immediate export must contain the latest section input before the autosave delay');
+    assert.equal(require('../src/storage/resume_optimization_store').getResumeOptimization(db,
+      { profileId: owner.profileId, optimizationId: draft.id }).finalText, original,
+    'exporting an unsaved section must not depend on a completed database save');
+    releaseExportSave();
+    await page.unroute('**/api/resume-optimization/save');
+    const fullTextEntry = page.locator('details[data-resume-full-text]');
+    await fullTextEntry.locator('summary').click();
+    await skills.waitFor({ state: 'hidden' });
+    assert.equal(await skills.isVisible(), false, 'full text mode must not expose a stale second editable view');
+    const fullTextSkills = 'PostgreSQL、Node.js、TypeScript、Redis。';
+    await editor.fill(original.replace(skillText, fullTextSkills));
+    await fullTextEntry.locator('summary').click();
+    await skills.waitFor({ state: 'visible' });
+    assert.equal(await skills.inputValue(), initialSkillValue.replace(skillText, fullTextSkills),
+      'returning from full text editing must rebuild sections from the latest body');
+    await fillSkills(latestSkills);
     await page.getByRole('link', { name: '面试训练', exact: true }).click();
     await page.waitForURL('**/interview?**');
     await page.goto(url);
@@ -52,10 +112,11 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
       await route.continue();
     });
     const saving = page.waitForRequest('**/api/resume-optimization/save');
-    await editor.fill(latest + '\n第一处修改。');
+    await fillSkills('TypeScript、PostgreSQL、Node.js、Redis。');
     await saving;
-    const duringSave = latest + '\n保存期间继续修改的文字。';
-    await editor.fill(duringSave);
+    const duringSaveSkills = 'PostgreSQL、TypeScript、Node.js、Redis。';
+    const duringSave = original.replace(skillText, duringSaveSkills);
+    await fillSkills(duringSaveSkills);
     const leave = page.getByRole('link', { name: '面试训练', exact: true }).click();
     release(); await leave;
     await page.waitForURL('**/interview?**');
@@ -66,8 +127,9 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     let blocked = true;
     await page.route('**/api/resume-optimization/save', route => blocked
       ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '模拟保存失败' }) }) : route.continue());
-    const unsaved = duringSave + '\n希望进一步了解订单系统相关工作。';
-    await editor.fill(unsaved);
+    const unsavedSkills = 'Redis、TypeScript、Node.js、PostgreSQL。';
+    const unsaved = original.replace(skillText, unsavedSkills);
+    await fillSkills(unsavedSkills);
     await page.getByRole('link', { name: '面试训练', exact: true }).click();
     await page.locator('[data-resume-save-status]').filter({ hasText: '保存失败' }).waitFor();
     assert.equal(page.url(), url, 'failed save must keep the user in the editor');
@@ -76,6 +138,8 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     page.on('dialog', dialog => dialog.accept());
     await page.reload();
     assert.equal(await editor.inputValue(), unsaved, 'reload must recover the pending full text');
+    assert.equal(await skills.inputValue(), initialSkillValue.replace(skillText, unsavedSkills),
+      'recovered full text must also rehydrate the visible section');
     blocked = false;
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
     await page.waitForLoadState('networkidle');
@@ -84,33 +148,94 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     const recoveryKeys = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('offergo:resume-draft:')));
     assert.equal(recoveryKeys.length, 0, 'successful save clears only acknowledged recovery copies');
     await page.evaluate(({ key, text }) => localStorage.setItem(key, JSON.stringify({ baseText: '过时的数据库正文', text })),
-      { key: `offergo:resume-draft:${owner.planId}:${draft.id}`, text: unsaved + '\n另一份尚未保存的文字。' });
+      { key: `offergo:resume-draft:${owner.planId}:${draft.id}`, text: original.replace(skillText, latestSkills) });
     await page.reload();
     assert.equal(await editor.inputValue(), unsaved, 'an outdated recovery base must not overwrite the current saved version');
+    assert.equal(await skills.inputValue(), initialSkillValue.replace(skillText, unsavedSkills));
     assert.equal(await page.locator('[data-resume-recovery]').isVisible(), true);
     await page.getByRole('button', { name: '恢复这份修改', exact: true }).click();
-    assert((await editor.inputValue()).includes('另一份尚未保存的文字。'));
+    assert.equal(await editor.inputValue(), latest);
+    assert.equal(await skills.inputValue(), initialSkillValue.replace(skillText, latestSkills),
+      'explicitly restoring an older local copy must update both views');
     // Return to the accepted text before activation; the pending recovery copy is cleared on save.
-    await editor.fill(unsaved);
+    await fillSkills(unsavedSkills);
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
     await page.waitForLoadState('networkidle');
 
+    await page.route('**/api/resume-optimization/activate', route => route.fulfill({
+      status: 409, contentType: 'application/json', body: JSON.stringify({
+        error: '当前简历还不能启用，请先处理下面的问题。', errorCode: 'RESUME_ACTIVATION_INTEGRITY_FAILED',
+        issues: [{ code: 'RESUME_PLACEHOLDER_PRESENT' }]
+      })
+    }));
+    await page.getByRole('button', { name: '启用为新版本', exact: true }).click();
+    await page.locator('[data-resume-save-status]').filter({ hasText: '当前简历还不能启用' }).waitFor();
+    assert.equal(await editor.inputValue(), unsaved);
+    assert.equal(await skills.evaluate(field => field.readOnly), false,
+      'a rejected activation must unlock the visible section editor');
+    assert.equal(await page.locator('[data-resume-section-field][readonly]').count(), 0);
+    await page.unroute('**/api/resume-optimization/activate');
     await page.getByRole('button', { name: '启用为新版本', exact: true }).click();
     await page.getByText('这份草稿已经启用', { exact: true }).waitFor();
+    assert.equal(await skills.evaluate(field => field.readOnly), true);
+    assert.equal(await page.locator('[data-resume-section-field]:not([readonly])').count(), 0,
+      'every visible section in an activated snapshot must be read-only');
     await page.getByRole('button', { name: '以此版本继续编辑', exact: true }).click();
     await page.waitForURL(value => value.searchParams.get('draftId') !== String(draft.id));
     assert.equal(await editor.inputValue(), unsaved);
     assert.equal(await editor.getAttribute('readonly'), null);
+    assert.equal(await skills.getAttribute('readonly'), null);
     if (process.env.OFFERGO_UX_ARTIFACT_DIR) {
       fs.mkdirSync(process.env.OFFERGO_UX_ARTIFACT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(process.env.OFFERGO_UX_ARTIFACT_DIR, 'resume-continue-editing.png'), fullPage: true });
     }
-    await editor.fill(unsaved + '\n可以补充介绍项目细节。');
+    await fillSkills(latestSkills);
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
     await page.waitForLoadState('networkidle');
     const originalDraft = require('../src/storage/resume_optimization_store').getResumeOptimization(db, { profileId: owner.profileId, optimizationId: draft.id });
     assert.equal(originalDraft.status, 'activated');
     assert.equal(originalDraft.finalText, unsaved, 'continuing edits must not mutate the activated snapshot');
+    const emptyEndingText = original.slice(0, original.indexOf('\n\n资格证书')) + '\n\n资格证书';
+    const emptyOwner = storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name: '陈亦航', city: '杭州', targetTitles: ['后端开发'] } },
+      document: { originalFileName: 'empty-ending.txt', format: 'text', contentHash: 'empty-ending', text: emptyEndingText, diagnostics: {} },
+      searchPlan: { name: '空章节编辑', cities: ['杭州'], directions: ['后端开发'], keywords: [{ word: '后端开发', priority: 'A' }] }
+    });
+    const emptyDraft = createResumeOptimization(db, { profileId: emptyOwner.profileId, planId: emptyOwner.planId,
+      sourceResumeVersionId: emptyOwner.resumeVersionId, mode: 'general', generatedText: emptyEndingText,
+      headline: '末尾空章节', suggestions: [], evidenceCatalog: [] });
+    await page.goto(`${base}/resume-optimization?planId=${emptyOwner.planId}&draftId=${emptyDraft.id}`);
+    const certificate = page.locator('[data-resume-section-field][aria-label="资格证书"]');
+    assert.equal(await certificate.inputValue(), '');
+    await certificate.fill('英语六级');
+    assert.equal(await editor.inputValue(), emptyEndingText + '\n英语六级',
+      'entering content in a final empty section must insert a line break after its title');
+    await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+    await page.waitForLoadState('networkidle');
+    assert.equal(await certificate.inputValue(), '英语六级');
+    assert.equal(await editor.inputValue(), emptyEndingText + '\n英语六级');
+    const unstructuredText = '陈亦航参与订单接口开发，使用 TypeScript 和 Node.js 实现查询，并以本机测试核对处理结果。';
+    const plainOwner = storage.saveProfileAnalysis(db, {
+      profile: { candidate: { name: '陈亦航', city: '杭州', targetTitles: ['后端开发'] } },
+      document: { originalFileName: 'plain.txt', format: 'text', contentHash: 'plain-editor', text: unstructuredText, diagnostics: {} },
+      searchPlan: { name: '无章节编辑', cities: ['杭州'], directions: ['后端开发'], keywords: [{ word: '后端开发', priority: 'A' }] }
+    });
+    const plainDraft = createResumeOptimization(db, { profileId: plainOwner.profileId, planId: plainOwner.planId,
+      sourceResumeVersionId: plainOwner.resumeVersionId, mode: 'general', generatedText: unstructuredText,
+      headline: '无章节简历', suggestions: [], evidenceCatalog: [] });
+    await page.goto(`${base}/resume-optimization?planId=${plainOwner.planId}&draftId=${plainDraft.id}`);
+    assert.equal(await editor.isVisible(), true, 'an unstructured resume must fall back to full text editing');
+    const introducedHeading = unstructuredText + '\n\n项目经历\n参与订单查询接口实现与本机测试。';
+    await editor.fill(introducedHeading);
+    await editor.press('End');
+    assert.equal(await fullTextEntry.evaluate(details => details.open), true,
+      'typing the first recognizable heading must not collapse the editor while the user is writing');
+    assert.equal(await editor.isVisible(), true);
+    await fullTextEntry.locator('summary').click();
+    await page.locator('[data-resume-section-field][aria-label="项目经历"]').waitFor({ state: 'visible' });
+    assert.equal(await editor.inputValue(), introducedHeading, 'manual mode changes must preserve the new section text');
+    await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+    await page.waitForLoadState('networkidle');
     await page.getByRole('link', { name: '简历工作室', exact: true }).click();
     await page.goto(`${base}/resumes?profileId=${owner.profileId}`);
     assert.equal(await page.locator('.primary-nav [aria-current="page"]').innerText(), '简历工作室');
@@ -139,6 +264,10 @@ const logger = { info() {}, warn() {}, error() {}, requestId() { return 'resume-
     await resumePrintPaginationCheck(page);
     assert.deepEqual(errors, []);
     if (process.env.OFFERGO_UX_ARTIFACT_DIR) fs.writeFileSync(path.join(process.env.OFFERGO_UX_ARTIFACT_DIR, 'browser-results.json'), JSON.stringify({
+      originalSectionOrder: 'passed', independentProjects: 'passed', untouchedTextPreserved: 'passed', immediateExport: 'passed',
+      fullTextRoundTrip: 'passed', rejectedActivationUnlocks: 'passed', activatedSectionsReadOnly: 'passed',
+      wholeSectionReplacement: 'passed', emptyFinalSection: 'passed',
+      firstHeadingKeepsFullEditorOpen: 'passed',
       immediateLeave: 'passed', editWhileSaving: 'passed', failedSaveStaysInEditor: 'passed', reloadRecovery: 'passed',
       staleRecoveryRequiresChoice: 'passed', continueEditing: 'passed', activatedSnapshotPreserved: 'passed', resumeNavigation: 'passed',
       darkContrastRatios: contrasts, pageErrors: errors

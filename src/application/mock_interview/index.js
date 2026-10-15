@@ -5,18 +5,21 @@ const { selectRelevantCandidateMaterial } = require("../../core/candidate_eviden
 const { mergeCandidateFacts, currentCandidateMaterial } = require('../../core/candidate_fact_policy');
 const { listDecisionPool } = require("../../storage/job_store");
 const { createMockInterviewSession, getMockInterviewSession, listMockInterviewSessions,
-  answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry, findMockInterviewOperation } = require("../../storage/mock_interview_store");
+  answerMockInterviewTurn, completeMockInterviewSession, recordMockInterviewRetry, findMockInterviewOperation,
+  createMockInterviewPreparation, getMockInterviewPreparation, listMockInterviewPreparations,
+  updateMockInterviewPreparation, findMockInterviewPreparationOperation } = require("../../storage/mock_interview_store");
 const { prepareResumeTextForModel } = require("../../core/resume_privacy");
 const {
   normalizeInterviewSettings,
   buildInterviewBrief,
   buildInterviewProgress,
   buildResumeInterviewEvidenceCatalog,
+  validateInterviewPreparation,
   validateInterviewStep,
   validateInterviewReport,
   validateRetryReview
 } = require("../../core/mock_interview");
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const interviewFlights = new WeakMap();
 
 function createMockInterviewService({ db, adapter = null } = {}) {
@@ -25,6 +28,11 @@ function createMockInterviewService({ db, adapter = null } = {}) {
   const finishFlights = interviewFlights.get(db);
 
   return Object.freeze({
+    prepareStories,
+    getPreparation,
+    savePreparation,
+    refineStory,
+    getPreparationOperation,
     startSession,
     answerTurn,
     finishSession,
@@ -42,6 +50,82 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const operationId = requiredText(input.operationId, '生成操作编号', 128);
     const result = findMockInterviewOperation(db, { profileId, planId: plan.id, operationId });
     return { saved: Boolean(result), resultId: result?.id || null };
+  }
+
+  function getPreparationOperation(input = {}) {
+    const profileId = requiredId(input.profileId, 'profileId');
+    const plan = ownedPlan(profileId, input.planId);
+    const operationId = requiredText(input.operationId, '生成操作编号', 128);
+    const result = findMockInterviewPreparationOperation(db, { profileId, planId: plan.id, operationId });
+    return { saved: Boolean(result), resultId: result?.preparation.id || null };
+  }
+
+  async function prepareStories(input = {}) {
+    return generationOperation('prepare', input, async identity => {
+      const profileId = requiredId(input.profileId, 'profileId');
+      const plan = ownedPlan(profileId, input.planId);
+      if (identity.operationId) {
+        const prior = findMockInterviewPreparationOperation(db, { profileId, planId: plan.id, operationId: identity.operationId });
+        if (prior) { assertOperationInput(prior.identity, identity); return prior.preparation; }
+      }
+      const resume = ownedResume(profileId, input.resumeVersionId);
+      const context = buildFrozenContext(profileId, plan.id, 'resume_general', null, resume);
+      requireAdapterMethod('generateMockInterviewPreparation');
+      const raw = await adapter.generateMockInterviewPreparation({ context });
+      const { stories } = validateInterviewPreparation(raw, { resumeEvidenceCatalog: context.resumeEvidenceCatalog });
+      return createMockInterviewPreparation(db, { profileId, planId: plan.id, resumeVersionId: resume.id, context, stories,
+        modelIdentity: { ...identity, operationId: identity.operationId || randomUUID(), provider: String(adapter.provider || 'unknown'), model: String(adapter.model || '') } });
+    });
+  }
+
+  function getPreparation(input = {}) {
+    const profileId = requiredId(input.profileId, 'profileId');
+    const plan = ownedPlan(profileId, input.planId);
+    const preparation = getMockInterviewPreparation(db, { profileId, planId: plan.id,
+      preparationId: requiredId(input.preparationId, 'preparationId') });
+    if (!preparation) throw serviceError('MOCK_INTERVIEW_PREPARATION_NOT_FOUND', '故事准备稿不存在或不属于当前方案');
+    return preparation;
+  }
+
+  function checkedPreparation(input) {
+    const preparation = getPreparation(input);
+    if (preparation.revision !== requiredId(input.expectedRevision, 'expectedRevision')) {
+      throw serviceError('MOCK_INTERVIEW_PREPARATION_REVISION_CONFLICT', '故事稿已有新修改，请重新打开后再保存，当前输入仍保留。');
+    }
+    const storyId = requiredText(input.storyId, '故事编号', 120);
+    if (!preparation.stories.some(story => story.id === storyId)) {
+      throw serviceError('MOCK_INTERVIEW_STORY_NOT_FOUND', '这条故事不存在，请重新打开准备稿。');
+    }
+    return preparation;
+  }
+
+  function savePreparation(input = {}) {
+    const preparation = checkedPreparation(input);
+    const text = requiredText(input.storyText, '故事正文', 12_000);
+    const { stories } = validateInterviewPreparation({ stories: preparation.stories.map(story =>
+      story.id === input.storyId ? { ...story, text } : story) }, { resumeEvidenceCatalog: preparation.context.resumeEvidenceCatalog });
+    return updateMockInterviewPreparation(db, { profileId: preparation.profileId, planId: preparation.planId,
+      preparationId: preparation.id, expectedRevision: preparation.revision, stories });
+  }
+
+  async function refineStory(input = {}) {
+    return generationOperation('refine', input, async identity => {
+      const profileId = requiredId(input.profileId, 'profileId');
+      const plan = ownedPlan(profileId, input.planId);
+      if (identity.operationId) {
+        const prior = findMockInterviewPreparationOperation(db, { profileId, planId: plan.id, operationId: identity.operationId });
+        if (prior) { assertOperationInput(prior.identity, identity); return prior.preparation; }
+      }
+      const preparation = checkedPreparation(input);
+      const supplement = requiredText(input.supplement, '补充情况', 12_000);
+      requireAdapterMethod('generateMockInterviewPreparation');
+      const raw = await adapter.generateMockInterviewPreparation({ context: refreshSupplementalContext(preparation),
+        preparation: { id: preparation.id, revision: preparation.revision, stories: preparation.stories }, storyId: input.storyId, supplement });
+      const result = validateInterviewPreparation(raw, { resumeEvidenceCatalog: preparation.context.resumeEvidenceCatalog, storyId: input.storyId });
+      const stories = preparation.stories.map(story => story.id === input.storyId ? result.stories[0] : story);
+      return updateMockInterviewPreparation(db, { profileId, planId: plan.id, preparationId: preparation.id,
+        expectedRevision: preparation.revision, stories, operationIdentity: { ...identity, operationId: identity.operationId || randomUUID() } });
+    });
   }
 
   async function startSession(input = {}) {
@@ -68,7 +152,24 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     const job = sessionKind === "job_specific" ? ownedCompleteJob(plan, input.jobId) : null;
     const resume = ownedResume(profileId, input.resumeVersionId);
     const settings = normalizeInterviewSettings(input.settings);
-    const context = buildFrozenContext(profileId, plan.id, sessionKind, job, resume);
+    let context = buildFrozenContext(profileId, plan.id, sessionKind, job, resume);
+    if (input.preparationId !== undefined && input.preparationId !== null && input.preparationId !== '') {
+      const preparation = getPreparation({ profileId, planId: plan.id, preparationId: input.preparationId });
+      if (preparation.resumeVersionId !== resume.id || preparation.context.resume?.contentHash !== resume.contentHash) {
+        throw serviceError('MOCK_INTERVIEW_PREPARATION_RESUME_MISMATCH', '故事稿对应另一份简历，请选择对应简历或准备新稿。');
+      }
+      if (preparation.revision !== requiredId(input.preparationRevision, 'preparationRevision')) {
+        throw serviceError('MOCK_INTERVIEW_PREPARATION_REVISION_CONFLICT', '故事稿已更新，请重新打开后开始练习。');
+      }
+      const requested = [...new Set(Array.isArray(input.storyIds) ? input.storyIds : input.storyIds ? [input.storyIds] : [])];
+      if (!requested.length || requested.some(id => !preparation.stories.some(story => story.id === id))) {
+        throw serviceError('MOCK_INTERVIEW_STORY_NOT_FOUND', '请选择这份准备稿中想练习的故事。');
+      }
+      context = { ...context, storyPreparation: { id: preparation.id, revision: preparation.revision,
+        stories: preparation.stories.filter(story => requested.includes(story.id)) } };
+      context.interviewBrief = buildInterviewBrief({ sessionKind, job: context.job, resumeEvidenceCatalog: context.resumeEvidenceCatalog,
+        candidateEvidence: context.candidateEvidence, priorWeaknesses: context.priorWeaknesses, storyPreparation: context.storyPreparation });
+    }
     const step = await generateStep(context, settings, []);
     const session = createMockInterviewSession(db, {
       profileId,
@@ -261,21 +362,28 @@ function createMockInterviewService({ db, adapter = null } = {}) {
     }).map(hydrateSessionContext);
   }
 
-  function dashboard({ profileId, planId, sessionId = null } = {}) {
+  function dashboard({ profileId, planId, sessionId = null, preparationId = null } = {}) {
     const profile = requiredId(profileId, "profileId");
     const plan = ownedPlan(profile, planId);
     const sessions = listMockInterviewSessions(db, { profileId: profile, planId: plan.id, limit: 30 })
       .map(hydrateSessionContext);
+    const resumes = listCandidateResumeVersions(db, profile).filter((resume) => resume.isActive);
+    const preparations = listMockInterviewPreparations(db, { profileId: profile, planId: plan.id, limit: 30 });
+    const selectedPreparation = preparationId ? getPreparation({ profileId: profile, planId: plan.id, preparationId })
+      : preparations.find(item => resumes.some(resume => resume.id === item.resumeVersionId)) || null;
     return {
       profile: getCandidateProfile(db, profile),
       candidateEvidence: listCandidateEvidence(db, { profileId: profile }),
       plan,
       jobs: listDecisionPool(db, { planId: plan.id }).filter(isCompleteJob),
-      resumes: listCandidateResumeVersions(db, profile).filter((resume) => resume.isActive),
+      resumes,
+      preparations,
+      selectedPreparation,
+      selectedSessionExplicit: Boolean(sessionId),
       sessions,
       selectedSession: sessionId
         ? hydrateSessionContext(getMockInterviewSession(db, { profileId: profile, planId: plan.id, sessionId }))
-        : sessions.find((session) => session.status === "active") || sessions[0] || null
+        : preparationId ? null : sessions.find((session) => session.status === "active") || sessions[0] || null
     };
   }
 
@@ -369,7 +477,8 @@ function createMockInterviewService({ db, adapter = null } = {}) {
         profileId: session.profileId, activeOnly: true, source: 'user_edited_reply', limit: 500
       }), { sessionKind: context.sessionKind, job }), { facts: candidateFacts, factRevisions }), { query, job, limit: 12, maxChars: 12000 }),
       interviewBrief: buildInterviewBrief({ sessionKind: context.sessionKind, job: context.job,
-        resumeEvidenceCatalog: context.resumeEvidenceCatalog, candidateEvidence, priorWeaknesses: context.priorWeaknesses })
+        resumeEvidenceCatalog: context.resumeEvidenceCatalog, candidateEvidence, priorWeaknesses: context.priorWeaknesses,
+        storyPreparation: context.storyPreparation })
     };
   }
 

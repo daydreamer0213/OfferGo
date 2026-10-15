@@ -2,7 +2,25 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const { openDb, saveProfileAnalysis } = require("../src/core/storage");
 const { createDashboardServer } = require("../src/dashboard/server");
-const { RESUME_OPTIMIZATION_SCRIPT } = require("../src/dashboard/pages/resume_optimization");
+const { RESUME_OPTIMIZATION_SCRIPT, splitResumeSections } = require("../src/dashboard/pages/resume_optimization");
+
+function resumeSectionSplitSmoke() {
+  const source = '陈亦航\r\n邮箱：example@example.com\r\n\r\n个人优势\r\n关注可靠性。\r\n\r\n专业技能\r\nNode.js、SQL。\r\n\r\n项目经历\r\n订单平台 2024-2025\r\n内容:\r\n1. 原样保留缩进与续行。\r\n  后续说明\r\n\r\n退款工具 2023-2024\r\n业绩:\r\n保留原文。\r\n\r\n教育经历\r\n示例大学 本科 2020-2024\r\n\r\n## 开源贡献\r\n<script>仅作为原文</script>\r\n';
+  const sections = splitResumeSections(source);
+  const join = () => sections.map(section => section.heading + section.parts.map(part => part.heading + part.text + part.after).join('')).join('');
+  assert.equal(join(), source, 'section views must retain every original character, including CRLF and unknown content');
+  assert.deepEqual(sections.map(section => section.title), ['简历开头', '个人优势', '专业技能', '项目经历', '教育经历', '开源贡献']);
+  assert.deepEqual(sections.find(section => section.title === '项目经历').parts.filter(part => part.title).map(part => part.title), ['订单平台 2024-2025', '退款工具 2023-2024']);
+  const skill = sections.find(section => section.title === '专业技能').parts[0];
+  skill.text = 'SQL、Node.js。';
+  assert.equal(join(), source.replace('Node.js、SQL', 'SQL、Node.js'), 'editing a section must leave the rest of the resume byte-for-byte intact');
+  const plain = '姓名：测试\n技能：Node.js\n一个没有明确章节的普通段落。';
+  const fallback = splitResumeSections(plain);
+  assert.equal(fallback.map(section => section.heading + section.parts.map(part => part.heading + part.text + part.after).join('')).join(''), plain);
+  assert(fallback.every(section => !section.heading), 'ambiguous prose must remain available as full-text editing');
+  const ambiguousProjects = splitResumeSections('项目经历\n知识问答系统\n没有明确日期或子标题的项目内容\n');
+  assert.equal(ambiguousProjects[0].parts.length, 1, 'do not guess project boundaries from ordinary body lines');
+}
 
 const logger = {
   info() {}, warn() {}, error() {},
@@ -11,6 +29,7 @@ const logger = {
 };
 
 (async () => {
+  resumeSectionSplitSmoke();
   const db = openDb(":memory:");
   const owner = saveProfileAnalysis(db, {
     profile: {

@@ -1,4 +1,7 @@
 const all = Object.freeze([
+  "funnel_feedback_store_smoke.js",
+  "funnel_actionable_review_smoke.js",
+  "funnel_actionable_review_journey.js",
   "generation_operation_smoke.js",
   "message_learning_audit_regression.js",
   "dashboard_generation_audit_journey.js",
@@ -27,6 +30,7 @@ const all = Object.freeze([
   "runtime_paths_smoke.js",
   "browser_readiness_smoke.js",
   "boss_page_state_smoke.js",
+  "boss_pane_activity_dom_smoke.js",
   "workspace_tabs_smoke.js",
   "scan_execution_smoke.js",
   "scan_store_contract_smoke.js",
@@ -203,6 +207,8 @@ const all = Object.freeze([
 
 const groups = Object.freeze({
   fast: Object.freeze([
+  "funnel_feedback_store_smoke.js",
+  "funnel_actionable_review_smoke.js",
   "generation_operation_smoke.js",
   "message_learning_audit_regression.js",
   "candidate_evidence_smoke.js",
@@ -249,6 +255,7 @@ const groups = Object.freeze({
   "activity_status_smoke.js"
 ]),
   integration: Object.freeze([
+  "funnel_actionable_review_journey.js",
   "dashboard_learning_audit_journey.js",
   "dashboard_generation_audit_journey.js",
   "dashboard_audit_repairs_journey.js",
@@ -261,6 +268,7 @@ const groups = Object.freeze({
   "portable_edge_runtime_smoke.js",
   "browser_readiness_smoke.js",
   "boss_page_state_smoke.js",
+  "boss_pane_activity_dom_smoke.js",
   "workspace_tabs_smoke.js",
   "scan_execution_smoke.js",
   "scan_store_contract_smoke.js",

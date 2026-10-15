@@ -36,23 +36,34 @@ const CANDIDATE_EXPORTS = [
   "listCandidateFacts"
 ].sort();
 
+const MOCK_INTERVIEW_PREPARATION_EXPORTS = [
+  "createMockInterviewPreparation", "getMockInterviewPreparation", "listMockInterviewPreparations",
+  "updateMockInterviewPreparation", "findMockInterviewPreparationOperation"
+];
+
 const FACADE_EXPORTS = [
+  ...MOCK_INTERVIEW_PREPARATION_EXPORTS,
   "OUTCOME_STATUSES", "SCAN_RUN_STATUSES", "SCHEMA", "SCHEMA_VERSION", "WORKFLOW_RUN_STATUSES", "WORKFLOW_TIMEOUT_CIRCUIT_OPEN_CODE", "replaceWorkflowScanContext",
   "acquireSiteScanLease", "activateResumeOptimization", "addFollowUpNote", "answerMockInterviewTurn", "appendMockInterviewQuestion", "applyJobQualityGovernance", "archiveCandidateJob", "attachResumeDocumentFile", "attachWorkflowCommunication", "attachWorkflowScan", "attachWorkflowScanRun", "backfillHistoricalCommunicationOutcomes", "beginScanRun", "bindBatchToPlan", "buildBatchSummary", "buildFeedbackSummary", "checkpointScanProgress", "checkpointScanTarget", "claimScanRun", "claimWorkflowJobTaskRow", "clearSiteRuntimeState", "closeMessageReplyDrafts", "closeOpenMessageReplyDraftsByIntent", "compareProfileVersions", "completeMessageReplyDraft", "completeMockInterviewSession", "completeWorkflowJobTaskRow", "confirmMatchingCard", "countWorkflowJobTaskStatuses", "countWorkflowJobTasks", "createAndBindScanBatch", "createBatch", "createMatchingCardDraft", "createMessageReplySendBatch", "createMockInterviewSession", "createResumeOptimization", "createScanRun", "createWorkflowRun", "decisionBucket", "deleteCandidateFact", "deleteMessageInboundContext", "ensureActiveFunnelStrategyRound", "ensureFunnelEntry", "failWorkflowJobTaskRow", "finishJobAnalysisAttemptRow", "finishScanRun", "freezeReadyFunnelCohort", "getActiveFunnelStrategyRound", "getActiveMatchingCard", "getActiveSearchPlan", "getActiveWorkflowRun", "getBatch", "getCandidateMatchingContext", "getCandidateProfile", "getFunnelCohort", "getFunnelEntry", "getFunnelPolicy", "getFunnelStrategyRound", "getLatestBatchId", "getLatestJobRefreshAttempt", "getLatestMainScanBatchId", "getLatestProfileVersionId", "getLatestResumableBatch", "getLatestScanRun", "getMatchingCard", "getMessageInboundContext", "getMessageReplyDraft", "getMessageReplySendBatch", "getMockInterviewSession", "getModelCache", "getOutcomeAnalyticsSnapshot", "getPlatformFilterCatalog", "getResumeDocument", "getResumeOptimization", "getRunningJobAnalysisAttemptRow", "getScanRun", "getSearchPlan", "getSearchPlanDependency", "getSitePacingState", "getSiteRuntimeState", "getSiteScanLease", "getWorkflowHealthSnapshot", "getWorkflowJobTaskRow", "getWorkflowObservationJob", "getWorkflowRun", "getWorkflowRunByCommunicationBatch", "getWorkspacePlatformPreference", "heartbeatScanRun", "immediateTransaction", "incrementWorkflowRunActivity", "incrementWorkflowTimeoutCounters", "insertJobAnalysisAttemptRow", "insertWorkflowJobTaskRow", "interruptOrphanedScanRuns", "isActivityProbeDue", "isCandidateJobArchived", "isJobAwaitingAction", "isWorkflowJobTaskObservationReady", "jobAnalysisAttemptRow", "latestMessageEvent", "listCandidateAnswerMemories", "listCandidateFactRevisions", "listCandidateFacts", "listCandidateJobEvents", "listCandidateProfiles", "listCandidateResumeVersions", "listDecisionPool", "listDecisionQueue", "listFunnelCohorts", "listFunnelEntries", "listFunnelProgressEvents", "listFunnelStrategyRounds", "listJobAnalysisAttemptRows", "listJobRefreshAttempts", "listLatestScanTargetResults", "listMatchingCards", "listMatchingResumeVersions", "listMessageEvents", "listMessageInboundContexts", "listMessageReplySendItems", "listMockInterviewSessions", "listOpenMessageReplyDrafts", "listProfileVersions", "listReportJobs", "listResumeOptimizations", "listResumeParseAttempts", "listReusableJobDetails", "listScanTargetResults", "listSearchPlans", "listSiteAccessEvents", "listWorkflowJobTaskRows", "listWorkflowRuns", "markApplication", "markCandidateJob", "markWorkflowJobTasksStopped", "mergeBossPacingStates", "openDb", "reactivateWorkflowDetailRequiredTaskRow", "reassessBatchObservations", "recordCandidateJobEvent", "recordJobRefreshAttempt", "recordMessageReplyDrafts", "recordMockInterviewRetry", "recordRecommendationFeedback", "recordResumeParseAttempt", "recordScanRunProcessExit", "recordScanTargetResult", "recordSiteAccessEvent", "recordWorkflowPlatformAccess", "recordWorkflowScanWait", "releaseSiteScanLease", "renewSiteScanLease", "requestWorkflowRunConfigurationPause", "rescorePlanObservations", "restoreCandidateJob", "reviseCandidateAnswerMemory", "saveCandidateFact", "saveCandidateResumeVersion", "saveConfirmedMatchingCardRevision", "saveFunnelPolicy", "saveMatchingCardDraftEdit", "saveMessageInboundContext", "saveMessageReplyDraftEdit", "saveModelCache", "savePlatformFilterCatalog", "saveProfileAnalysis", "saveResumeOptimizationDraft", "saveSearchPlan", "saveWorkspacePlatformPreference", "selectClaimableWorkflowJobTaskRow", "selectEarliestRetryAvailableAt", "selectExpiredLeaseWorkflowJobTaskRows", "selectReadyWorkflowJobEntries", "setSitePacingState", "setSiteRuntimeState", "settleIncompleteWorkflowJobTaskRows", "sourceContentHash", "startFunnelStrategyRound", "stopPendingMessageReplySendItems", "summarizeScanTargets", "transitionMessageReplySendBatch", "transitionMessageReplySendItem", "transitionWorkflowRun", "updateCandidateProfile", "upsertJob", "upsertKeywordSource", "upsertMessageEvents", "withdrawCandidateAnswerMemory", "workflowJobTaskRow"
 ].sort();
 
 assert.strictEqual(CANDIDATE_EXPORTS.length, 32);
-assert.strictEqual(FACADE_EXPORTS.length, 196);
+assert.strictEqual(FACADE_EXPORTS.length, 201);
 
 const warnings = [];
 const onWarning = (warning) => warnings.push(warning);
 process.on("warning", onWarning);
 const candidateStore = require("../src/storage/candidate_store");
 const storage = require("../src/core/storage");
+const mockInterviewStore = require("../src/storage/mock_interview_store");
 process.removeListener("warning", onWarning);
 
 assert.deepStrictEqual(Object.keys(candidateStore).sort(), CANDIDATE_EXPORTS);
 assert.deepStrictEqual(Object.keys(storage).sort(), FACADE_EXPORTS);
+for (const name of MOCK_INTERVIEW_PREPARATION_EXPORTS) {
+  assert.strictEqual(typeof storage[name], "function");
+  assert.strictEqual(storage[name], mockInterviewStore[name], `${name} must be a direct facade reference`);
+}
 for (const name of CANDIDATE_EXPORTS.filter((name) => ![
   "getCandidateResumeDocument", "getActiveResumeText", "listCandidateResumeVersionLabels"
 ].includes(name))) assert.strictEqual(storage[name], candidateStore[name], `${name} must be a direct facade reference`);
