@@ -32,6 +32,10 @@
 - [`operations.md`](operations.md)：日志、错误码、恢复和排错方法。
 - [`release_boundary.md`](release_boundary.md)：安装包、隐私数据和外部操作边界。
 
+## 已确认、待落实的产品设计
+
+- [`mock_interview_design.md`](mock_interview_design.md)：2026-10-15 用户确认的模拟面试设计。核心是每块简历工作准备完整故事，再练深入追问；岗位定制是加分项。本页记录设计方向，不代表现有功能已实现或验收通过。
+
 ## 历史记录
 
 - [`releases/v1.3.2.md`](releases/v1.3.2.md)：旧名称 RoleFlow v1.3.2 的历史版本说明。
