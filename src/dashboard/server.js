@@ -4323,7 +4323,7 @@ async function handleCommunication(req, res, { db, modelConfig, modelReady, logg
     if (!job) throw new Error("岗位不存在或不属于当前筛选方案。");
     if (job.archived) throw new Error("岗位已归档，请先恢复后再生成沟通草稿。");
     const mode = ["greeting", "hr_reply", "follow_up"].includes(params.mode) ? params.mode : "greeting";
-    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有证据完整的主投或可投岗位可以生成定制招呼语；其他岗位请使用 BOSS 通用招呼语。");
+    if (mode === "greeting" && !canGenerateGreeting(job)) throw new Error("只有岗位详情和支持证据完整的投递候选可以生成定制招呼语；请先补齐资料或完成分析。");
     if (mode === "follow_up" && job.applicationStatus !== "no_reply") throw new Error("只有已标记为“无回复待跟进”的岗位可以生成跟进文案。");
     if (mode === "hr_reply" && !String(params.hrMessage || "").trim()) throw new Error("请粘贴 HR 的原话。");
     if (params.factKey && params.factValue) saveCandidateFact(db, { profileId: profile.id, factKey: params.factKey, factValue: params.factValue, source: "user_provided" });
@@ -4567,7 +4567,7 @@ async function handleProgress(req, res, db, messageDiscovery = null, replyLearni
 
 function canGenerateGreeting(job) {
   const analysis = job.analysis || {};
-  if (!["primary", "apply"].includes(job.decisionBucket) || analysis.semanticStatus !== "complete") return false;
+  if (!defaultSelectedForBatch(job.decisionBucket) || analysis.semanticStatus !== "complete") return false;
   if (analysis.semanticMatchingMode === "whole_jd") {
     return hasCompleteJobDescription(job)
       && Array.isArray(analysis.selectedWork?.jdEvidenceRefs) && analysis.selectedWork.jdEvidenceRefs.length > 0
@@ -6281,7 +6281,6 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
   counts.waiting_reply = scopedProgress.filter((job) => job.progressCard.stage === "waiting_reply").length;
   counts.needs_user_action = scopedProgress.filter((job) => ["needs_user_action", "reply_ready"].includes(job.progressCard.stage)).length;
   counts.interview = scopedProgress.filter((job) => ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard.stage)).length;
-  const wanted = pool === "focus" ? new Set(["primary", "apply"]) : new Set([pool]);
   const filtered = candidates.filter((job) => {
     const tags = job.qualityTags || [];
     if (pool === "no_reply") return true;
@@ -6290,7 +6289,7 @@ function renderCompactQueuePage({ db, plan, searchParams, outcomeAnalyticsPanel 
     if (pool === "waiting_reply") return job.progressCard?.stage === "waiting_reply";
     if (pool === "needs_user_action") return ["needs_user_action", "reply_ready"].includes(job.progressCard?.stage);
     if (pool === "interview") return ["interview_invited", "interview_scheduled", "interview_completed", "offer_received"].includes(job.progressCard?.stage);
-    return wanted.has(job.decisionBucket);
+    return pool === "focus" ? defaultSelectedForBatch(job.decisionBucket) : job.decisionBucket === pool;
   });
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -6621,7 +6620,7 @@ function jobExportFilterInputs(filters) {
 
 function renderCompactPoolTabs(queue, planId, profileId = "") {
   const scopes = [["all", "全部待处理", queue.scopeCounts.all || 0], ["new", "本轮新增", queue.scopeCounts.new || 0], ["repeated", "本轮重复", queue.scopeCounts.repeated || 0], ["backlog", "历史未处理", queue.scopeCounts.backlog || 0]];
-  const tabs = [["focus", "主投 + 可投", (queue.counts.primary || 0) + (queue.counts.apply || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "等待分析", queue.counts.analysis_pending || 0], ["detail_pending", "等待补齐资料", queue.counts.detail_pending || 0], ["activity_pending", "等待确认招聘状态", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
+  const tabs = [["focus", "投递候选", (queue.counts.primary || 0) + (queue.counts.apply || 0) + (queue.counts.caution || 0)], ["primary", "主投", queue.counts.primary || 0], ["apply", "可投", queue.counts.apply || 0], ["caution", "慎投", queue.counts.caution || 0], ["analysis_pending", "等待分析", queue.counts.analysis_pending || 0], ["detail_pending", "等待补齐资料", queue.counts.detail_pending || 0], ["activity_pending", "等待确认招聘状态", queue.counts.activity_pending || 0], ["no_reply", "无回复跟进", queue.counts.no_reply || 0], ["waiting_reply", "等待回复", queue.counts.waiting_reply || 0], ["needs_user_action", "需要处理", queue.counts.needs_user_action || 0], ["interview", "面试进展", queue.counts.interview || 0], ["not_recommended", "不推荐", queue.counts.not_recommended || 0]];
   const scopeLinks = scopes.map(([key, label, count]) => `<a class="pool-tab ${queue.scope === key ? "active" : ""}" href="${queueHref(planId, queue.pool, key, 1, queue.site)}">${escapeHtml(label)} ${count}</a>`).join("")
     + `<a class="pool-tab" href="/communication/new?planId=${escapeAttr(planId)}${queue.site === 'zhaopin' ? '&site=zhaopin' : ''}">${queue.site === 'zhaopin' ? '选择岗位打招呼' : '批量沟通清单'}</a>`
     + (profileId ? `<a class="pool-tab" href="/messages?profileId=${escapeAttr(profileId)}${queue.site === 'zhaopin' ? '&workSite=zhaopin' : ''}">消息发现</a>` : "");

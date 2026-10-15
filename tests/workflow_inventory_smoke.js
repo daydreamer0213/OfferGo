@@ -47,9 +47,17 @@ try {
   ids.staleActivity = insert("stale-activity", { bossActiveDays: 7 }, batchId);
   ids.missingDetail = insert("missing-detail", { qualityTags: ["detail_unverified"], description: "short" }, batchId);
   ids.staleAnalysis = insert("stale-analysis", { analysis: { ...completeAnalysis(), semanticStatus: "stale" } }, batchId);
+  ids.notRecommended = insert("not-recommended", { analysis: completeAnalysis("not_recommended") }, batchId);
+  ids.pending = insert("pending", { analysis: { ...completeAnalysis("caution"), semanticStatus: "pending" } }, batchId);
+  ids.failed = insert("failed", { analysis: { ...completeAnalysis("caution"), semanticStatus: "failed" } }, batchId);
+  ids.refresh = insert("refresh", { bossActiveDays: null, qualityTags: ["activity_unverified"] }, batchId);
+  ids.unknown = insert("unknown", { analysis: completeAnalysis("unknown") }, batchId);
+  ids.hardScope = insert("hard-scope", { qualityTags: ["internship_role"] }, batchId);
+  ids.skipped = insert("skipped", {}, batchId);
 
   markCandidateJob(db, { profileId, planId, jobId: ids.applied, status: "applied" });
   markCandidateJob(db, { profileId, planId, jobId: ids.invalid, status: "invalid" });
+  markCandidateJob(db, { profileId, planId, jobId: ids.skipped, status: "skipped" });
   markCandidateJob(db, {
     profileId,
     planId,
@@ -230,7 +238,7 @@ try {
     "主方向完全错位的岗位不得进入慎投复核集合");
   const semanticRiskCandidate = reviewCandidates.find((candidate) => candidate.id === semanticRiskReviewId);
   assert.strictEqual(semanticRiskCandidate?.workflowTier, "caution");
-  assert.strictEqual(semanticRiskCandidate?.defaultChecked, false, "通用人工复核岗位不得默认勾选");
+  assert.strictEqual(semanticRiskCandidate?.defaultChecked, true, "容量允许时慎投可默认勾选，但保持慎投等级");
   assert.strictEqual(
     reviewCandidates.find((candidate) => candidate.id === ids.talk)?.defaultChecked,
     true,
@@ -238,12 +246,12 @@ try {
   );
   assert.strictEqual(
     reviewCandidates.find((candidate) => candidate.id === ids.lowRiskBackup)?.defaultChecked,
-    false,
-    "慎投不得默认勾选"
+    true,
+    "有实际关联的慎投可在容量内默认勾选"
   );
   const legacyCandidate = reviewCandidates.find((candidate) => candidate.id === legacyRoleCoreId);
-  assert.strictEqual(typeof legacyCandidate?.workflowTier, "string", "历史方向备选仍须可读且不默认勾选");
-  assert.strictEqual(legacyCandidate?.defaultChecked, false);
+  assert.strictEqual(legacyCandidate?.workflowTier, "caution", "历史方向备选仍须可读且保持慎投等级");
+  assert.strictEqual(legacyCandidate?.defaultChecked, true);
   assert.strictEqual(
     typeof reviewCandidates.find((candidate) => candidate.id === legacyRoleCoreId)?.workflowTier,
     "string",
@@ -252,8 +260,23 @@ try {
   assert.strictEqual(
     reviewCandidates.find((candidate) => candidate.id === layeredHighSalaryId)?.workflowTier,
     "caution",
-    "高薪跨度已经在分析阶段归入慎投，人工可见但不默认勾选"
+    "高薪跨度已经在分析阶段归入慎投，进入候选也不改变等级"
   );
+  for (const key of ["notRecommended", "pending", "failed", "refresh", "unknown", "hardScope", "skipped",
+    "applied", "invalid", "futureLater", "ambiguous", "progressActive", "verifiedClosed", "staleActivity", "missingDetail", "staleAnalysis"]) {
+    assert.strictEqual(reviewCandidates.some((candidate) => candidate.id === ids[key]), false,
+      `${key} must remain outside the review and default selection`);
+  }
+  const limitedWorkflow = createWorkflowRun(db, {
+    profileId, planId, localDay: "2026-07-20", sequence: 2,
+    targetSuccessCount: 1, inventoryCount: 2, candidateGap: 0, scanNeeded: false,
+    planner: { replacementBuffer: 2 }
+  });
+  const limitedCandidates = listWorkflowReviewCandidates(db, limitedWorkflow.id, { now });
+  assert.deepStrictEqual(limitedCandidates.filter((candidate) => candidate.defaultChecked).map((candidate) => candidate.id),
+    [ids.primary, ids.talk, layeredHighSalaryId], "主投、可投、慎投按原顺序填满目标与补位，不能超额默认勾选");
+  assert.deepStrictEqual(listWorkflowInventory(db, { planId, now }).map((candidate) => candidate.id),
+    [ids.primary, ids.talk], "慎投默认可选不能改变扫描补位库存口径");
 
   const outcomeJobIds = {
     succeeded: insert("outcome-succeeded", {}, batchId),

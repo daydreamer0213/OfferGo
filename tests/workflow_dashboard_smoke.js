@@ -54,7 +54,7 @@ const {
 } = require("../scripts/benchmark-workflow-status-read-model");
 
 const root = path.join(__dirname, "..");
-const smokeDir = path.join(root, ".runtime", "smoke");
+const smokeDir = process.env.ROLEFLOW_TEST_TMPDIR || path.join(root, ".runtime", "smoke");
 const dbPath = path.join(smokeDir, `workflow-dashboard-${Date.now()}.sqlite`);
 const logger = {
   info() {}, warn() {}, error() {},
@@ -1158,9 +1158,15 @@ let server;
   assert.match(reviewPage.body, new RegExp(`name="workflowRunId" value="${workflow.id}"`));
   assert.match(reviewPage.body, /name="browserMode" value="edge"/);
   assert.doesNotMatch(reviewPage.body, new RegExp(`name="jobIds" value="${historicalStoppedJobId}"`));
-  assert.strictEqual((reviewPage.body.match(/<input[^>]*name="jobIds"[^>]*checked/g) || []).length, 5);
+  assert.strictEqual((reviewPage.body.match(/<input[^>]*name="jobIds"[^>]*checked/g) || []).length, 7);
+  const cautionCandidates = listWorkflowReviewCandidates(db, workflow.id)
+    .filter((job) => job.decisionBucket === "caution");
+  assert.strictEqual(cautionCandidates.length, 2);
+  for (const candidate of cautionCandidates) {
+    assert.match(reviewPage.body, new RegExp(`name="jobIds" value="${candidate.id}" checked`));
+  }
   assert.match(reviewPage.body, /本轮成功目标\s*35/);
-  assert.match(reviewPage.body, /<dt>可用推荐<\/dt><dd[^>]*>5<\/dd>/);
+  assert.match(reviewPage.body, /<dt>可用推荐<\/dt><dd[^>]*>7<\/dd>/);
   assert.strictEqual(getWorkflowRun(db, workflow.id).inventoryCount >= 6, true);
   for (const label of ["主要工作", "负责 RAG 应用交付与持续优化", "你的相关经历", "完成 RAG 应用交付", "生产环境部署"]) {
     assert.match(reviewPage.body, new RegExp(label));

@@ -170,8 +170,11 @@ assert.strictEqual(normalizeRecommendationTier("unknown", 2), "");
 
 assert.strictEqual(defaultSelectedForBatch("primary"), true);
 assert.strictEqual(defaultSelectedForBatch("apply"), true);
-assert.strictEqual(defaultSelectedForBatch("caution"), false);
+assert.strictEqual(defaultSelectedForBatch("caution"), true);
 assert.strictEqual(defaultSelectedForBatch("not_recommended"), false);
+for (const tier of ["analysis_pending", "refresh", "stale", "unknown", ""]) {
+  assert.strictEqual(defaultSelectedForBatch(tier), false, `${tier || "empty"} must not enter the default selection`);
+}
 
 assert.strictEqual(isExplicitSoftRequirement({ requirement: "有行业经验优先" }), true);
 assert.strictEqual(isExplicitSoftRequirement({ requirement: "熟悉某工具者优先考虑" }), true);

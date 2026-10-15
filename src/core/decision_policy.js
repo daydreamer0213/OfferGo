@@ -81,7 +81,7 @@ const DECISION_POLICY = deepFreeze({
   defaultBatchSelection: {
     primary: true,
     apply: true,
-    caution: false,
+    caution: true,
     not_recommended: false
   },
   matrix: {
@@ -257,9 +257,9 @@ function assertDecisionPolicy(policy) {
   }
   if (policy.defaultBatchSelection.primary !== true
     || policy.defaultBatchSelection.apply !== true
-    || policy.defaultBatchSelection.caution !== false
+    || policy.defaultBatchSelection.caution !== true
     || policy.defaultBatchSelection.not_recommended !== false) {
-    throw new Error("default batch selection must select only primary and apply");
+    throw new Error("default batch selection must select primary, apply and caution, excluding not_recommended");
   }
   return true;
 }

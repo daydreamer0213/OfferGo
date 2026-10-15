@@ -33,7 +33,7 @@ const { renderCommunicationPage } = require("../src/dashboard/pages/communicatio
 const { createDashboardServer } = require("../src/dashboard/server");
 
 const root = path.join(__dirname, "..");
-const smokeDir = path.join(root, ".runtime", "smoke");
+const smokeDir = process.env.ROLEFLOW_TEST_TMPDIR || path.join(root, ".runtime", "smoke");
 const dbPath = path.join(smokeDir, `dashboard-communication-batch-${Date.now()}.sqlite`);
 const logger = { info() {}, warn() {}, error() {}, requestId() { return "dashboard-communication-batch-smoke"; }, listRecent() { return []; } };
 let db;
@@ -544,9 +544,28 @@ async function assertCommunicationClient() {
   assert.match(staleForm.body, /COMMUNICATION_JOB_INELIGIBLE/);
 
   const smallBuilder = await getText(baseUrl, `/communication/new?planId=${fixture.smallPlanId}`);
-  assert.strictEqual((smallBuilder.body.match(/<input[^>]*name="jobIds"[^>]*checked/g) || []).length, 21);
-  assert.match(smallBuilder.body, /当前可沟通候选不足 22 个，可在风险额度允许时补扫一轮/);
+  assert.strictEqual((smallBuilder.body.match(/<input[^>]*name="jobIds"[^>]*checked/g) || []).length, 22);
+  assert.match(smallBuilder.body, new RegExp(`name="jobIds" value="${fixture.smallCautionId}" checked`),
+    "a supported caution opportunity must be selected within the unchanged default limit");
+  assert.doesNotMatch(smallBuilder.body, /当前可沟通候选不足 22 个/);
   assert.doesNotMatch(smallBuilder.body, /自动补扫|开始补扫/);
+  for (const id of fixture.smallExcludedIds) {
+    assert.doesNotMatch(smallBuilder.body, new RegExp(`name="jobIds" value="${id}"`));
+  }
+  const opportunityQueue = await getText(baseUrl, `/queue?planId=${fixture.smallPlanId}`);
+  assert.match(opportunityQueue.body, /Small caution opportunity/,
+    "the default candidate pool must retain a related opportunity with gaps");
+  assert.match(opportunityQueue.body, />投递候选 22<\/a>/);
+  for (const title of ["Small not recommended", "Small refresh", "Small failed", "Small applied", "Small skipped"]) {
+    assert(!opportunityQueue.body.includes(title), `${title} must remain outside the default candidate pool`);
+  }
+  const priorityBuilder = await getText(baseUrl, `/communication/new?planId=${fixture.priorityPlanId}`);
+  const prioritySelectedIds = [...priorityBuilder.body.matchAll(/<input[^>]*name="jobIds" value="(\d+)" checked/g)]
+    .map((match) => Number(match[1]));
+  assert.equal(prioritySelectedIds.length, 30, "caution opportunities must not increase the default cap");
+  assert.deepEqual(prioritySelectedIds.slice(0, 2), [fixture.priorityPrimaryId, fixture.priorityApplyId],
+    "low-score primary/apply roles must precede more than30 high-score caution roles");
+  assert(prioritySelectedIds.slice(2).every((id) => fixture.priorityCautionIds.includes(id)));
 
   const queue = await getText(baseUrl, `/queue?planId=${fixture.planId}`);
   const plan = await getText(baseUrl, `/plan?planId=${fixture.planId}`);
@@ -1217,9 +1236,38 @@ function seed(database) {
   for (let index = 0; index < 21; index += 1) {
     upsertJob(database, job(`small-${index}`, { title: `Small role ${index}`, analysis: completeAnalysis("apply") }), smallBatchId);
   }
+  const smallCautionId = upsertJob(database, job("small-caution", {
+    title: "Small caution opportunity", analysis: completeAnalysis("caution")
+  }), smallBatchId);
+  const smallExcludedIds = [
+    upsertJob(database, job("small-not-recommended", { title: "Small not recommended", analysis: completeAnalysis("not_recommended") }), smallBatchId),
+    upsertJob(database, job("small-refresh", { title: "Small refresh", bossActiveText: "", bossActiveDays: null, qualityTags: ["activity_unverified"] }), smallBatchId),
+    upsertJob(database, job("small-failed", { title: "Small failed", analysis: { ...completeAnalysis("caution"), semanticStatus: "failed", errorCode: "MODEL_TIMEOUT" } }), smallBatchId)
+  ];
+  for (const status of ["applied", "skipped"]) {
+    const jobId = upsertJob(database, job(`small-${status}`, {
+      title: `Small ${status}`, analysis: completeAnalysis("caution")
+    }), smallBatchId);
+    markCandidateJob(database, { profileId, planId: smallPlanId, jobId, status });
+    smallExcludedIds.push(jobId);
+  }
+  const priorityPlanId = Number(database.prepare("INSERT INTO search_plans(profile_id, name, plan_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(profileId, "Priority dashboard smoke", "{}", now, now).lastInsertRowid);
+  const priorityBatchId = createBatch(database, "boss", "priority-dashboard-communication", "priority dashboard communication smoke", { profileId, searchPlanId: priorityPlanId });
+  const priorityCautionIds = [];
+  for (let index = 0; index < 31; index += 1) {
+    priorityCautionIds.push(upsertJob(database, job(`priority-caution-${index}`, {
+      score: 999, analysis: { ...completeAnalysis("caution"), confidence: 0.99 }
+    }), priorityBatchId));
+  }
+  const priorityPrimaryId = upsertJob(database, job("priority-primary", {
+    score: -10, analysis: { ...completeAnalysis("primary"), confidence: 0.1 }
+  }), priorityBatchId);
+  const priorityApplyId = upsertJob(database, job("priority-apply", {
+    score: -5, analysis: { ...completeAnalysis("apply"), confidence: 0.2 }
+  }), priorityBatchId);
   const otherProfileId = Number(database.prepare("INSERT INTO candidate_profiles(display_name, profile_json, created_at, updated_at) VALUES (?, ?, ?, ?)").run("Other dashboard smoke", "{}", now, now).lastInsertRowid);
   Number(database.prepare("INSERT INTO search_plans(profile_id, name, plan_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(otherProfileId, "Other dashboard plan", "{}", now, now).lastInsertRowid);
-  return { profileId, scanBatchId, planId, smallPlanId, otherProfileId, primaryId, talkId, backupId, notRecommendedId, internshipId, cohortMismatchId, eligibilityReviewId, appliedId, skippedId, safeId, rebindId, historySucceededId, summaryDriftStartId, summaryDriftResumeId, itemDriftStartId, itemDriftResumeId };
+  return { profileId, scanBatchId, planId, smallPlanId, smallCautionId, smallExcludedIds, priorityPlanId, priorityCautionIds, priorityPrimaryId, priorityApplyId, otherProfileId, primaryId, talkId, backupId, notRecommendedId, internshipId, cohortMismatchId, eligibilityReviewId, appliedId, skippedId, safeId, rebindId, historySucceededId, summaryDriftStartId, summaryDriftResumeId, itemDriftStartId, itemDriftResumeId };
 }
 
 function reviewWorkflow(database, { id, planId, localDay, planner = {} }) {

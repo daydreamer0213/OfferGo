@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { createJobAnalysisRunner, cachedModelCall } = require('../src/core/job_analysis');
+const { createJobAnalysisRunner, cachedModelCall, runWorkflowAnalysisPhase } = require('../src/core/job_analysis');
 const { scoreJob, decisionState } = require('../src/core/scoring');
 const { presentWorkMatchInput, validateWorkMatchOutput } = require('../src/core/job_work_matching');
-const { openDb, saveProfileAnalysis, createBatch } = require('../src/core/storage');
+const { openDb, saveProfileAnalysis, createBatch, createWorkflowRun, transitionWorkflowRun, getWorkflowRun, createScanRun, attachWorkflowScan } = require('../src/core/storage');
 const { upsertJob, getJob, decisionBucket, rescorePlanObservations, listReportJobs } = require('../src/storage/job_store');
 const { projectMessageDecisionCard } = require('../src/core/message_discovery');
 const { loadConfigs } = require('../src/config');
@@ -71,7 +71,15 @@ async function main() {
       assert.equal(stored.analysis.recommendation, expected);
       assert.equal(decisionBucket(stored), expected);
       assert.equal(require('../src/core/decision_policy').defaultSelectedForBatch(decisionBucket(stored)),
-        ['primary', 'apply'].includes(expected), 'Only the actual primary/apply recommendations receive default selection');
+        ['primary', 'apply', 'caution'].includes(expected), 'Opportunity candidates receive default selection without changing their saved tier');
+      if (expected === 'caution') {
+        upsertJob(db, { ...caseJob, ...scoreJob(caseJob, configs), analysis: { ...analysis,
+          decisionPolicyHash: 'ae0b1dc5eca1bd12d9d0dffd06a20e14ee0e7b101cedf3aaf6b414e42ad48cba' } });
+        const reopened = getJob(db, storedId);
+        assert.equal(reopened.analysis.semanticStatus, 'complete', 'An old selection-policy hash must not invalidate a current whole-JD result');
+        assert.equal(reopened.analysis.recommendation, 'caution');
+        assert.equal(decisionBucket(reopened), 'caution');
+      }
       const card = projectMessageDecisionCard(stored);
       assert.equal(card.roleSummary, analysis.roleSummary);
       assert.equal(card.fitSummary, analysis.decisionExplanation);
@@ -156,6 +164,7 @@ async function main() {
     assert.equal(getJob(db, alternateId).analysis.recommendation, 'caution', 'Saving/reopening must not upgrade the tier');
     assert.equal((await analyze(alternateFull)).recommendation, 'caution');
     assert.equal(requests, alternateBefore + 1, 'The unchanged whole-JD cache remains usable');
+    await testCautionOnlyWorkflowReview(alternateFull, alternateResult);
 
 
     const reviewedBefore = requests;
@@ -183,6 +192,36 @@ async function main() {
     assert.equal(requests, reviewedBefore);
 
     console.log('whole_jd_analysis_smoke passed');
+  } finally { db.close(); }
+}
+async function testCautionOnlyWorkflowReview(original, analysis) {
+  const db = openDb(':memory:');
+  try {
+    const now = new Date().toISOString();
+    const { profileId, planId } = saveProfileAnalysis(db, {
+      profile: configs.candidateProfile,
+      document: { originalFileName: 'caution-only.txt', format: 'text', contentHash: 'caution-only',
+        text: configs.candidateProfile.source.resumeEvidenceText, diagnostics: {} },
+      searchPlan: { name: 'Caution only', cities: ['广州'], directions: ['后端开发'], keywords: ['后端开发'] }
+    });
+    const batchId = createBatch(db, 'boss', '后端开发', 'caution-only', { profileId, searchPlanId: planId, startedAt: now });
+    const jobId = upsertJob(db, { ...original, source: 'boss', sourceId: 'caution-only',
+      url: 'https://www.zhipin.com/job_detail/caution-only.html', bossActiveText: '今日活跃', bossActiveDays: 0, analysis }, batchId);
+    const workflow = createWorkflowRun(db, { profileId, planId, localDay: now.slice(0, 10), sequence: 1,
+      targetSuccessCount: 1, inventoryCount: 0, candidateGap: 1, scanNeeded: true, planner: { replacementBuffer: 0 } });
+    transitionWorkflowRun(db, { id: workflow.id, status: 'scanning' });
+    const scan = createScanRun(db, { runId: 'caution-only-scan', planId, batchId });
+    attachWorkflowScan(db, { id: workflow.id, scanRunId: scan.id, scanBatchId: batchId });
+    const summary = await runWorkflowAnalysisPhase(db, { workflowRun: getWorkflowRun(db, workflow.id), batchId,
+      jobsToAnalyze: listReportJobs(db, { batchId }), modelRuntimes: { primary: { revision: 'caution-only', concurrency: 1 } },
+      createAnalyzeJob: () => { throw Error('A saved complete result must not request another model'); } });
+    assert.equal(summary.status, 'drained');
+    const reviewed = getWorkflowRun(db, workflow.id);
+    assert.equal(reviewed.inventoryCount, 0, 'Caution must not fill the scan inventory');
+    assert.equal(reviewed.scanNeeded, true, 'Review selection must not change the planned scan requirement');
+    assert.equal(reviewed.status, 'review_required', 'A caution-only finished round must still allow confirmation');
+    assert.deepEqual(require('../src/core/workflow_inventory').listWorkflowReviewCandidates(db, workflow.id)
+      .map(candidate => [candidate.id, candidate.workflowTier, candidate.defaultChecked]), [[jobId, 'caution', true]]);
   } finally { db.close(); }
 }
 async function testPriorWorkMethodRefresh(input, previous, priorVersion) {

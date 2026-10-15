@@ -289,6 +289,27 @@ let server;
       funnelCountBeforeArchive,
       "archiving must not change funnel samples"
     );
+    const legacyJobId = upsertJob(db, {
+      source: "boss", sourceId: "legacy-short-description", title: "旧版证据完整岗位", company: "测试公司", location: "广州",
+      salary: "10-18K", experience: "1-3年", education: "本科", bossActiveText: "今日活跃", bossActiveDays: 0,
+      url: "https://www.zhipin.com/job_detail/legacy-short-description.html", tags: ["Python", "RAG"],
+      description: "负责企业知识库 RAG 与 Agent 应用开发", qualityTags: [],
+      score: 20, level: "优先", matches: ["Python", "RAG"], risks: [], analysis
+    }, createBatch(db, "boss", "AI应用开发", "legacy-short-description", {
+      profileId: saved.profileId, searchPlanId: saved.planId
+    }));
+    const legacyStored = listDecisionPool(db, { planId: saved.planId, site: "boss" }).find((job) => job.id === legacyJobId);
+    assert.strictEqual(legacyStored.decisionBucket, "primary");
+    const legacyHtml = await (await fetch(`${base}/queue?planId=${saved.planId}&pool=primary&scope=all`)).text();
+    const legacyGreeting = await post(base, "/api/communication", {
+      mode: "greeting", jobId: legacyJobId, profileId: saved.profileId, planId: saved.planId
+    });
+    const legacyGreetingBody = await legacyGreeting.text();
+    assert.strictEqual(legacyGreeting.status, 200, `legacy sufficient evidence remains usable: ${legacyGreetingBody}`);
+    assert([...legacyHtml.matchAll(/<form\b[^>]*action="\/api\/communication"[^>]*>[\s\S]*?<\/form>/g)]
+      .some(([form]) => form.includes('name="mode" value="greeting"') && form.includes(`name="jobId" value="${legacyJobId}"`)),
+    "legacy sufficient evidence retains its ordinary greeting control");
+    assert(legacyGreetingBody.includes("文案只生成到本页，不会自动发送"));
     await wholeJdGreetingSmoke(base, saved, profile);
     console.log("communication_smoke ok");
   } finally {
@@ -345,12 +366,14 @@ async function wholeJdGreetingSmoke(base, saved, profile) {
   const cases = [
     { name: "primary", tier: "primary", allowed: true },
     { name: "apply", tier: "apply", allowed: true },
-    { name: "caution", tier: "caution", allowed: false },
+    { name: "caution", tier: "caution", allowed: true },
     { name: "not-recommended", tier: "not_recommended", allowed: false },
     { name: "failed", tier: "apply", allowed: false, analysis: { semanticStatus: "failed" } },
     { name: "partial", tier: "apply", allowed: false, analysis: { semanticStatus: "partial" } },
     { name: "missing-jd-source", tier: "apply", allowed: false, analysis: { selectedWork: { summary: "企业知识库交付", jdEvidenceRefs: [] } } },
     { name: "missing-resume-facts", tier: "apply", allowed: false, analysis: { supportingFacts: [], evidence: { jd: [], resume: [] } } },
+    { name: "caution-missing-resume-facts", tier: "caution", allowed: false, analysis: { supportingFacts: [], evidence: { jd: [], resume: [] } } },
+    { name: "caution-activity-unknown", tier: "caution", allowed: false, job: { bossActiveText: "", bossActiveDays: null, qualityTags: ["activity_unverified"] } },
     { name: "unverified-detail", tier: "apply", allowed: false, job: { qualityTags: ["detail_unverified"] } },
     { name: "short-detail", tier: "apply", allowed: false, job: { description: "只有搜索卡摘要" } }
   ];
@@ -372,12 +395,12 @@ async function wholeJdGreetingSmoke(base, saved, profile) {
     const forms = [...html.matchAll(/<form\b[^>]*action="\/api\/communication"[^>]*>[\s\S]*?<\/form>/g)];
     const hasGreeting = forms.some(([form]) => form.includes('name="mode" value="greeting"')
       && form.includes(`name="jobId" value="${jobId}"`));
-    assert.strictEqual(hasGreeting, testCase.allowed, `${testCase.name}: ordinary UI greeting eligibility`);
     const response = await post(base, "/api/communication", {
       mode: "greeting", jobId, profileId: saved.profileId, planId: saved.planId
     });
     const body = await response.text();
     assert.strictEqual(response.status, testCase.allowed ? 200 : 400, `${testCase.name}: ${body}`);
+    assert.strictEqual(hasGreeting, testCase.allowed, `${testCase.name}: ordinary UI greeting eligibility`);
     if (testCase.allowed) {
       assert(body.includes("KnowledgeFlow"));
       assert(body.includes("文案只生成到本页，不会自动发送"));
