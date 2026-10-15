@@ -134,6 +134,16 @@ const { createMockInterviewService } = require('../src/application/mock_intervie
         assert.deepEqual(await a.locator(formSelector).evaluate(form => Array.from(new FormData(form)).map(([key, value]) => [key, String(value)])), fieldsBefore, 'failed status lookup preserves all input fields');
         await a.unroute('**' + operationUrl + '?*');
       }
+      let recoveredId = null;
+      if (kind === 'interview' && completeBeforeReturn) {
+        await button().click();
+        await a.waitForURL(url => Number(url.searchParams.get('sessionId')) === firstId);
+        await a.locator('#interview-active-step').waitFor();
+        recoveredId = Number(new URL(a.url()).searchParams.get('sessionId'));
+        assert.equal(calls, callsBeforeReturn, 'recovering a saved interview opens the original result without generating again');
+        // Recovery opens the saved result; explicitly reopen the normal entry to request a new round.
+        await open();
+      }
       const response = a.waitForResponse(value => value.url().endsWith(endpoint) && value.request().method() === 'POST');
       const pendingRequest = !completeBeforeReturn
         ? a.waitForRequest(value => value.url().endsWith(endpoint) && value.method() === 'POST') : null;
@@ -142,7 +152,7 @@ const { createMockInterviewService } = require('../src/application/mock_intervie
       if (!completeBeforeReturn) { await pendingRequest; releaseGeneration(); }
       await response; await a.waitForLoadState('networkidle');
       const newResults = getResults().filter(item => !idsBefore.has(item.id));
-      const result = { kind, completeBeforeReturn, laterHistory, callsBeforeReturn, calls, firstId, resultIds: newResults.map(item => item.id) };
+      const result = { kind, completeBeforeReturn, laterHistory, callsBeforeReturn, calls, firstId, recoveredId, resultIds: newResults.map(item => item.id) };
       navigationCases.push(result);
       await a.screenshot({ path: path.join(dataRoot, `${kind}-${completeBeforeReturn ? 'new-round' : 'pending-return'}.png`), fullPage: true });
       adapter[method] = original;
