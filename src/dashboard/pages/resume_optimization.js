@@ -98,7 +98,8 @@ function renderWholeDraft(dashboard, draft, evidence) {
   return `<div class="resume-workbench-columns"><form class="card pad resume-opt-editor" method="post" action="/api/resume-optimization/save" data-resume-editor data-resume-submit data-resume-success-target="resume-opt-draft-title">
     <input type="hidden" name="planId" value="${escapeAttr(planId)}"><input type="hidden" name="draftId" value="${escapeAttr(draft.id)}"><input type="hidden" name="expectedRevision" value="${escapeAttr(draft.revision || '')}">
     <div class="resume-opt-section-head"><div><p class="section-label">完整简历草稿</p><h2>${draft.userEditedAt ? "用户已修改" : "系统生成版本"}</h2></div><button class="secondary" type="button" data-copy-resume>复制当前全文</button></div>
-    <label class="resume-opt-full-editor" for="resume-opt-final-text">当前全文<textarea id="resume-opt-final-text" name="finalText" rows="22"${activated ? " readonly" : ""}>${escapeHtml(draft.finalText || draft.generatedText || "")}</textarea></label>
+    <div data-resume-sections hidden></div>
+    <details class="resume-opt-raw" data-resume-full-text open><summary>编辑全文与章节标题</summary><label class="resume-opt-full-editor" for="resume-opt-final-text">当前全文<textarea id="resume-opt-final-text" name="finalText" rows="22"${activated ? " readonly" : ""}>${escapeHtml(draft.finalText || draft.generatedText || "")}</textarea></label></details>
     <div class="button-row"><button class="secondary" type="submit" name="format" value="print" formaction="/api/resume-optimization/export" formtarget="_blank">打印 / 保存 PDF</button><button class="secondary" type="submit" name="format" value="text" formaction="/api/resume-optimization/export">下载文字版</button></div><p class="hint">导出当前全文。启用新版本后，OfferGo 会参考它；招聘平台上的简历附件仍需更新。</p>
     ${renderResumeIntegrity(dashboard.selectedIntegrity)}
     ${activated ? `<p class="notice">当前全文为已启用版本，只读保留。</p>` : `<p class="notice" data-resume-recovery hidden>另有一份未保存的本机修改。<button type="button" class="secondary" data-resume-restore>恢复这份修改</button></p><div class="notice" data-resume-conflict hidden><p>其他页面已更新这份简历，本页修改仍保留。请先复制当前全文，再查看最新内容并合并。</p><a href="/resume-optimization?planId=${escapeAttr(planId)}&amp;draftId=${escapeAttr(draft.id)}" target="_blank" rel="noopener">在新页面查看最新版本</a> <button type="button" class="secondary" data-resume-reload>重新载入最新版本</button></div><div class="resume-opt-savebar"><div data-resume-save-status aria-live="polite">修改后会自动保存。</div><div class="button-row"><button class="secondary" type="submit" data-resume-success-target="resume-opt-draft-title">保存草稿</button><button type="submit" formaction="/api/resume-optimization/activate" data-resume-success-target="resume-opt-activated">启用为新版本</button></div></div>`}
@@ -150,7 +151,112 @@ function renderHistory(dashboard, selected) {
   return `<section class="card pad resume-opt-history"><p class="section-label">历史草稿</p><h2>保留每次源材料与处理结果</h2><ul>${history.map((draft) => `<li><a href="/resume-optimization?planId=${escapeAttr(planId)}&amp;draftId=${escapeAttr(draft.id)}">${escapeHtml(draft.headline || `定向简历草稿 ${draft.id}`)}</a><span>${draft.status === "activated" ? "已启用" : "草稿"}</span></li>`).join("")}</ul></section>`;
 }
 
+// Keep original slices: the section UI must never normalize or rewrite resume text.
+function splitResumeSections(value) {
+  const text = String(value || "");
+  const makePart = (heading, content, title = "") => {
+    const after = content.match(/(?:\r\n|\r|\n)+$/)?.[0] || "";
+    return { title, heading, text: content.slice(0, content.length - after.length), after };
+  };
+  const lines = [];
+  let offset = 0;
+  for (const raw of text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) || []) {
+    if (!raw) continue;
+    lines.push({ raw, start: offset, end: offset + raw.length, line: raw.replace(/[\r\n]+$/, "").trim() });
+    offset += raw.length;
+  }
+  const knownHeading = /^(?:个人(?:信息|优势|总结|简介)|自我(?:评价|介绍)|求职意向|(?:专业|技术|核心|职业)?技能|技能(?:清单|介绍|特长)|技术栈|(?:工作|实习|项目|教育|校园|志愿者)经历|(?:工作|项目)经验|教育背景|资格证书|(?:获奖|培训)经历|荣誉奖项|开源贡献|其他补充|Profile|Summary|Skills|Technical Skills|Work Experience|Experience|Projects|Project Experience|Education|Certifications|Awards)$/i;
+  const headings = [];
+  for (const line of lines) {
+    const title = line.line.replace(/^#{1,2}\s+/, "").replace(/[：:]$/, "");
+    const bareTitle = title.replace(/^(?:\d+[.、）)]|[一二三四五六七八九十]+[、.）)])\s*/, "");
+    if (knownHeading.test(bareTitle) || (/^#{1,2}\s+\S/.test(line.line) && title.length <= 60)) {
+      headings.push({ ...line, title, kind: bareTitle });
+    }
+  }
+  if (!headings.length) return [{ title: "完整简历", heading: "", parts: [makePart("", text)] }];
+  const sections = [];
+  if (headings[0].start) sections.push({ title: "简历开头", heading: "", parts: [makePart("", text.slice(0, headings[0].start))] });
+  for (let index = 0; index < headings.length; index++) {
+    const heading = headings[index];
+    const end = headings[index + 1]?.start ?? text.length;
+    const entries = /^(?:项目经历|项目经验|Projects|Project Experience)$/i.test(heading.kind)
+      ? lines.filter(line => line.start >= heading.end && line.start < end && (
+        /^#{3,6}\s+\S/.test(line.line) ||
+        (!/^(?:[•●·*\-]|\d+[.、）)])\s*/.test(line.line) && /\b(?:19|20)\d{2}(?:[./]\d{1,2})?\s*[-–—~～至]\s*(?:(?:19|20)\d{2}(?:[./]\d{1,2})?|至?今)\s*$/.test(line.line))
+      )) : [];
+    const section = { title: heading.title, heading: text.slice(heading.start, heading.end), parts: [] };
+    let cursor = heading.end;
+    for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+      const entry = entries[entryIndex];
+      if (entry.start > cursor) section.parts.push(makePart("", text.slice(cursor, entry.start)));
+      const next = entries[entryIndex + 1]?.start ?? end;
+      section.parts.push(makePart(text.slice(entry.start, entry.end), text.slice(entry.end, next), entry.line.replace(/^#{3,6}\s+/, "")));
+      cursor = next;
+    }
+    if (!entries.length) section.parts.push(makePart("", text.slice(heading.end, end)));
+    sections.push(section);
+  }
+  return sections;
+}
+
+function createResumeSectionEditor(editor, onChange) {
+  const host = document.querySelector('[data-resume-sections]');
+  const raw = document.querySelector('[data-resume-full-text]');
+  if (!editor || !host || !raw) return null;
+  let sections = [], fields = [], focused = null, initialized = false;
+  const sync = () => { editor.value = sections.map(section => section.heading + section.parts.map(part => part.heading + part.text + part.after).join('')).join(''); };
+  const rebuild = () => {
+    const firstBuild = !initialized; initialized = true;
+    sections = splitResumeSections(editor.value);
+    const structured = sections.some(section => section.heading);
+    host.hidden = !structured || raw.open && !firstBuild;
+    if (!structured) { raw.open = true; return; }
+    if (firstBuild) raw.open = false;
+    host.replaceChildren(); fields = []; focused = null;
+    const intro = document.createElement('p'); intro.className = 'hint';
+    intro.textContent = '按这份简历原有的章节编辑。修改任意一块，都会自动保存到完整简历。'; host.append(intro);
+    const nav = document.createElement('nav'); nav.className = 'resume-section-nav'; nav.setAttribute('aria-label', '简历章节'); host.append(nav);
+    sections.forEach((section, index) => {
+      const panel = document.createElement('section'); panel.className = 'resume-section'; panel.dataset.resumeSection = ''; panel.id = 'resume-section-' + index;
+      const title = document.createElement('h3'); title.textContent = section.title; panel.append(title);
+      const link = document.createElement('a'); link.href = '#' + panel.id; link.textContent = section.title; nav.append(link);
+      section.parts.forEach((part, partIndex) => {
+        // Blank separators remain in the source, without an empty field on screen.
+        if (section.parts.length > 1 && !part.title && !part.text.trim()) return;
+        const block = document.createElement('div'); block.className = part.title ? 'resume-project-block' : 'resume-section-body';
+        if (part.title) { const heading = document.createElement('h4'); heading.textContent = part.title; block.append(heading); }
+        const field = document.createElement('textarea'); field.dataset.resumeSectionField = ''; field.value = part.text;
+        field.setAttribute('aria-label', part.title || section.title); field.readOnly = editor.readOnly;
+        field.rows = Math.min(14, Math.max(3, part.text.trimEnd().split(/\r\n|\r|\n/).length + 1));
+        field.addEventListener('focus', () => { focused = field; });
+        field.addEventListener('input', () => {
+          part.text = field.value;
+          const newline = editor.value.match(/\r\n|\r|\n/)?.[0] || '\n';
+          if (part.text) {
+            if (part.heading && !/[\r\n]$/.test(part.heading)) part.heading += newline;
+            else if (!partIndex && section.heading && !/[\r\n]$/.test(section.heading)) section.heading += newline;
+            if (!part.after && (partIndex < section.parts.length - 1 || index < sections.length - 1) && !/[\r\n]$/.test(part.text)) part.after = newline;
+          }
+          sync(); onChange();
+        });
+        fields.push(field); block.append(field); panel.append(block);
+      });
+      host.append(panel);
+    });
+  };
+  raw.addEventListener('toggle', () => { if (!raw.open) rebuild(); host.hidden = raw.open || !sections.some(section => section.heading); });
+  rebuild();
+  return {
+    rebuild,
+    setReadOnly(value) { editor.readOnly = value; fields.forEach(field => { field.readOnly = value; }); },
+    focus() { if (raw.open || !fields.length) editor.focus(); else (focused || fields[0]).focus(); }
+  };
+}
+
 const RESUME_OPTIMIZATION_SCRIPT = `<script>(()=>{
+const splitResumeSections=${splitResumeSections.toString()};
+const createResumeSectionEditor=${createResumeSectionEditor.toString()};
 const issueMessages=${JSON.stringify(RESUME_INTEGRITY_MESSAGES)};
 const reveal=()=>{const target=location.hash&&document.getElementById(location.hash.slice(1));if(target)setTimeout(()=>target.scrollIntoView({block:'start'}),0);};
 if(document.readyState==='complete')reveal();else addEventListener('load',reveal,{once:true});
@@ -182,13 +288,15 @@ const enqueue=(text,revision)=>{chain=chain.then(async()=>{
 }).catch(failure=>{if(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT')showConflict();setStatus(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT'?failure.message:'保存失败，修改仍保留在本机。请点击“保存草稿”重试。');return false;});return chain;};
 const changed=()=>{version+=1;remember(true);if(conflicted){setStatus('本页有未保存修改，请查看最新版本并合并。');return;}setStatus('有修改待保存');clearTimeout(timer);timer=setTimeout(()=>enqueue(editor.value,version),600);};
 const flush=async()=>{clearTimeout(timer);await chain;while(editor.value!==savedText){if(!await enqueue(editor.value,version))return false;clearTimeout(timer);}return true;};
+const sections=createResumeSectionEditor(editor,changed);
+const setEditorReadOnly=value=>{if(sections)sections.setReadOnly(value);else if(editor)editor.readOnly=value;};
 const navigate=(url,target)=>{const base=String(url||'').split('#')[0];const destination=base+(target?'#'+target:'');if(location.href.split('#')[0]===base){location.hash=target;location.reload();}else location.assign(destination);};
 if(editable){
   form.querySelector('[data-resume-reload]')?.addEventListener('click',()=>{remember();location.reload();});
-  editor.addEventListener('input',changed);
+  editor.addEventListener('input',()=>{sections?.rebuild();changed();});
   try{const backup=JSON.parse(localStorage.getItem(backupKey)||'null');
     if(backup&&typeof backup.text==='string'&&backup.text!==savedText){
-      const restore=()=>{editor.value=backup.text;changed();const notice=form.querySelector('[data-resume-recovery]');if(notice)notice.hidden=true;setStatus('已恢复未保存的修改，正在保存…');};
+      const restore=()=>{editor.value=backup.text;sections?.rebuild();changed();const notice=form.querySelector('[data-resume-recovery]');if(notice)notice.hidden=true;setStatus('已恢复未保存的修改，正在保存…');};
       if(backup.baseText===savedText)restore();
       else{const notice=form.querySelector('[data-resume-recovery]');if(notice)notice.hidden=false;form.querySelector('[data-resume-restore]')?.addEventListener('click',restore);}
     }else if(backup)localStorage.removeItem(backupKey);
@@ -198,7 +306,7 @@ if(editable){
     const destination=new URL(link.href,location.href);const current=new URL(location.href);
     if(destination.pathname===current.pathname&&destination.search===current.search)return;
     if(editor.value===savedText)return;
-    event.preventDefault();if(await flush())location.assign(link.href);else editor.focus();
+    event.preventDefault();if(await flush())location.assign(link.href);else if(sections)sections.focus();else editor.focus();
   });
   if(typeof addEventListener==='function'){
     addEventListener('pagehide',remember);
@@ -212,7 +320,7 @@ for(const submitForm of document.querySelectorAll('[data-resume-submit]'))submit
   if(error)error.textContent='';
   const action=button?.getAttribute?.('formaction')||submitForm.getAttribute('action')||submitForm.action;
   if(button){button.disabled=true;button.textContent=action.endsWith('/activate')?'正在启用…':action.endsWith('/save')?'正在保存…':action.endsWith('/copy')?'正在打开草稿…':'正在整理简历…';}
-  if(submitForm===form){clearTimeout(timer);if(editable)editor.readOnly=true;}
+  if(submitForm===form){clearTimeout(timer);if(editable)setEditorReadOnly(true);}
   try{
     if(editable){if(submitForm===form)await chain;else if(!await flush())throw new Error('保存失败，请先重试保存当前简历。');}
     const body=new URLSearchParams(new FormData(submitForm));
@@ -228,7 +336,7 @@ for(const submitForm of document.querySelectorAll('[data-resume-submit]'))submit
     if(failure.code==='RESUME_OPTIMIZATION_REVISION_CONFLICT')showConflict();
     if(Array.isArray(failure.issues))updateIntegrity({errors:failure.issues,warnings:[]});
     displayFailure(error,failure);
-    if(submitForm===form&&editable)editor.readOnly=false;
+    if(submitForm===form&&editable)setEditorReadOnly(false);
     if(button){button.disabled=false;button.textContent=label;}
   }
 });
@@ -274,4 +382,4 @@ function renderResumePrintPage(text) {
   </style></head><body><div class="toolbar"><button type="button" onclick="window.print()">打印 / 保存 PDF</button><span>在打印窗口中选择“另存为 PDF”，保存后可上传给 HR。</span></div><main><div class="resume-text">${renderResumePrintBlocks(text)}</div></main></body></html>`;
 }
 
-module.exports = { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues, renderResumePrintPage };
+module.exports = { renderResumeOptimizationPage, RESUME_OPTIMIZATION_SCRIPT, publicResumeIntegrityIssues, renderResumePrintPage, splitResumeSections };

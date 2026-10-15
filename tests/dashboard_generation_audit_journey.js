@@ -43,6 +43,10 @@ const { createMockInterviewService } = require('../src/application/mock_intervie
     for (const page of [a, b]) { page.on('pageerror', error => pageErrors.push(error.message)); page.on('dialog', dialog => dialog.accept()); }
     const draftUrl = `${base}/resume-optimization?planId=${owner.planId}&draftId=${draft.id}`;
     await a.goto(draftUrl); await b.goto(draftUrl); await a.waitForLoadState('networkidle'); await b.waitForLoadState('networkidle');
+    for (const page of [a, b]) {
+      const fullText = page.locator('[data-resume-full-text]');
+      if (!await fullText.evaluate(element => element.open)) await fullText.locator('summary').click();
+    }
     const firstText = draft.finalText + '\n甲页面：负责退款核对。';
     const secondText = draft.finalText + '\n乙页面：负责接口联调。';
     await a.locator('#resume-opt-final-text').fill(firstText);
