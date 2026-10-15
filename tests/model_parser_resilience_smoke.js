@@ -32,7 +32,7 @@ async function testLongStructuredTaskTokenLimits() {
   });
   assert.deepStrictEqual(
     requested.map((body) => body.max_tokens),
-    [8192, 8192, 16384, 4096],
+    [8192, 8192, 32768, 4096],
     "multi-story preparation keeps the long structured response budget without increasing ordinary tasks"
   );
 }
