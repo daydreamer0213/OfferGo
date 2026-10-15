@@ -19,6 +19,46 @@ function buildResumeInterviewEvidenceCatalog(sourceText) {
   return lines.map((text, index) => ({ id: `R${index + 1}`, kind: "resume", text }));
 }
 
+function validateInterviewPreparation(raw, { resumeEvidenceCatalog = [], storyId } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+    || !Array.isArray(raw.stories) || raw.stories.length < 1 || raw.stories.length > 60) {
+    throw new Error('故事准备稿格式无效');
+  }
+  const evidenceIds = new Set(resumeEvidenceCatalog.map(item => String(item?.id || '').trim()));
+  const seen = new Set();
+  const stories = raw.stories.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('故事格式无效');
+    if (typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.text !== 'string') {
+      throw new Error('故事文字格式无效');
+    }
+    if (Array.isArray(item.missingDetails) && item.missingDetails.some(value => typeof value !== 'string')) {
+      throw new Error('待补充事项格式无效');
+    }
+    const id = cleanText(item.id, 30, '故事编号');
+    if (!/^S[1-9]\d*$/.test(id) || seen.has(id)) throw new Error('故事编号无效或重复');
+    seen.add(id);
+    if (!Array.isArray(item.resumeEvidenceIds) || !item.resumeEvidenceIds.length
+      || item.resumeEvidenceIds.length > 100 || item.resumeEvidenceIds.some(value => typeof value !== 'string')) {
+      throw new Error('故事必须引用简历证据');
+    }
+    const resumeEvidenceIds = [...new Set(item.resumeEvidenceIds.map(value => cleanText(value, 30, '简历证据编号')))];
+    if (resumeEvidenceIds.some(value => !/^R[1-9]\d*$/.test(value) || !evidenceIds.has(value))) {
+      throw new Error('故事引用了不存在的简历证据');
+    }
+    return {
+      id,
+      title: cleanText(item.title, 160, '故事标题'),
+      resumeEvidenceIds,
+      text: cleanText(item.text, 12_000, '故事正文'),
+      missingDetails: boundedTextArray(item.missingDetails, '待补充事项', { maxItems: 3 })
+    };
+  });
+  if (storyId !== undefined && (stories.length !== 1 || stories[0].id !== storyId)) {
+    throw new Error('只能重新整理指定的一条故事');
+  }
+  return { stories };
+}
+
 function projectInterviewFacts({ factRevisions = [], answerMemories = [], allowedScopeKinds = [], includeTimestamps = false } = {}) {
   const allowedScopes = new Set(allowedScopeKinds.map((kind) => String(kind || "").trim()).filter(Boolean));
   const memoriesById = new Map((Array.isArray(answerMemories) ? answerMemories : [])
@@ -309,8 +349,10 @@ function validateRetryReview(raw, context = {}) {
   };
 }
 
-function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], candidateEvidence = [], priorWeaknesses = [] }) {
-  const generalThemes = ['经历与求职方向', '实际承担的工作', '解决问题与取舍', '协作与沟通', '成果与复盘'];
+function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], candidateEvidence = [], priorWeaknesses = [], storyPreparation }) {
+  const stories = Array.isArray(storyPreparation?.stories) ? storyPreparation.stories : [];
+  const generalThemes = stories.length ? stories.map(story => `${story.id}：${story.title}`)
+    : ['经历与求职方向', '实际承担的工作', '解决问题与取舍', '协作与沟通', '成果与复盘'];
   const understanding = job?.analysis?.jobUnderstanding || job?.analysis || {};
   const jobFocus = job ? {
     role: understanding.roleSummary || job.analysis?.roleSummary || '',
@@ -331,11 +373,26 @@ function buildInterviewBrief({ sessionKind, job, resumeEvidenceCatalog = [], can
     matchingEvidence: job.analysis?.evidence || {}
   } : null;
   return { sessionKind, generalThemes, jobFocus, resumeEvidenceCatalog, candidateEvidence, priorWeaknesses,
-    coverageRule: '先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。' };
+    ...(stories.length ? { storyPreparation } : {}),
+    coverageRule: stories.length
+      ? '先介绍所选工作，再围绕实际回答深入追问判断、取舍、行动、结果与经验；准备稿只是练习材料，不是已回答或已确认的事实。无需为了覆盖旧五类主题转到无关问题，JD 定制作为相关补充。'
+      : '先覆盖重要主题；回答缺少关键证据时追问，有充分信息后切换主题。岗位专项优先覆盖 JD 核心职责与用户经历的适配点。' };
 }
 
 function buildInterviewProgress(brief, turns = []) {
   const themes = Array.isArray(brief?.generalThemes) ? brief.generalThemes : [];
+  const askedQuestions = turns.map(turn => String(turn.question || turn.questionText || '').trim()).filter(Boolean);
+  const stories = Array.isArray(brief?.storyPreparation?.stories) ? brief.storyPreparation.stories : [];
+  if (stories.length) {
+    const coveredThemes = themes.filter((theme, index) => turns.some(turn => {
+      const focus = String(turn.focus || turn.questionFocus || '').toLowerCase();
+      const focusedStoryIndex = stories.findIndex((story, at) => focus === story.id.toLowerCase()
+        || focus === themes[at]?.toLowerCase() || focus === story.title.toLowerCase());
+      return focusedStoryIndex >= 0 ? focusedStoryIndex === index
+        : String(turn.question || turn.questionText || '').includes(stories[index].title);
+    }));
+    return { askedQuestions, coveredThemes, remainingThemes: themes.filter(theme => !coveredThemes.includes(theme)) };
+  }
   const themePatterns = [
     /intro|motivation|career|direction|经历与求职方向|自我介绍|职业方向|求职|动机|离职原因|空档/,
     /contribution|responsibility|实际承担的工作|个人贡献|职责|承担|负责|参与.*工作/,
@@ -343,7 +400,6 @@ function buildInterviewProgress(brief, turns = []) {
     /collaboration|teamwork|communication|协作与沟通|协作|合作|沟通|分歧/,
     /result|reflection|成果与复盘|成果|结果|复盘|量化|改进/
   ];
-  const askedQuestions = turns.map(turn => String(turn.question || turn.questionText || '').trim()).filter(Boolean);
   const coveredThemes = themes.filter((theme, index) => turns.some(turn => {
     const focus = String(turn.focus || turn.questionFocus || '').toLowerCase();
     const question = String(turn.question || turn.questionText || '');
@@ -358,6 +414,7 @@ module.exports = {
   buildInterviewProgress,
   normalizeInterviewSettings,
   buildResumeInterviewEvidenceCatalog,
+  validateInterviewPreparation,
   projectInterviewFacts,
   validateInterviewStep,
   validateInterviewReport,

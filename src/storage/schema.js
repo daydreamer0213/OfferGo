@@ -759,6 +759,28 @@ CREATE INDEX IF NOT EXISTS idx_resume_optimizations_profile
   ON resume_optimizations(profile_id, status, updated_at DESC, id DESC);
 `;
 
+const MOCK_INTERVIEW_PREPARATIONS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS mock_interview_preparations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL,
+  plan_id INTEGER NOT NULL,
+  resume_version_id INTEGER NOT NULL,
+  context_hash TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  generated_stories_json TEXT NOT NULL,
+  stories_json TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+  model_identity_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(profile_id) REFERENCES candidate_profiles(id),
+  FOREIGN KEY(plan_id) REFERENCES search_plans(id),
+  FOREIGN KEY(resume_version_id) REFERENCES candidate_resume_versions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_mock_interview_preparations_owner
+  ON mock_interview_preparations(profile_id, plan_id, resume_version_id, updated_at DESC, id DESC);
+`;
+
 const MOCK_INTERVIEW_V1_SCHEMA = `
 CREATE TABLE IF NOT EXISTS mock_interview_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -955,5 +977,6 @@ module.exports = {
   JOB_SEARCH_FUNNEL_SCHEMA,
   FUNNEL_STRATEGY_ROUNDS_SCHEMA,
   RESUME_OPTIMIZATION_SCHEMA,
-  MOCK_INTERVIEW_V1_SCHEMA
+  MOCK_INTERVIEW_V1_SCHEMA,
+  MOCK_INTERVIEW_PREPARATIONS_SCHEMA
 };

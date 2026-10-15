@@ -6,6 +6,7 @@ const ALWAYS_LONG_STRUCTURED_TASKS = new Set([
   "analyzeResume",
   "recommendSearchPlan",
   "generateResumeOptimization",
+  "generateMockInterviewPreparation",
   "reviewMockInterview"
 ]);
 const THINKING_LONG_STRUCTURED_TASKS = new Set([
@@ -125,8 +126,9 @@ class OpenAICompatibleTransport {
     let jsonModeFallback = false;
     let structuredJsonModeFallback = false;
     const longStructuredTask = usesLongStructuredBudget(kind, this.thinkingMode);
+    const initialStructuredBudget = kind === 'generateMockInterviewPreparation' ? 16384 : LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS;
     let responseTokenLimit = longStructuredTask
-      ? Math.max(maxTokens, LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS)
+      ? Math.max(maxTokens, initialStructuredBudget)
       : maxTokens;
     const startedAt = Date.now();
     try {

@@ -3,6 +3,7 @@ const { createHash } = require("node:crypto");
 const storage = require("../src/core/storage");
 const { createMockInterviewService } = require("../src/application/mock_interview");
 const { projectInterviewFacts } = require("../src/core/mock_interview");
+const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
 require('./mock_interview_feedback_regressions');
 require('./mock_model_quality_regressions');
 
@@ -759,6 +760,92 @@ const db = storage.openDb(":memory:");
         assert.strictEqual(unchanged.turns[0].answerText, '', 'failed kind correction must not partially save an answer');
       }
     }
+    // Preparation must deliver and persist usable stories without starting an interview.
+    const storyOwner = storage.saveProfileAnalysis(db, {
+      profile: profile('故事候选人'),
+      document: { ...document('story-preparation-resume'), text: '知识库项目\n负责检索链路，组合关键词与向量召回。\n维护评估样例，比较检索结果。\n实现检索接口，处理查询失败。' },
+      searchPlan: { name: '故事准备', cities: ['广州'], directions: ['AI 应用工程师'], keywords: [{ word: '知识库', priority: 'A' }] }
+    });
+    let preparationCalls = 0;
+    let preparationFailure = false;
+    let invalidPreparation = false;
+    const storyInputs = [];
+    const preparationInputs = [];
+    const storyAdapter = { ...adapter,
+      async generateMockInterviewPreparation(input) {
+        preparationCalls += 1;
+        preparationInputs.push(JSON.parse(JSON.stringify(input)));
+        if (preparationFailure) throw new Error('story provider unavailable');
+        if (input.storyId) return { stories: [{ ...input.preparation.stories.find(story => story.id === input.storyId),
+          text: `我负责维护评估样例，先比较不同召回方式，再记录查询结果。${input.supplement}`,
+          missingDetails: [] }] };
+        return { stories: [
+          { id: 'S1', title: '建立检索链路', resumeEvidenceIds: [invalidPreparation ? 'R404' : 'R2'], text: '我负责检索链路，把关键词与向量两种召回方式组合起来。', missingDetails: ['当时主要希望解决哪类检索问题？'] },
+          { id: 'S2', title: '维护评估样例', resumeEvidenceIds: ['R3'], text: '我维护评估样例，通过比较检索结果来检查方案。', missingDetails: ['哪些比较结果影响了后续选择？'] },
+          { id: 'S3', title: '交付检索接口', resumeEvidenceIds: ['R4'], text: '我实现检索接口，并处理查询失败。', missingDetails: [] }
+        ] };
+      },
+      async generateMockInterviewStep(input) {
+        storyInputs.push(JSON.parse(JSON.stringify(input)));
+        const selected = input.context.storyPreparation?.stories[0];
+        if (!selected) return adapter.generateMockInterviewStep(input);
+        const last = input.turns.at(-1);
+        return { answerReview: last ? { conclusion: '说明了自己比较方案的做法。', strengths: ['行动清楚'], improvements: ['进一步解释选择依据'], turnNumbers: [last.turnNumber] } : null,
+          nextQuestion: { questionKind: last ? 'follow_up' : 'topic_transition', text: last ? `你提到“${last.answer}”，当时为什么这样比较？` : `请介绍${selected.title}这部分工作。`,
+            focus: 'project', resumeEvidenceIds: selected.resumeEvidenceIds, basedOnTurnNumber: last?.turnNumber ?? null, answerEvidence: last?.answer || '' }, complete: false };
+      }
+    };
+    const storyService = createMockInterviewService({ db, adapter: storyAdapter });
+    const storyBase = { profileId: storyOwner.profileId, planId: storyOwner.planId, resumeVersionId: storyOwner.resumeVersionId };
+    const sessionCountBeforePreparation = db.prepare('SELECT count(*) AS n FROM mock_interview_sessions').get().n;
+    const [prepared, samePreparation] = await Promise.all([
+      storyService.prepareStories({ ...storyBase, operationId: 'prepare-three-stories' }),
+      storyService.prepareStories({ ...storyBase, operationId: 'prepare-three-stories' })
+    ]);
+    assert.equal(preparationCalls, 1, 'duplicate preparation shares one provider operation');
+    assert.equal(prepared.id, samePreparation.id);
+    assert.equal(prepared.stories.length, 3);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM mock_interview_sessions').get().n, sessionCountBeforePreparation, 'preparing stories must not create a question or session');
+    assert.equal(preparationInputs[0].context.job, null, 'general preparation does not require a job');
+    assert.equal(storyService.dashboard({ ...storyBase, preparationId: prepared.id }).selectedPreparation.id, prepared.id);
+    const prepOwner = { profileId: storyBase.profileId, planId: storyBase.planId, preparationId: prepared.id };
+    const edited = storyService.savePreparation({ ...prepOwner, expectedRevision: prepared.revision, storyId: 'S2', storyText: '我维护评估样例，先用真实查询比较，再记录不同方式的结果。' });
+    assert.equal(edited.revision, prepared.revision + 1);
+    assert.equal(preparationCalls, 1, 'ordinary edits do not call a model');
+    assert.equal(storyService.getPreparation(prepOwner).stories[1].text, edited.stories[1].text);
+    assert.equal(edited.stories[0].text, prepared.stories[0].text);
+    assert.throws(() => storyService.savePreparation({ ...prepOwner, expectedRevision: prepared.revision, storyId: 'S2', storyText: '旧页面修改' }), /版本|更新|修改/);
+    const refineInput = { ...prepOwner, expectedRevision: edited.revision, storyId: 'S2', supplement: '后来保留了有代表性的失败查询。', operationId: 'refine-story-two' };
+    const refined = await storyService.refineStory(refineInput);
+    assert.equal(refined.stories[0].text, prepared.stories[0].text);
+    assert.equal(refined.stories[2].text, prepared.stories[2].text);
+    assert.match(refined.stories[1].text, /失败查询/);
+    await storyService.refineStory(refineInput);
+    assert.equal(preparationCalls, 2, 'a saved refine operation is read without a second provider request');
+    assert.deepEqual(storyService.getPreparationOperation({ ...storyBase, operationId: 'refine-story-two' }), { saved: true, resultId: prepared.id });
+    preparationFailure = true;
+    await assert.rejects(() => storyService.refineStory({ ...refineInput, expectedRevision: refined.revision, operationId: 'refine-failed' }), /unavailable/);
+    assert.deepEqual(storyService.getPreparation(prepOwner).stories, refined.stories, 'failed refinement keeps all saved edits');
+    preparationFailure = false;
+    invalidPreparation = true;
+    await assert.rejects(() => storyService.prepareStories({ ...storyBase, operationId: 'invalid-preparation-source' }), /证据/);
+    assert.equal(storyService.dashboard({ ...storyBase }).preparations.length, 1, 'an invalid result must not save a partial draft');
+    invalidPreparation = false;
+    await assert.rejects(() => storyService.prepareStories({ ...storyBase, profileId: owner.profileId, operationId: 'wrong-owner' }), /属于/);
+    const preparedSession = await storyService.startSession({ ...storyBase, preparationId: prepared.id, preparationRevision: refined.revision, storyIds: ['S2'],
+      settings: { type: 'mixed', difficulty: 'standard', plannedQuestions: 3 }, operationId: 'start-prepared-story' });
+    assert.deepEqual(preparedSession.context.storyPreparation.stories.map(story => story.id), ['S2']);
+    assert.equal(preparedSession.context.storyPreparation.stories[0].text, refined.stories[1].text);
+    storyService.savePreparation({ ...prepOwner, expectedRevision: refined.revision, storyId: 'S2', storyText: '练习开始后又调整了表达。' });
+    assert.equal(storyService.getSession({ ...storyBase, sessionId: preparedSession.id }).context.storyPreparation.stories[0].text, refined.stories[1].text, 'later edits must not rewrite a running interview');
+    await storyService.answerTurn({ ...storyBase, sessionId: preparedSession.id, turnNumber: 1, answerText: '我先用真实查询对比不同召回方式的结果。' });
+    assert.equal(storyInputs.at(-1).context.storyPreparation.stories[0].text, refined.stories[1].text);
+    assert.equal(listCandidateEvidence(db, { profileId: storyBase.profileId }).length, 0, 'preparation edits do not become confirmed candidate facts');
+    const withoutClientOperation = await storyService.prepareStories(storyBase);
+    assert.equal(withoutClientOperation.stories.length, 3, 'a normal service call without a client operation id must still save its draft');
+    const refinedWithoutClientOperation = await storyService.refineStory({ profileId: storyBase.profileId, planId: storyBase.planId,
+      preparationId: withoutClientOperation.id, expectedRevision: withoutClientOperation.revision, storyId: 'S2', supplement: '补充一次真实查询比较。' });
+    assert.match(refinedWithoutClientOperation.stories[1].text, /真实查询比较/);
     console.log("mock_interview_service_smoke ok");
   } finally {
     db.close();

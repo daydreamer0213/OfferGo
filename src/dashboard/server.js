@@ -1610,6 +1610,15 @@ function createDashboardServer({
           profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get("operationId")
         }) });
       }
+      if (req.method === 'GET' && url.pathname === '/api/interview/preparation/operation') {
+        const plan = requiredMockInterviewPlan(db, url.searchParams.get('planId'));
+        return sendJson(res, 200, { ok: true, ...getMockInterviewService().getPreparationOperation({
+          profileId: plan.profileId, planId: plan.id, operationId: url.searchParams.get('operationId')
+        }) });
+      }
+      if (req.method === 'POST' && ['/api/interview/prepare', '/api/interview/preparation/save', '/api/interview/preparation/refine'].includes(url.pathname)) {
+        return await handleMockInterviewPreparation(req, res, { db, mockInterview: getMockInterviewService(), path: url.pathname });
+      }
       if (req.method === "POST" && url.pathname === "/api/interview/start") return await handleMockInterviewStart(req, res, {
         db,
         mockInterview: getMockInterviewService()
@@ -6196,12 +6205,32 @@ function renderMockInterviewDashboardPage({ db, searchParams, mockInterview, mod
   const plan = getSearchPlan(db, searchParams.get("planId"));
   if (!plan) return renderErrorPage("找不到这份筛选方案，请从今日任务重新进入模拟面试。", "/plan");
   const sessionId = Number(searchParams.get("sessionId") || 0) || null;
+  const preparationId = Number(searchParams.get('preparationId') || 0) || null;
   const dashboard = mockInterview.dashboard({
     profileId: plan.profileId,
     planId: plan.id,
-    sessionId
+    sessionId,
+    ...(preparationId ? { preparationId } : {})
   });
   return renderPage("模拟面试训练", `${renderMockInterviewPage({ dashboard, modelReady })}${MOCK_INTERVIEW_SCRIPT}`);
+}
+
+async function handleMockInterviewPreparation(req, res, { db, mockInterview, path }) {
+  const params = parseBody(await readBody(req), req.headers['content-type'] || '');
+  const plan = requiredMockInterviewPlan(db, params.planId);
+  const owner = { profileId: plan.profileId, planId: plan.id };
+  let preparation;
+  if (path === '/api/interview/prepare') {
+    preparation = await mockInterview.prepareStories({ ...owner, resumeVersionId: Number(params.resumeVersionId),
+      ...(params.operationId === undefined ? {} : { operationId: params.operationId }) });
+  } else {
+    const input = { ...owner, preparationId: Number(params.preparationId), expectedRevision: Number(params.expectedRevision), storyId: params.storyId };
+    preparation = path.endsWith('/save')
+      ? mockInterview.savePreparation({ ...input, storyText: params.storyText })
+      : await mockInterview.refineStory({ ...input, supplement: params.supplement,
+        ...(params.operationId === undefined ? {} : { operationId: params.operationId }) });
+  }
+  return redirect(res, `/interview?planId=${encodeURIComponent(plan.id)}&preparationId=${encodeURIComponent(preparation.id)}#interview-preparation`);
 }
 
 async function handleMockInterviewStart(req, res, { db, mockInterview }) {
@@ -6215,6 +6244,8 @@ async function handleMockInterviewStart(req, res, { db, mockInterview }) {
     ...(params.operationId === undefined ? {} : { operationId: params.operationId }),
     jobId: sessionKind === "job_specific" ? Number(params.jobId) : null,
     resumeVersionId: Number(params.resumeVersionId),
+    ...(params.preparationId ? { preparationId: Number(params.preparationId), preparationRevision: Number(params.preparationRevision),
+      storyIds: Array.isArray(params.storyIds) ? params.storyIds : params.storyIds ? [params.storyIds] : [] } : {}),
     settings: {
       type: params.type,
       difficulty: params.difficulty,

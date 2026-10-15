@@ -18,6 +18,175 @@ function requiredText(value, label, maxLength = 20_000) {
   return text;
 }
 
+function preparationRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    profileId: Number(row.profile_id),
+    planId: Number(row.plan_id),
+    resumeVersionId: Number(row.resume_version_id),
+    context: parseJson(row.context_json, {}),
+    contextHash: row.context_hash,
+    generatedStories: parseJson(row.generated_stories_json, []),
+    stories: parseJson(row.stories_json, []),
+    revision: Number(row.revision),
+    modelIdentity: parseJson(row.model_identity_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function ownedPreparationRow(db, profileId, planId, preparationId) {
+  return db.prepare("SELECT * FROM mock_interview_preparations WHERE id = ? AND profile_id = ? AND plan_id = ?")
+    .get(positiveId(preparationId, "preparationId"), positiveId(profileId, "profileId"), positiveId(planId, "planId"));
+}
+
+function preparationStories(value, context) {
+  if (!Array.isArray(value) || !value.length) throw new Error("故事准备稿不能为空");
+  const evidenceIds = new Set((context.resumeEvidenceCatalog || []).map(item => item.id));
+  const storyIds = new Set();
+  const text = (item, label, limit) => {
+    if (typeof item !== "string") throw new Error(`${label}格式无效`);
+    return requiredText(item, label, limit);
+  };
+  return value.map(story => {
+    if (!story || typeof story !== "object" || Array.isArray(story)) throw new Error("故事格式无效");
+    const id = text(story.id, "故事编号", 120);
+    if (storyIds.has(id)) throw new Error("故事编号不能重复");
+    storyIds.add(id);
+    if (!Array.isArray(story.resumeEvidenceIds) || !story.resumeEvidenceIds.length
+      || story.resumeEvidenceIds.some(evidenceId => !evidenceIds.has(evidenceId))) {
+      throw new Error("故事必须引用冻结简历中的真实证据");
+    }
+    if (!Array.isArray(story.missingDetails)) throw new Error("故事待补充提示格式无效");
+    return {
+      id,
+      title: text(story.title, "故事标题", 400),
+      resumeEvidenceIds: [...new Set(story.resumeEvidenceIds)],
+      text: text(story.text, "故事正文", 20_000),
+      missingDetails: story.missingDetails.map(item => text(item, "待补充提示", 4_000))
+    };
+  });
+}
+
+function preparationOperationIdentity(value = {}, { required = false } = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("故事整理操作身份格式无效");
+  const { operations, ...identity } = value;
+  if (required || identity.operationId != null || identity.operationInputHash != null) {
+    identity.operationId = requiredText(identity.operationId, "操作编号", 200);
+    identity.operationInputHash = requiredText(identity.operationInputHash, "操作输入哈希", 200);
+  }
+  return identity;
+}
+
+function getMockInterviewPreparation(db, { profileId, planId, preparationId }) {
+  return preparationRow(ownedPreparationRow(db, profileId, planId, preparationId));
+}
+
+function findMockInterviewPreparationOperation(db, { profileId, planId, operationId }) {
+  const id = requiredText(operationId, "操作编号", 200);
+  const row = db.prepare(`SELECT * FROM mock_interview_preparations
+    WHERE profile_id = ? AND plan_id = ? AND (
+      json_extract(model_identity_json, '$.operationId') = ? OR EXISTS (
+        SELECT 1 FROM json_each(model_identity_json, '$.operations')
+        WHERE json_extract(value, '$.operationId') = ?
+      )
+    ) ORDER BY id DESC LIMIT 1`)
+    .get(positiveId(profileId, "profileId"), positiveId(planId, "planId"), id, id);
+  const preparation = preparationRow(row);
+  if (!preparation) return null;
+  const { operations = [], ...createdIdentity } = preparation.modelIdentity;
+  const identity = createdIdentity.operationId === id
+    ? createdIdentity : operations.find(item => item.operationId === id);
+  return { preparation, identity };
+}
+
+function assertPreparationOperation(found, identity, preparationId = null) {
+  if (found && (found.identity.operationInputHash !== identity.operationInputHash
+    || (preparationId !== null && found.preparation.id !== preparationId))) {
+    throw storageError("MOCK_INTERVIEW_PREPARATION_OPERATION_CONFLICT", "操作编号已用于其他故事整理请求，请刷新后重试");
+  }
+}
+
+function createMockInterviewPreparation(db, input = {}) {
+  const profileId = positiveId(input.profileId, "profileId");
+  const planId = positiveId(input.planId, "planId");
+  const resumeVersionId = positiveId(input.resumeVersionId, "resumeVersionId");
+  if (!input.context || typeof input.context !== "object" || Array.isArray(input.context)) throw new Error("冻结故事上下文格式无效");
+  const contextJson = JSON.stringify(input.context);
+  const storiesJson = JSON.stringify(preparationStories(input.stories, input.context));
+  const modelIdentity = preparationOperationIdentity(input.modelIdentity);
+  return immediateTransaction(db, () => {
+    const ownedPlan = db.prepare("SELECT id FROM search_plans WHERE id = ? AND profile_id = ?").get(planId, profileId);
+    if (!ownedPlan) throw storageError("MOCK_INTERVIEW_PLAN_NOT_FOUND", "筛选方案不存在或不属于当前候选人");
+    const ownedResume = db.prepare("SELECT id, is_active FROM candidate_resume_versions WHERE id = ? AND profile_id = ?")
+      .get(resumeVersionId, profileId);
+    if (!ownedResume) throw storageError("MOCK_INTERVIEW_RESUME_NOT_FOUND", "启用中的简历不存在或不属于当前候选人");
+    if (input.context.resume?.versionId != null && Number(input.context.resume.versionId) !== resumeVersionId) {
+      throw new Error("故事上下文与简历版本不一致");
+    }
+    if (modelIdentity.operationId) {
+      const found = findMockInterviewPreparationOperation(db, { profileId, planId, operationId: modelIdentity.operationId });
+      assertPreparationOperation(found, modelIdentity);
+      if (found) return found.preparation;
+    }
+    if (!ownedResume.is_active) throw storageError("MOCK_INTERVIEW_RESUME_NOT_FOUND", "启用中的简历不存在或不属于当前候选人");
+    const now = nowIso();
+    const result = db.prepare(`INSERT INTO mock_interview_preparations(
+      profile_id, plan_id, resume_version_id, context_hash, context_json,
+      generated_stories_json, stories_json, revision, model_identity_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`).run(
+      profileId, planId, resumeVersionId, sha256(contextJson), contextJson,
+      storiesJson, storiesJson, JSON.stringify(modelIdentity), now, now
+    );
+    return getMockInterviewPreparation(db, { profileId, planId, preparationId: Number(result.lastInsertRowid) });
+  });
+}
+
+function listMockInterviewPreparations(db, { profileId, planId, resumeVersionId, limit } = {}) {
+  const params = [positiveId(profileId, "profileId"), positiveId(planId, "planId")];
+  let resumeClause = "";
+  if (resumeVersionId !== undefined && resumeVersionId !== null && resumeVersionId !== "") {
+    resumeClause = " AND resume_version_id = ?";
+    params.push(positiveId(resumeVersionId, "resumeVersionId"));
+  }
+  const boundedLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 30)));
+  return db.prepare(`SELECT * FROM mock_interview_preparations
+    WHERE profile_id = ? AND plan_id = ?${resumeClause} ORDER BY updated_at DESC, id DESC LIMIT ?`)
+    .all(...params, boundedLimit).map(preparationRow);
+}
+
+function updateMockInterviewPreparation(db, input = {}) {
+  const profileId = positiveId(input.profileId, "profileId");
+  const planId = positiveId(input.planId, "planId");
+  const preparationId = positiveId(input.preparationId, "preparationId");
+  const expectedRevision = positiveId(input.expectedRevision, "expectedRevision");
+  const identity = input.operationIdentity == null ? null
+    : preparationOperationIdentity(input.operationIdentity, { required: true });
+  return immediateTransaction(db, () => {
+    const preparation = getMockInterviewPreparation(db, { profileId, planId, preparationId });
+    if (!preparation) throw storageError("MOCK_INTERVIEW_PREPARATION_NOT_FOUND", "故事准备稿不存在或不属于当前候选人");
+    if (identity) {
+      const found = findMockInterviewPreparationOperation(db, { profileId, planId, operationId: identity.operationId });
+      assertPreparationOperation(found, identity, preparationId);
+      if (found) return found.preparation;
+    }
+    if (preparation.revision !== expectedRevision) {
+      throw storageError("MOCK_INTERVIEW_PREPARATION_REVISION_CONFLICT", "故事准备稿已更新，请刷新后再保存");
+    }
+    const storiesJson = JSON.stringify(preparationStories(input.stories, preparation.context));
+    const modelIdentity = identity ? {
+      ...preparation.modelIdentity,
+      operations: [...(preparation.modelIdentity.operations || []), identity]
+    } : preparation.modelIdentity;
+    db.prepare(`UPDATE mock_interview_preparations
+      SET stories_json = ?, revision = revision + 1, model_identity_json = ?, updated_at = ?
+      WHERE id = ? AND profile_id = ? AND plan_id = ? AND revision = ?`)
+      .run(storiesJson, JSON.stringify(modelIdentity), nowIso(), preparationId, profileId, planId, expectedRevision);
+    return getMockInterviewPreparation(db, { profileId, planId, preparationId });
+  });
+}
+
 function questionInput(value = {}) {
   const basedOn = value.basedOnTurnNumber;
   const resumeEvidenceIds = [...new Set((Array.isArray(value.resumeEvidenceIds) ? value.resumeEvidenceIds : [])
@@ -342,6 +511,11 @@ function recordMockInterviewRetry(db, input = {}) {
 }
 
 module.exports = {
+  createMockInterviewPreparation,
+  getMockInterviewPreparation,
+  listMockInterviewPreparations,
+  updateMockInterviewPreparation,
+  findMockInterviewPreparationOperation,
   createMockInterviewSession,
   getMockInterviewSession,
   findMockInterviewOperation,

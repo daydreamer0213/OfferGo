@@ -314,6 +314,147 @@ try {
   assert.strictEqual(profileWideGeneral.length, 2);
   assert(profileWideGeneral.every((item) => item.sessionKind === "resume_general"));
 
+  const preparationContext = {
+    sessionKind: "resume_general", job: null,
+    resume: { versionId: owner.resumeVersionId, text: "参与企业知识库开发；负责接口联调" },
+    resumeEvidenceCatalog: [
+      { id: "R1", kind: "resume", text: "参与企业知识库开发" },
+      { id: "R2", kind: "resume", text: "负责接口联调" }
+    ]
+  };
+  const stories = [
+    { id: "S1", title: "知识库开发", resumeEvidenceIds: ["R1"], text: "我参与企业知识库开发，承担检索接口实现。", missingDetails: ["如何选择检索方案？"] },
+    { id: "S2", title: "接口联调", resumeEvidenceIds: ["R2"], text: "我负责接口联调，与前端核对接口约定。", missingDetails: [] }
+  ];
+  const createInput = {
+    profileId: owner.profileId, planId: owner.planId, resumeVersionId: owner.resumeVersionId,
+    context: preparationContext, stories,
+    modelIdentity: { provider: "mock", model: "offline", operationId: "prepare-1", operationInputHash: "prepare-input-1" }
+  };
+  const sessionsBeforePreparation = db.prepare("SELECT count(*) AS n FROM mock_interview_sessions").get().n;
+  const preparation = storage.createMockInterviewPreparation(db, createInput);
+  assert.strictEqual(preparation.profileId, owner.profileId);
+  assert.strictEqual(preparation.planId, owner.planId);
+  assert.strictEqual(preparation.resumeVersionId, owner.resumeVersionId);
+  assert.strictEqual(preparation.revision, 1);
+  assert.deepStrictEqual(preparation.context, preparationContext);
+  assert.strictEqual(preparation.contextHash, crypto.createHash("sha256").update(JSON.stringify(preparationContext)).digest("hex"));
+  assert.deepStrictEqual(preparation.stories, stories);
+  assert.deepStrictEqual(preparation.generatedStories, stories);
+  assert(preparation.createdAt && preparation.updatedAt);
+  assert.strictEqual(db.prepare("SELECT count(*) AS n FROM mock_interview_sessions").get().n, sessionsBeforePreparation,
+    "preparing stories must not create an interview session");
+  assert.strictEqual(storage.createMockInterviewPreparation(db, createInput).id, preparation.id);
+  assert.strictEqual(db.prepare("SELECT count(*) AS n FROM mock_interview_preparations").get().n, 1,
+    "retrying the same generation must read the stored preparation");
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, modelIdentity: { ...createInput.modelIdentity, operationInputHash: "changed-input" }
+  }), error => error.code === "MOCK_INTERVIEW_PREPARATION_OPERATION_CONFLICT");
+
+  for (const scope of [
+    { profileId: other.profileId, planId: other.planId },
+    { profileId: owner.profileId, planId: secondOwnerPlanId }
+  ]) {
+    assert.strictEqual(storage.getMockInterviewPreparation(db, { ...scope, preparationId: preparation.id }), null);
+    assert.strictEqual(storage.findMockInterviewPreparationOperation(db, { ...scope, operationId: "prepare-1" }), null);
+    assert.deepStrictEqual(storage.listMockInterviewPreparations(db, scope), []);
+    assert.throws(() => storage.updateMockInterviewPreparation(db, {
+      ...scope, preparationId: preparation.id, expectedRevision: 1, stories
+    }), error => error.code === "MOCK_INTERVIEW_PREPARATION_NOT_FOUND");
+  }
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, planId: other.planId
+  }), error => error.code === "MOCK_INTERVIEW_PLAN_NOT_FOUND");
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, resumeVersionId: other.resumeVersionId
+  }), error => error.code === "MOCK_INTERVIEW_RESUME_NOT_FOUND");
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, modelIdentity: {}, stories: [{ ...stories[0], resumeEvidenceIds: ["R999"] }]
+  }), /依据|证据/);
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, modelIdentity: {}, context: { ...preparationContext, resume: { versionId: other.resumeVersionId } }
+  }), /简历|版本/);
+
+  const editInput = {
+    profileId: owner.profileId, planId: owner.planId, preparationId: preparation.id,
+    expectedRevision: 1, stories: [{ ...stories[0], text: "我补充了自己负责的检索接口实现和选择原因。" }, stories[1]]
+  };
+  const edited = storage.updateMockInterviewPreparation(db, editInput);
+  assert.strictEqual(edited.revision, 2);
+  assert.deepStrictEqual(edited.stories, editInput.stories);
+  assert.deepStrictEqual(edited.generatedStories, stories);
+  assert.deepStrictEqual(edited.context, preparationContext);
+  assert.deepStrictEqual(edited.modelIdentity, preparation.modelIdentity);
+  assert.throws(() => storage.updateMockInterviewPreparation(db, {
+    ...editInput, stories: [{ ...stories[0], text: "旧页面覆盖" }, stories[1]]
+  }), error => error.code === "MOCK_INTERVIEW_PREPARATION_REVISION_CONFLICT");
+  assert.throws(() => storage.updateMockInterviewPreparation(db, {
+    ...editInput, expectedRevision: 2, stories: [{ ...stories[0], resumeEvidenceIds: ["R999"] }, stories[1]]
+  }), /依据|证据/);
+
+  const refineIdentity = { provider: "mock", model: "offline", operationId: "refine-1", operationInputHash: "refine-input-1" };
+  const refinedStories = [{ ...editInput.stories[0], text: "补充实际情境后重新整理的知识库故事。" }, stories[1]];
+  const refineInput = { ...editInput, expectedRevision: 2, stories: refinedStories, operationIdentity: refineIdentity };
+  const refined = storage.updateMockInterviewPreparation(db, refineInput);
+  assert.strictEqual(refined.revision, 3);
+  assert.deepStrictEqual(refined.stories, refinedStories);
+  assert.deepStrictEqual(refined.generatedStories, stories);
+  assert.deepStrictEqual(refined.modelIdentity.operations, [refineIdentity]);
+  assert.strictEqual(storage.updateMockInterviewPreparation(db, refineInput).revision, 3,
+    "retrying an already saved refinement must not increment its revision");
+  assert.throws(() => storage.updateMockInterviewPreparation(db, {
+    ...refineInput, operationIdentity: { ...refineIdentity, operationInputHash: "changed-refine-input" }
+  }), error => error.code === "MOCK_INTERVIEW_PREPARATION_OPERATION_CONFLICT");
+  const secondRefineIdentity = { ...refineIdentity, operationId: "refine-2", operationInputHash: "refine-input-2" };
+  storage.updateMockInterviewPreparation(db, {
+    ...refineInput, expectedRevision: 3, operationIdentity: secondRefineIdentity
+  });
+  const saved = storage.updateMockInterviewPreparation(db, { ...editInput, expectedRevision: 4, stories: refinedStories });
+  assert.strictEqual(saved.revision, 5);
+  assert.deepStrictEqual(saved.modelIdentity.operations, [refineIdentity, secondRefineIdentity]);
+  for (const identity of [createInput.modelIdentity, refineIdentity, secondRefineIdentity]) {
+    const found = storage.findMockInterviewPreparationOperation(db, {
+      profileId: owner.profileId, planId: owner.planId, operationId: identity.operationId
+    });
+    assert.strictEqual(found.preparation.id, preparation.id);
+    assert.strictEqual(found.preparation.revision, 5);
+    assert.deepStrictEqual(found.identity, identity);
+  }
+
+  db.exec(`CREATE TRIGGER fail_story_update BEFORE UPDATE OF stories_json ON mock_interview_preparations
+    BEGIN SELECT RAISE(ABORT, 'forced preparation update failure'); END;`);
+  assert.throws(() => storage.updateMockInterviewPreparation(db, {
+    ...editInput, expectedRevision: 5, operationIdentity: { ...refineIdentity, operationId: "failed-refine" }
+  }), /forced preparation update failure/);
+  db.exec("DROP TRIGGER fail_story_update");
+  assert.deepStrictEqual(storage.getMockInterviewPreparation(db, {
+    profileId: owner.profileId, planId: owner.planId, preparationId: preparation.id
+  }), saved, "a failed write must preserve stories, revision, context and operation history");
+  assert.strictEqual(storage.findMockInterviewPreparationOperation(db, {
+    profileId: owner.profileId, planId: owner.planId, operationId: "failed-refine"
+  }), null);
+
+  db.prepare("UPDATE candidate_resume_versions SET is_active = 0 WHERE id = ?").run(owner.resumeVersionId);
+  assert.throws(() => storage.createMockInterviewPreparation(db, {
+    ...createInput, modelIdentity: { ...createInput.modelIdentity, operationId: "inactive-create" }
+  }), error => error.code === "MOCK_INTERVIEW_RESUME_NOT_FOUND");
+  assert.strictEqual(storage.getMockInterviewPreparation(db, {
+    profileId: owner.profileId, planId: owner.planId, preparationId: preparation.id
+  }).id, preparation.id, "old resume preparations remain readable");
+  assert.strictEqual(storage.updateMockInterviewPreparation(db, { ...editInput, expectedRevision: 5 }).revision, 6,
+    "ownership and revision protect updates even after a resume is deactivated");
+  const recoveredCreation = storage.createMockInterviewPreparation(db, createInput);
+  assert.strictEqual(recoveredCreation.id, preparation.id);
+  assert.strictEqual(recoveredCreation.revision, 6,
+    "an already completed creation can be recovered after a resume change without replacing later edits");
+  assert.deepStrictEqual(recoveredCreation.stories, editInput.stories);
+  assert.strictEqual(storage.listMockInterviewPreparations(db, {
+    profileId: owner.profileId, planId: owner.planId, resumeVersionId: owner.resumeVersionId
+  }).length, 1);
+  assert.deepStrictEqual(storage.listMockInterviewPreparations(db, {
+    profileId: owner.profileId, planId: owner.planId, resumeVersionId: other.resumeVersionId
+  }), []);
+
   console.log("mock_interview_store_smoke ok");
 } finally {
   db.close();

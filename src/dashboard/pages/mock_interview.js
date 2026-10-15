@@ -4,9 +4,12 @@ const { renderDashboardFrame } = require("../ui/shell");
 function renderMockInterviewPage({ dashboard = {}, modelReady = true } = {}) {
   const plan = dashboard.plan || {};
   const planId = Number(plan.id || 0);
-  const selected = dashboard.selectedSession || null;
-  const currentPath = `/interview?planId=${encodeURIComponent(planId)}${selected ? `&sessionId=${encodeURIComponent(selected.id)}` : ""}`;
+  const selected = dashboard.selectedSessionExplicit === false ? null : dashboard.selectedSession || null;
+  const preparation = dashboard.selectedPreparation || null;
+  const currentPath = `/interview?planId=${encodeURIComponent(planId)}${selected ? `&sessionId=${encodeURIComponent(selected.id)}` : preparation ? `&preparationId=${encodeURIComponent(preparation.id)}` : ""}`;
   const todayPath = `/plan?planId=${encodeURIComponent(planId)}`;
+  const preparationWorkspace = renderPreparationWorkspace(dashboard, modelReady);
+  const directPractice = `<details class="interview-new-session"><summary>直接开始简历或岗位练习</summary>${renderStartPanel(dashboard, modelReady)}</details>`;
   return renderDashboardFrame({
     currentPath,
     todayPath,
@@ -16,42 +19,80 @@ function renderMockInterviewPage({ dashboard = {}, modelReady = true } = {}) {
     content: `<main id="main-content" class="interview-main">
       <section class="page-heading interview-heading" aria-labelledby="interview-title">
         <h1 id="interview-title">模拟面试训练</h1>
-        <p class="lede">围绕简历练习，也可以选一个岗位。每题答完后看反馈，练完一轮再挑需要改进的题目重练。</p>
+        <p class="lede">先把简历里的重要工作整理成能讲清楚的故事，再围绕你的经历和回答深入练习。也可以选一个岗位，补充针对性问题。</p>
         <div class="heading-meta"><span>${escapeHtml(plan.name || "当前筛选方案")}</span><span>文字练习</span><span>记录保存在本机</span></div>
       </section>
-      ${selected ? `<details class="interview-new-session"><summary>开始另一轮训练</summary>${renderStartPanel(dashboard, modelReady)}</details>` : renderStartPanel(dashboard, modelReady)}
-      ${selected ? renderSession(dashboard, selected) : renderEmptyState()}
+      ${selected ? `${renderSession(dashboard, selected)}<details class="interview-new-session"><summary>准备故事或开始另一轮训练</summary>${preparationWorkspace}${directPractice}</details>` : `${dashboard.selectedSession?.status === "active" ? `<p class="interview-continue"><a href="/interview?planId=${escapeAttr(planId)}&amp;sessionId=${escapeAttr(dashboard.selectedSession.id)}#interview-active-step">继续上次未完成的训练</a></p>` : ""}${preparationWorkspace}${directPractice}${renderHistory(dashboard, {})}`}
     </main><p class="footer-note">练习和记录保存在本机，不会发送给招聘方。回答中的经历需要你确认后，才会用于后续求职。</p>`
   });
 }
 
-function renderStartPanel(dashboard, modelReady) {
+function renderPreparationWorkspace(dashboard, modelReady) {
+  const preparation = dashboard.selectedPreparation;
+  const resumes = (dashboard.resumes || []).filter(resume => resume.isActive);
+  const planId = dashboard.plan?.id || "";
+  const generator = `<form class="interview-prepare-form" method="post" action="/api/interview/prepare" data-interview-submit data-interview-choice-scope="${escapeAttr(`${dashboard.profile?.id || dashboard.plan?.profileId || ""}:${planId}`)}" data-interview-operation-url="/api/interview/preparation/operation" data-interview-result-param="preparationId" data-interview-success-target="interview-preparation">
+    <input type="hidden" name="planId" value="${escapeAttr(planId)}">
+    <label>参考简历<select name="resumeVersionId" required>${resumes.map(resume => `<option value="${escapeAttr(resume.id)}">${escapeHtml(resume.name || `简历版本 ${resume.id}`)}</option>`).join("")}</select></label>
+    <button${!modelReady || !resumes.length ? " disabled" : ""}>根据简历准备故事</button>
+    <div class="alert" data-interview-error role="alert"></div>
+  </form>`;
+  const history = (dashboard.preparations || []).length ? `<details class="interview-preparation-history"><summary>查看已保存的准备稿</summary><ul>${dashboard.preparations.map(item => `<li><a href="/interview?planId=${escapeAttr(planId)}&amp;preparationId=${escapeAttr(item.id)}#interview-preparation"${item.id === preparation?.id ? ' aria-current="true"' : ""}>${escapeHtml(item.context?.resume?.name || `简历版本 ${item.resumeVersionId}`)} · ${escapeHtml(item.stories?.[0]?.title || "故事准备稿")}</a><span>${(item.stories || []).length} 条故事${resumes.some(resume => resume.id === item.resumeVersionId) ? "" : " · 旧简历稿"}</span></li>`).join("")}</ul></details>` : "";
+  return `<section id="interview-preparation" class="interview-preparation" aria-labelledby="interview-preparation-title">
+    <div class="card pad interview-preparation-intro"><p class="section-label">面试前准备</p><h2 id="interview-preparation-title">${preparation ? "把你的工作讲成故事" : "从简历得到故事初稿"}</h2>
+      <p>${preparation ? `这份稿参考 ${escapeHtml(preparation.context?.resume?.name || `简历版本 ${preparation.resumeVersionId}`)}。先读一条，再补充你真正做过的事；每条修改单独保存后，就能用来练习。` : "系统会按实际工作整理初稿，帮你讲清负责什么、为什么这样做、实际结果与收获。已有材料不够的地方，会留下具体的补充提示。"}</p>
+      ${modelReady ? "" : '<p class="alert">当前深度分析模型不可用。已保存的稿件仍可查看和修改；<a href="/settings">前往模型设置</a>后可继续整理和练习。</p>'}
+      ${!resumes.length ? '<p class="alert">还没有启用中的简历。<a href="/resume-optimization?planId=' + escapeAttr(planId) + '">前往简历工作室</a>检查简历后再准备。</p>' : ""}
+      ${preparation ? `<details class="interview-prepare-another"><summary>用可用简历准备另一份故事稿</summary><p>新稿会另存，当前稿和修改仍可从已保存的准备稿中打开。</p>${generator}</details>` : generator}
+    </div>
+    ${preparation ? `<div class="interview-story-list">${preparation.stories.map((story, index) => renderPreparationStory(dashboard, preparation, story, index, modelReady)).join("")}</div>${renderStartPanel(dashboard, modelReady, preparation)}` : ""}
+    ${history}
+  </section>`;
+}
+
+function renderPreparationStory(dashboard, preparation, story, index, modelReady) {
+  const hidden = `<input type="hidden" name="planId" value="${escapeAttr(dashboard.plan?.id || "")}"><input type="hidden" name="preparationId" value="${escapeAttr(preparation.id)}"><input type="hidden" name="expectedRevision" value="${escapeAttr(preparation.revision)}"><input type="hidden" name="storyId" value="${escapeAttr(story.id)}">`;
+  const scope = `${preparation.profileId}:${preparation.planId}:${preparation.id}:${preparation.revision}:${story.id}`;
+  const missing = story.missingDetails || [];
+  const catalog = new Map((preparation.context?.resumeEvidenceCatalog || []).map(item => [item.id, item.text]));
+  return `<details class="card interview-story"${index === 0 ? " open" : ""}><summary><strong>${escapeHtml(story.title)}</strong><span>${escapeHtml(String(story.text || "").replace(/\s+/g, " ").slice(0, 90))}${String(story.text || "").length > 90 ? "…" : ""}</span></summary>
+    <div class="interview-story-content"><p class="interview-story-text">${escapeHtml(story.text)}</p>
+      ${missing.length ? `<aside class="interview-story-missing"><h3>讲之前可以补充</h3>${renderTextList(missing.slice(0, 3))}${missing.length > 3 ? `<details><summary>查看其他 ${missing.length - 3} 条提示</summary>${renderTextList(missing.slice(3))}</details>` : ""}<p>可以边练边补充，不必全部写完才开始。</p></aside>` : ""}
+      <details class="interview-story-editor"><summary>修改这条故事</summary><form method="post" action="/api/interview/preparation/save" data-interview-submit data-interview-draft="preparation" data-interview-draft-field="storyText" data-interview-draft-scope="${escapeAttr(scope)}" data-interview-success-target="interview-preparation">${hidden}<label>故事正文<textarea name="storyText" rows="9" maxlength="12000" required>${escapeHtml(story.text)}</textarea></label><p class="hint" data-interview-draft-status aria-live="polite">直接按你的经历修改，保存后使用这版内容练习。</p><button class="secondary">保存这条故事</button><div class="alert" data-interview-error role="alert"></div></form></details>
+      <details class="interview-story-editor"><summary>补充情况，让系统重新整理这一条</summary><form method="post" action="/api/interview/preparation/refine" data-interview-submit data-interview-draft="preparation" data-interview-draft-field="supplement" data-interview-draft-scope="${escapeAttr(scope)}" data-interview-operation-url="/api/interview/preparation/operation" data-interview-result-param="preparationId" data-interview-success-target="interview-preparation">${hidden}<label>补充你的实际情况<textarea name="supplement" rows="5" maxlength="12000" required placeholder="例如：当时遇到什么问题，比较过哪些做法，为什么这样选，后来结果如何。"></textarea></label><p class="hint" data-interview-draft-status aria-live="polite">会以已保存的故事和这次补充整理，请先保存上方的正文修改。其他故事会保留。</p><button class="secondary"${modelReady ? "" : " disabled"}>补充并重新整理这一条</button><div class="alert" data-interview-error role="alert"></div></form></details>
+      <details class="interview-story-source"><summary>查看这条故事的简历依据</summary>${renderTextList((story.resumeEvidenceIds || []).map(id => catalog.get(id) || id))}</details>
+    </div></details>`;
+}
+
+function renderStartPanel(dashboard, modelReady, preparation = null) {
   const plan = dashboard.plan || {};
   const resumes = (dashboard.resumes || []).filter((resume) => resume.isActive);
   const jobs = dashboard.jobs || [];
   const activeResume = resumes.find((resume) => resume.isActive) || resumes[0] || null;
-  return `<section class="card pad interview-start" aria-labelledby="interview-start-title">
-    <div class="interview-section-head"><div><p class="section-label">开始一轮训练</p><h2 id="interview-start-title">选好简历，开始练习</h2></div><span class="status ${modelReady ? "good" : "waiting"}">${modelReady ? "深度分析可用" : "模型待配置"}</span></div>
+  const canPractice = modelReady && (preparation ? resumes.some(resume => resume.id === preparation.resumeVersionId) : resumes.length);
+  const titleId = preparation ? "interview-prepared-start-title" : "interview-start-title";
+  return `<section class="card pad interview-start${preparation ? " interview-prepared-start" : ""}" aria-labelledby="${titleId}">
+    <div class="interview-section-head"><div><p class="section-label">${preparation ? "围绕故事深入练习" : "开始一轮训练"}</p><h2 id="${titleId}">${preparation ? "选一条工作，练介绍与追问" : "选好简历，开始练习"}</h2></div><span class="status ${modelReady ? "good" : "waiting"}">${modelReady ? "深度分析可用" : "模型待配置"}</span></div>
     ${modelReady ? "" : '<p class="alert">当前深度分析模型不可用。<a href="/settings">前往模型设置</a>完成连接后再开始。</p>'}
-    <form class="interview-start-form" method="post" action="/api/interview/start" data-interview-submit data-interview-success-target="interview-active-step">
+    ${preparation && !resumes.some(resume => resume.id === preparation.resumeVersionId) ? '<p class="alert">这份稿对应已停用的简历，仍可查看和修改。开始练习前，请启用对应简历，或用可用简历准备新稿。</p>' : ""}
+    <form class="interview-start-form" method="post" action="/api/interview/start" data-interview-submit data-interview-operation-url="/api/interview/operation" data-interview-result-param="sessionId" data-interview-success-target="interview-active-step">
       <input type="hidden" name="planId" value="${escapeAttr(plan.id || "")}">
+      ${preparation ? `<input type="hidden" name="preparationId" value="${escapeAttr(preparation.id)}"><input type="hidden" name="preparationRevision" value="${escapeAttr(preparation.revision)}"><input type="hidden" name="resumeVersionId" value="${escapeAttr(preparation.resumeVersionId)}"><fieldset class="interview-story-picker"><legend>本轮想练的故事</legend>${preparation.stories.map((story, index) => `<label><input type="checkbox" name="storyIds" value="${escapeAttr(story.id)}"${index === 0 ? " checked" : ""}><span>${escapeHtml(story.title)}</span></label>`).join("")}<small>至少选一条；练习使用已保存的内容，仍有待补充提示也能开始。</small></fieldset>` : ""}
+      ${preparation ? '<details class="interview-prepared-job-option"><summary>结合目标岗位练习（可选）</summary>' : ""}
       <fieldset class="interview-mode-picker"><legend>训练范围</legend>
         <label><input type="radio" name="sessionKind" value="resume_general" checked><span><strong>简历通用面试</strong><small>从简历中的真实经历开始练习，不需要先收到面试邀请。</small></span></label>
         <label><input type="radio" name="sessionKind" value="job_specific"${jobs.length ? "" : " disabled"}><span><strong>岗位专项面试</strong><small>${jobs.length ? "选一个岗位，结合它的要求练习可能被问到的问题。" : "还没有资料完整的岗位，可以先练简历通用面试。"}</small></span></label>
       </fieldset>
       <div class="interview-job-panel" data-interview-job-panel hidden><label>目标岗位<select name="jobId" disabled>${jobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.title || "未命名岗位")} · ${escapeHtml(job.company || "公司未记录")}</option>`).join("")}</select></label></div>
-      <label>简历版本<select name="resumeVersionId" required>${resumes.map((resume) => `<option value="${escapeAttr(resume.id)}"${activeResume?.id === resume.id ? " selected" : ""}>${escapeHtml(resume.name || "简历版本")}${activeResume?.id === resume.id ? " · 默认参考" : ""}</option>`).join("")}</select><small>默认参考最近更新的可用版本，也可以另选。本轮只使用你选的这份简历。</small></label>
+      ${preparation ? "</details>" : ""}
+      ${preparation ? `<p class="interview-prepared-resume">参考简历：${escapeHtml(preparation.context?.resume?.name || `简历版本 ${preparation.resumeVersionId}`)}</p>` : `<label>简历版本<select name="resumeVersionId" required>${resumes.map((resume) => `<option value="${escapeAttr(resume.id)}"${activeResume?.id === resume.id ? " selected" : ""}>${escapeHtml(resume.name || "简历版本")}${activeResume?.id === resume.id ? " · 默认参考" : ""}</option>`).join("")}</select><small>默认参考最近更新的可用版本，也可以另选。本轮只使用你选的这份简历。</small></label>`}
       <label>题目侧重<select name="type"><option value="mixed">综合面试</option><option value="technical">技术 / 业务</option><option value="behavioral">行为问题</option><option value="general">自我介绍与沟通</option></select></label>
       <label>难度<select name="difficulty"><option value="standard">标准</option><option value="warmup">热身</option><option value="challenging">高压追问</option></select></label>
       <label>计划题数<select name="plannedQuestions"><option value="3">3 题 · 快速练习</option><option value="5" selected>5 题 · 推荐</option><option value="8">8 题 · 完整练习</option><option value="12">12 题 · 深入练习</option></select></label>
-      <div class="button-row"><button${!modelReady || !resumes.length ? " disabled" : ""}>开始模拟面试</button><span class="hint">本轮参考所选简历；之后更新简历，不会改变这轮题目使用的资料。</span></div>
+      <div class="button-row"><button${!canPractice ? " disabled" : ""}>${preparation ? "开始深入练习" : "开始模拟面试"}</button><span class="hint">${preparation ? "先介绍你选的工作，再根据你的回答追问。之后修改故事，不会改变已经开始的训练。" : "本轮参考所选简历；之后更新简历，不会改变这轮题目使用的资料。"}</span></div>
       <div class="alert" data-interview-error role="alert" style="grid-column:1/-1"></div>
     </form>
   </section>`;
-}
-
-function renderEmptyState() {
-  return `<section class="card pad interview-empty"><p class="section-label">还没有训练记录</p><h2>先从上方开始一轮</h2><p>通用训练的首题会直接使用当前简历；后续会结合回答继续追问或切换到其他重要主题。</p></section>`;
 }
 
 function renderSession(dashboard, session) {
@@ -200,6 +241,179 @@ function focusLabel(value) {
   return { general: "求职方向与沟通", contribution: "个人贡献", intro: "自我介绍", motivation: "岗位动机", project: "项目深挖", technical: "技术 / 业务", behavioral: "行为问题", pressure: "压力追问", questions: "反问" }[value] || value || "岗位问题";
 }
 
-const MOCK_INTERVIEW_SCRIPT = `<script>(()=>{const reveal=()=>{const target=location.hash&&document.getElementById(location.hash.slice(1));if(target){let parent=target.closest?.('details');while(parent){parent.open=true;parent=parent.parentElement?.closest('details');}const detail=target.querySelector?.('.interview-turn-detail');if(detail)detail.open=true;setTimeout(()=>target.scrollIntoView({block:'start'}),0);}};if(document.readyState==='complete')reveal();else addEventListener('load',reveal,{once:true});for(const link of document.querySelectorAll('[data-interview-retry-link]'))link.addEventListener('click',()=>{const turn=document.getElementById(link.getAttribute('href').slice(1));const field=turn?.querySelector('textarea[name="answerText"]');let detail=field?.closest('details');while(detail){detail.open=true;detail=detail.parentElement?.closest('details');}setTimeout(()=>field?.focus({preventScroll:true}),0);});const start=document.querySelector('.interview-start-form');if(start){const panel=start.querySelector('[data-interview-job-panel]');const job=panel&&panel.querySelector('select[name="jobId"]');const sync=()=>{const selected=start.querySelector('input[name="sessionKind"]:checked');const specific=selected&&selected.value==='job_specific';if(panel)panel.hidden=!specific;if(job){job.disabled=!specific;job.required=!!specific;}};for(const radio of start.querySelectorAll('input[name="sessionKind"]'))radio.addEventListener('change',sync);sync();}const storage={get:(key)=>{try{return localStorage.getItem(key)}catch{return null}},set:(key,value)=>{try{localStorage.setItem(key,value)}catch{}},remove:(key)=>{try{localStorage.removeItem(key)}catch{}}};const navigate=(url,target)=>{const base=String(url||'').split('#')[0];const destination=base+(target?'#'+target:'');if(location.href.split('#')[0]===base){location.hash=target;location.reload();}else location.assign(destination);};for(const form of document.querySelectorAll('[data-interview-submit]')){const field=form.querySelector('textarea[name="answerText"]');const kind=form.dataset.interviewDraft||'';const sessionId=form.elements.sessionId?.value||'';const turnNumber=form.elements.turnNumber?.value||'';const key=field&&kind&&sessionId&&turnNumber?'roleflow:interview-draft:'+sessionId+':'+turnNumber+':'+kind:'';if(key&&!field.value){const saved=storage.get(key);if(saved!==null)field.value=saved;}if(key)field.addEventListener('input',()=>storage.set(key,field.value));form.addEventListener('submit',async(event)=>{event.preventDefault();const button=event.submitter||form.querySelector('button');if(button?.disabled)return;const label=button?.textContent||'';const error=form.querySelector('[data-interview-error]');if(error)error.textContent='';if(button){button.disabled=true;button.textContent=form.action.endsWith('/finish')?'正在生成复盘…':form.action.endsWith('/answer')?'正在分析回答…':form.action.endsWith('/retry')?'正在反馈这次回答…':form.action.endsWith('/evidence')?'正在保存经历…':'正在准备面试题…';}let operationKey='';try{const body=new URLSearchParams(new FormData(form));if(form.action.endsWith('/start')||form.action.endsWith('/retry')){operationKey='offergo:pending-generation:'+form.action+':'+body.toString();let operationId=storage.get(operationKey);if(operationId&&form.action.endsWith('/start')){const query=new URLSearchParams({planId:body.get('planId'),operationId});let statusResponse,statusPayload;try{statusResponse=await fetch('/api/interview/operation?'+query,{cache:'no-store'});statusPayload=JSON.parse(await statusResponse.text());}catch{throw new Error('暂时无法确认上次生成是否完成，请稍后重试。当前输入与操作编号仍保留。');}if(!statusResponse.ok||typeof statusPayload.saved!=='boolean')throw new Error('暂时无法确认上次生成是否完成，请稍后重试。当前输入与操作编号仍保留。');if(statusPayload.saved){storage.remove(operationKey);operationId=null;}}if(!operationId){operationId=typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);storage.set(operationKey,operationId);}body.set('operationId',operationId);}const response=await fetch(form.action,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});if(!response.ok){const text=await response.text();let message='操作失败，请稍后重试。';let payload={};try{payload=JSON.parse(text);const code=payload.errorCode||payload.code||'';message=code==='MODEL_TIMEOUT'?'模型响应超时，本次生成未完成。请稍后重试，当前输入仍保留。':payload.error||message;}catch{}if(operationKey)storage.remove(operationKey);const failure=new Error(message);failure.requestId=payload.requestId;failure.code=payload.errorCode||payload.code;throw failure;}if(operationKey)storage.remove(operationKey);if(key)storage.remove(key);navigate(response.url||form.action,form.dataset.interviewSuccessTarget||'');}catch(failure){if(error){error.textContent=failure.message||'操作失败，请稍后重试。';if((failure.requestId||failure.code)&&typeof document.createElement==='function'){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='排错信息';details.append(summary);const technical=document.createElement('p');technical.textContent=[failure.requestId?'排错编号：'+failure.requestId:'',failure.code?'错误代码：'+failure.code:''].filter(Boolean).join('；');details.append(technical);if(failure.requestId){const link=document.createElement('a');link.textContent='查看运行诊断';link.href='/diagnostics?requestId='+encodeURIComponent(failure.requestId);details.append(link);}error.append(details);}}if(button){button.disabled=false;button.textContent=label;}}});}})();</script>`;
+function interviewClient() {
+  const reveal = () => {
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    if (!target) return;
+    let parent = target.closest?.('details');
+    while (parent) { parent.open = true; parent = parent.parentElement?.closest('details'); }
+    const detail = target.querySelector?.('.interview-turn-detail');
+    if (detail) detail.open = true;
+    setTimeout(() => target.scrollIntoView({ block: 'start' }), 0);
+  };
+  if (document.readyState === 'complete') reveal();
+  else addEventListener('load', reveal, { once: true });
+  for (const link of document.querySelectorAll('[data-interview-retry-link]')) {
+    link.addEventListener('click', () => {
+      const turn = document.getElementById(link.getAttribute('href').slice(1));
+      const field = turn?.querySelector('textarea[name="answerText"]');
+      let detail = field?.closest('details');
+      while (detail) { detail.open = true; detail = detail.parentElement?.closest('details'); }
+      setTimeout(() => field?.focus({ preventScroll: true }), 0);
+    });
+  }
+  for (const start of document.querySelectorAll('.interview-start-form')) {
+    const panel = start.querySelector('[data-interview-job-panel]');
+    const job = panel?.querySelector('select[name="jobId"]');
+    const sync = () => {
+      const specific = start.querySelector('input[name="sessionKind"]:checked')?.value === 'job_specific';
+      if (panel) panel.hidden = !specific;
+      if (job) { job.disabled = !specific; job.required = specific; }
+    };
+    for (const radio of start.querySelectorAll('input[name="sessionKind"]')) radio.addEventListener('change', sync);
+    sync();
+  }
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+    remove(key) { try { localStorage.removeItem(key); } catch {} }
+  };
+  const navigate = (url, target) => {
+    const base = String(url || '').split('#')[0];
+    if (location.href.split('#')[0] === base) { location.hash = target; location.reload(); }
+    else location.assign(base + (target ? '#' + target : ''));
+  };
+  const pendingMessage = '暂时无法确认上次生成是否完成，请稍后重试。当前输入与操作编号仍保留。';
+  for (const form of document.querySelectorAll('[data-interview-submit]')) {
+    const resume = form.querySelector('select[name="resumeVersionId"]');
+    if (resume && form.dataset.interviewChoiceScope) {
+      const choiceKey = 'roleflow:interview-preparation-resume:' + form.dataset.interviewChoiceScope;
+      const savedResume = storage.get(choiceKey);
+      if (savedResume && [...resume.options].some(option => option.value === savedResume)) resume.value = savedResume;
+      resume.addEventListener('change', () => storage.set(choiceKey, resume.value));
+    }
+    const fieldName = form.dataset.interviewDraftField || 'answerText';
+    const field = form.querySelector('textarea[name="' + fieldName + '"]');
+    const kind = form.dataset.interviewDraft || '';
+    const preparationDraft = kind === 'preparation';
+    const scope = form.dataset.interviewDraftScope || '';
+    const sessionId = form.elements.sessionId?.value || '';
+    const turnNumber = form.elements.turnNumber?.value || '';
+    const key = field && preparationDraft && scope
+      ? 'roleflow:interview-preparation-draft:' + scope + ':' + fieldName
+      : field && kind && sessionId && turnNumber ? 'roleflow:interview-draft:' + sessionId + ':' + turnNumber + ':' + kind : '';
+    const draftStatus = form.querySelector('[data-interview-draft-status]');
+    if (key && (preparationDraft || !field.value)) {
+      const saved = storage.get(key);
+      if (saved !== null) {
+        field.value = saved;
+        if (draftStatus) draftStatus.textContent = '已恢复这条故事尚未提交的输入。保存或整理成功后才会更新准备稿。';
+      }
+    }
+    if (key) field.addEventListener('input', () => {
+      storage.set(key, field.value);
+      if (draftStatus) draftStatus.textContent = '输入已暂存本机，尚未更新准备稿。';
+    });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter || form.querySelector('button');
+      if (button?.disabled) return;
+      const label = button?.textContent || '';
+      const error = form.querySelector('[data-interview-error]');
+      if (error) error.textContent = '';
+      if (key) storage.set(key, field.value);
+      if (button) {
+        button.disabled = true;
+        button.textContent = form.action.endsWith('/prepare') ? '正在整理故事初稿…'
+          : form.action.endsWith('/refine') ? '正在整理这一条故事…'
+          : form.action.endsWith('/save') ? '正在保存故事…'
+          : form.action.endsWith('/finish') ? '正在生成复盘…'
+          : form.action.endsWith('/answer') ? '正在分析回答…'
+          : form.action.endsWith('/retry') ? '正在反馈这次回答…'
+          : form.action.endsWith('/evidence') ? '正在保存经历…' : '正在准备面试题…';
+      }
+      form.setAttribute?.('aria-busy', 'true');
+      let operationKey = '';
+      try {
+        const body = new URLSearchParams(new FormData(form));
+        if (body.has('preparationRevision') && !body.getAll('storyIds').length) throw new Error('请至少选择一条想练的故事。');
+        const operationUrl = form.dataset.interviewOperationUrl
+          || (form.action.endsWith('/start') ? '/api/interview/operation' : '');
+        if (operationUrl || form.action.endsWith('/retry')) {
+          operationKey = 'offergo:pending-generation:' + form.action + ':' + body.toString();
+          let operationId = storage.get(operationKey);
+          if (!operationId) {
+            operationId = typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+            storage.set(operationKey, operationId);
+          }
+          if (operationUrl) {
+            const query = new URLSearchParams({ planId: body.get('planId'), operationId });
+            let statusResponse, status;
+            try {
+              statusResponse = await fetch(operationUrl + '?' + query, { cache: 'no-store' });
+              status = JSON.parse(await statusResponse.text());
+            } catch { throw new Error(pendingMessage); }
+            if (!statusResponse.ok || !status || typeof status.saved !== 'boolean') throw new Error(pendingMessage);
+            if (status.saved) {
+              if (!Number.isInteger(Number(status.resultId)) || Number(status.resultId) < 1) throw new Error(pendingMessage);
+              const result = new URLSearchParams({ planId: body.get('planId') });
+              result.set(form.dataset.interviewResultParam || 'sessionId', status.resultId);
+              storage.remove(operationKey);
+              if (key) storage.remove(key);
+              navigate('/interview?' + result, form.dataset.interviewSuccessTarget || '');
+              return;
+            }
+          }
+          body.set('operationId', operationId);
+        }
+        const response = await fetch(form.action, {
+          method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          let payload = {};
+          try { payload = JSON.parse(text) || {}; } catch {}
+          const code = payload.errorCode || payload.code || '';
+          const message = code === 'MODEL_TIMEOUT'
+            ? '模型响应超时，本次生成未完成。请稍后重试，当前输入仍保留。'
+            : payload.error || '操作未完成，请稍后重试。当前输入仍保留。';
+          if (operationKey && (payload.error || code)) storage.remove(operationKey);
+          const failure = new Error(message);
+          failure.requestId = payload.requestId;
+          failure.code = code;
+          throw failure;
+        }
+        if (operationKey) storage.remove(operationKey);
+        if (key) storage.remove(key);
+        navigate(response.url || form.action, form.dataset.interviewSuccessTarget || '');
+      } catch (failure) {
+        if (error) {
+          error.textContent = failure.message || '操作未完成，请稍后重试。当前输入仍保留。';
+          if ((failure.requestId || failure.code) && typeof document.createElement === 'function') {
+            const details = document.createElement('details');
+            const summary = document.createElement('summary');
+            summary.textContent = '排错信息';
+            details.append(summary);
+            const technical = document.createElement('p');
+            technical.textContent = [failure.requestId ? '排错编号：' + failure.requestId : '', failure.code ? '错误代码：' + failure.code : ''].filter(Boolean).join('；');
+            details.append(technical);
+            if (failure.requestId) {
+              const link = document.createElement('a');
+              link.textContent = '查看运行诊断';
+              link.href = '/diagnostics?requestId=' + encodeURIComponent(failure.requestId);
+              details.append(link);
+            }
+            error.append(details);
+          }
+        }
+        form.setAttribute?.('aria-busy', 'false');
+        if (button) { button.disabled = false; button.textContent = label; }
+      }
+    });
+  }
+}
+
+const MOCK_INTERVIEW_SCRIPT = '<script>(' + interviewClient.toString() + ')();</script>';
 
 module.exports = { renderMockInterviewPage, MOCK_INTERVIEW_SCRIPT };

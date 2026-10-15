@@ -382,3 +382,60 @@ h2{font-size:19px;font-weight:600}
   .resume-change-ledger{max-height:none;overflow:visible}
 }
 .message-layout [hidden]{display:none}.message-source-filter{display:flex;align-items:center;gap:12px}.message-source-filter select{width:auto;min-width:140px;min-height:44px}.message-source{font-size:12px;color:var(--rf-teal);font-weight:700}
+
+/* Interview stories: read one complete draft, then edit or practice it. */
+.interview-preparation{display:grid;gap:18px;margin:18px 0 24px;min-width:0}
+.interview-preparation-intro>p:not(.section-label){max-width:72ch;line-height:1.75}
+.interview-prepare-form{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;max-width:720px}
+.interview-prepare-form label,.interview-story-editor label{display:grid;gap:7px;color:var(--rf-ink-soft);font-size:14px;font-weight:600;min-width:0}
+.interview-prepare-form [data-interview-error]{grid-column:1/-1}
+.interview-prepare-another>summary,.interview-preparation-history>summary,.interview-story-editor>summary,.interview-story-source>summary{display:list-item;align-content:center;min-height:48px;padding:12px 0;color:var(--rf-teal);font-weight:600;cursor:pointer}
+.interview-prepare-another>p{max-width:66ch;color:var(--rf-ink-soft);font-size:14px}
+.interview-story-list{display:grid;gap:14px;min-width:0}
+.interview-story{min-width:0;background:var(--rf-surface)}
+.interview-story>summary{padding:18px 22px;cursor:pointer;overflow-wrap:anywhere}
+.interview-story>summary strong{font-size:20px;line-height:1.5}
+.interview-story>summary>span{display:block;margin-top:6px;color:var(--rf-ink-soft);font-size:14px;line-height:1.7}
+.interview-story[open]>summary{border-bottom:1px solid var(--rf-rule)}
+.interview-story[open]>summary>span{display:none}
+.interview-story-content{min-width:0;padding:20px 22px}
+.interview-story-text{max-width:74ch;margin:0 0 22px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;font-size:16px}
+.interview-story-missing{max-width:74ch;margin:0 0 18px;padding:14px 18px;border-left:3px solid var(--rf-orange);background:var(--rf-mist);overflow-wrap:anywhere}
+.interview-story-missing h3{font-size:15px;margin:0 0 8px}
+.interview-story-missing ul{margin:8px 0;padding-left:20px;line-height:1.7}
+.interview-story-missing p{margin:10px 0 0;color:var(--rf-ink-soft);font-size:13px}
+.interview-story-missing summary{padding:10px 0;cursor:pointer}
+.interview-story-editor,.interview-story-source{border-top:1px solid var(--rf-rule)}
+.interview-story-editor form{display:grid;gap:12px;max-width:780px;padding:4px 0 18px}
+.interview-story-editor textarea{width:100%;min-width:0;line-height:1.8;resize:vertical}
+.interview-story-editor form>p{margin:0;line-height:1.7}
+.interview-story-editor button{justify-self:start}
+.interview-story-source ul{max-width:74ch;margin:0 0 14px;padding-left:20px;line-height:1.8;overflow-wrap:anywhere}
+.interview-prepared-start{border-top:4px solid var(--rf-teal)}
+.interview-prepared-job-option{grid-column:1/-1;min-width:0;border-top:1px solid var(--rf-rule);border-bottom:1px solid var(--rf-rule)}
+.interview-prepared-job-option>summary{min-height:48px;padding:12px 0;color:var(--rf-teal);font-size:14px;font-weight:600;cursor:pointer}
+.interview-prepared-job-option .interview-mode-picker{margin:0 0 12px}
+.interview-prepared-job-option .interview-job-panel{margin-bottom:12px}
+.interview-story-picker{display:grid;grid-column:1/-1;gap:8px;min-width:0;margin:0;padding:0;border:0}
+.interview-story-picker legend{padding:0 0 8px;color:var(--rf-ink-soft);font-size:14px;font-weight:600}
+.interview-start-form .interview-story-picker label{display:flex;align-items:center;gap:10px;min-height:44px;grid-column:auto;padding:8px 12px;border:1px solid var(--rf-rule);border-radius:6px;background:var(--rf-surface);cursor:pointer;font-size:15px;font-weight:400;overflow-wrap:anywhere}
+.interview-story-picker input{flex:0 0 18px;width:18px;min-height:18px;accent-color:var(--rf-teal)}
+.interview-story-picker small,.interview-prepared-resume{grid-column:1/-1;color:var(--rf-ink-soft);font-size:13px;line-height:1.7}
+.interview-prepared-resume{margin:0}
+.interview-preparation-history{padding:0 4px;border-top:1px solid var(--rf-rule)}
+.interview-preparation-history ul{display:grid;gap:10px;margin:0 0 14px;padding:0;list-style:none}
+.interview-preparation-history li{display:grid;gap:3px;min-width:0}
+.interview-preparation-history a{display:inline-flex;align-items:center;overflow-wrap:anywhere}
+.interview-preparation-history span{color:var(--rf-ink-soft);font-size:13px}
+.interview-continue a{display:inline-flex;align-items:center;min-height:44px;font-weight:600}
+.interview-new-session .interview-new-session{margin-bottom:0}
+@media(max-width:700px){
+  .interview-preparation{gap:14px;margin-top:14px}
+  .interview-prepare-form{grid-template-columns:1fr}
+  .interview-prepare-form button,.interview-story-editor button{width:100%}
+  .interview-story>summary{padding:16px}
+  .interview-story>summary strong{font-size:18px}
+  .interview-story-content{padding:16px}
+  .interview-story-missing{padding:12px 14px}
+  .interview-story-text{line-height:1.85}
+}
