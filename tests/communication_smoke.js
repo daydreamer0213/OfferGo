@@ -13,7 +13,9 @@ const {
   listDecisionPool,
   getLatestMainScanBatchId,
   buildFeedbackSummary,
-  listCandidateFacts
+  listCandidateFacts,
+  recordCandidateJobEvent,
+  listCandidateJobEvents
 } = require("../src/core/storage");
 const { matchingCardFromProfile } = require("../src/core/matching_card");
 const {
@@ -27,6 +29,14 @@ const { loadConfigs } = require("../src/config");
 const { createJobAnalysisRunner } = require("../src/core/job_analysis");
 const { scoreJob } = require("../src/core/scoring");
 const { presentWorkMatchInput, validateWorkMatchOutput } = require("../src/core/job_work_matching");
+const { MockModelAdapter } = require("../src/adapters/models/mock");
+
+const originalDraftCommunication = MockModelAdapter.prototype.draftCommunication;
+let communicationCalls = 0;
+MockModelAdapter.prototype.draftCommunication = async function (...args) {
+  communicationCalls += 1;
+  return originalDraftCommunication.apply(this, args);
+};
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "roleflow-communication-"));
 fs.mkdirSync(path.join(root, "configs"), { recursive: true });
@@ -36,6 +46,8 @@ for (const name of ["profile.example.json", "keywords.yaml", "scoring.yaml"]) {
 const dbPath = path.join(root, "jobs.sqlite");
 const db = openDb(dbPath);
 let server;
+let modelAvailable = true;
+let modelReadinessChecks = 0;
 
 (async () => {
   try {
@@ -96,7 +108,9 @@ let server;
       nextAction: "等待招聘方回复"
     });
 
-    server = createDashboardServer({ db, root, dbPath, forceMock: true, browserAuthority: { browserMode: "edge", cdpPort: null, profilePath: "" } });
+    server = createDashboardServer({ db, root, dbPath, forceMock: true,
+      modelReadinessChecker: () => { modelReadinessChecks += 1; return modelAvailable; },
+      browserAuthority: { browserMode: "edge", cdpPort: null, profilePath: "" } });
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -197,11 +211,53 @@ let server;
     assert.strictEqual(reopened.status, 303);
     assert.strictEqual(getProgressCardForJob(db, { profileId: saved.profileId, jobId }).stage, "needs_user_action");
 
+    const greetingPath = `/communication/greeting?planId=${saved.planId}&jobId=${jobId}`;
+    const other = saveProfileAnalysis(db, {
+      profile: { ...profile, candidate: { ...profile.candidate, name: "隔离测试候选人" } },
+      document: { originalFileName: "other.txt", format: "text", contentHash: "other-communication-resume", text: "独立隔离测试资料", diagnostics: {} },
+      searchPlan: { ...plan, name: "隔离测试方案" }
+    });
+    for (const binding of [
+      { profileId: saved.profileId, planId: null, message: "NULL_PLAN" },
+      { profileId: other.profileId, planId: saved.planId, message: "WRONG_PROFILE" },
+      { profileId: saved.profileId, planId: other.planId, message: "WRONG_PLAN" },
+      { profileId: saved.profileId, planId: saved.planId, message: "" }
+    ]) {
+      recordCandidateJobEvent(db, { profileId: binding.profileId, jobId, planId: binding.planId,
+        eventType: "communication_greeting", payload: { result: { kind: "greeting", jobId: "untrusted-model-id",
+          messages: binding.message ? [binding.message] : [], missingFact: null } } });
+    }
+    const emptyGreeting = await fetch(base + greetingPath);
+    const emptyGreetingHtml = await emptyGreeting.text();
+    assert.strictEqual(emptyGreeting.status, 200, "ordinary saved-greeting GET must exist");
+    assert(emptyGreetingHtml.includes("还没有保存的招呼语"));
+    assert(!/NULL_PLAN|WRONG_PROFILE|WRONG_PLAN/.test(emptyGreetingHtml));
+    assert.strictEqual(communicationCalls, 0, "empty or wrongly bound events must never trigger generation");
+    for (const query of [`planId=999999&jobId=${jobId}`, `planId=${saved.planId}&jobId=999999`, `planId=${other.planId}&jobId=${jobId}`]) {
+      const rejected = await fetch(`${base}/communication/greeting?${query}`);
+      assert.strictEqual(rejected.status, 404, "unknown or cross-plan job identity must be rejected");
+    }
     const greeting = await post(base, "/api/communication", { mode: "greeting", jobId, profileId: saved.profileId, planId: saved.planId });
-    const greetingHtml = await greeting.text();
-    assert.strictEqual(greeting.status, 200, greetingHtml);
+    assert.strictEqual(greeting.status, 303, await greeting.text());
+    assert.strictEqual(greeting.headers.get("location"), greetingPath);
+    const savedGreeting = listCandidateJobEvents(db, { profileId: saved.profileId, jobId, planId: saved.planId, eventType: "communication_greeting" })[0];
+    assert.strictEqual(savedGreeting.jobId, jobId, "event identity comes from the server-bound job");
+    const callsAfterGreeting = communicationCalls;
+    const eventsAfterGreeting = db.prepare("SELECT COUNT(*) AS n FROM candidate_job_events").get().n;
+    const checksAfterGreeting = modelReadinessChecks;
+    modelAvailable = false;
+    const greetingHtml = await (await fetch(base + greetingPath)).text();
+    const reloadedGreetingHtml = await (await fetch(base + greetingPath)).text();
+    assert.strictEqual(reloadedGreetingHtml, greetingHtml, "refresh retrieves the same saved draft");
+    assert.strictEqual(communicationCalls, callsAfterGreeting, "saved GET must not call a model");
+    assert.strictEqual(modelReadinessChecks, checksAfterGreeting, "saved GET does not require an available model");
+    assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM candidate_job_events").get().n, eventsAfterGreeting, "saved GET must not write another event");
+    modelAvailable = true;
     assert(greetingHtml.includes("KnowledgeFlow"));
     assert(greetingHtml.includes("企业知识库"));
+    assert(greetingHtml.includes("保存时间："));
+    assert(greetingHtml.includes('readonly'));
+    for (const message of savedGreeting.payload.result.messages) assert(greetingHtml.includes(message));
 
     const missingGap = await post(base, "/api/communication", { mode: "hr_reply", jobId, profileId: saved.profileId, planId: saved.planId, hrMessage: "为什么中间 GAP 了一年？" });
     const missingGapHtml = await missingGap.text();
@@ -284,6 +340,9 @@ let server;
     assert.strictEqual(archivedResponse.status, 303);
     const archivedQueueHtml = await (await fetch(`${base}/queue?planId=${saved.planId}&pool=no_reply`)).text();
     assert(!archivedQueueHtml.includes("AI应用开发工程师"), "archived jobs must leave communication action lists");
+    const archivedGreeting = await fetch(base + greetingPath);
+    assert.strictEqual(archivedGreeting.status, 200);
+    assert((await archivedGreeting.text()).includes("KnowledgeFlow"), "saved greetings remain readable after current generation eligibility changes");
     assert.strictEqual(
       Number(db.prepare("SELECT COUNT(*) AS count FROM candidate_funnel_entries WHERE profile_id = ?").get(saved.profileId).count),
       funnelCountBeforeArchive,
@@ -304,15 +363,20 @@ let server;
     const legacyGreeting = await post(base, "/api/communication", {
       mode: "greeting", jobId: legacyJobId, profileId: saved.profileId, planId: saved.planId
     });
-    const legacyGreetingBody = await legacyGreeting.text();
-    assert.strictEqual(legacyGreeting.status, 200, `legacy sufficient evidence remains usable: ${legacyGreetingBody}`);
+    assert.strictEqual(legacyGreeting.status, 303, `legacy sufficient evidence remains usable: ${await legacyGreeting.text()}`);
+    const legacyGreetingPath = legacyGreeting.headers.get("location");
+    const legacyGreetingBody = await (await fetch(base + legacyGreetingPath)).text();
     assert([...legacyHtml.matchAll(/<form\b[^>]*action="\/api\/communication"[^>]*>[\s\S]*?<\/form>/g)]
       .some(([form]) => form.includes('name="mode" value="greeting"') && form.includes(`name="jobId" value="${legacyJobId}"`)),
     "legacy sufficient evidence retains its ordinary greeting control");
     assert(legacyGreetingBody.includes("文案只生成到本页，不会自动发送"));
+    const savedQueueHtml = await (await fetch(`${base}/queue?planId=${saved.planId}`)).text();
+    assert(savedQueueHtml.includes(`href="${legacyGreetingPath.replace(/&/g, "&amp;")}"`));
+    assert(savedQueueHtml.includes("查看上次招呼"), "ordinary default queue provides a saved-greeting entry");
     await wholeJdGreetingSmoke(base, saved, profile);
     console.log("communication_smoke ok");
   } finally {
+    MockModelAdapter.prototype.draftCommunication = originalDraftCommunication;
     if (server) await new Promise((resolve) => server.close(resolve));
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -398,10 +462,12 @@ async function wholeJdGreetingSmoke(base, saved, profile) {
     const response = await post(base, "/api/communication", {
       mode: "greeting", jobId, profileId: saved.profileId, planId: saved.planId
     });
-    const body = await response.text();
-    assert.strictEqual(response.status, testCase.allowed ? 200 : 400, `${testCase.name}: ${body}`);
+    let body = await response.text();
+    assert.strictEqual(response.status, testCase.allowed ? 303 : 400, `${testCase.name}: ${body}`);
     assert.strictEqual(hasGreeting, testCase.allowed, `${testCase.name}: ordinary UI greeting eligibility`);
     if (testCase.allowed) {
+      assert.strictEqual(response.headers.get("location"), `/communication/greeting?planId=${saved.planId}&jobId=${jobId}`);
+      body = await (await fetch(base + response.headers.get("location"))).text();
       assert(body.includes("KnowledgeFlow"));
       assert(body.includes("文案只生成到本页，不会自动发送"));
     }
