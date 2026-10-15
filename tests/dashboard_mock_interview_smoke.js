@@ -335,13 +335,22 @@ async function verifyStoryPreparationFlow() {
   let generations = 0;
   let failRefine = false;
   let frozenStory = null;
+  const structuredStory = [
+    '【我负责什么】', '我负责检索链路的实现。', '',
+    '【当时要解决的问题】', '需要处理两种召回结果。', '',
+    '【我做了什么】', '- 我组合了两种召回方式。', '- 我核对了 <script>unsafe()</script> 样例。', '',
+    '【为什么这样做】', '组合两种方式，可以覆盖不同类型的查询。', '',
+    '【结果如何】', '检索链路已交付，效果数据仍需补充。', '',
+    '【复盘与启发】', '待核实思路：回想评估样例是否帮助发现问题。'
+  ].join('\n');
+  const legacyStory = '我负责评估样例。\n为什么这样做：这行是旧稿原话。\n\n【用户自己的标题】\n原文和空行后的内容都要保留。';
   const adapter = { provider: 'controlled', model: 'story-flow',
     async generateMockInterviewPreparation({ preparation, storyId, supplement }) {
       generations += 1;
       if (failRefine) throw Error('controlled preparation unavailable');
       if (storyId) return { stories: [{ ...preparation.stories.find(story => story.id === storyId), text: `补充后的故事：${supplement}`, missingDetails: [] }] };
       return { stories: ['检索链路', '评估样例', '查询接口'].map((title, i) => ({ id: `S${i + 1}`, title,
-        resumeEvidenceIds: [`R${i + 2}`], text: `我负责${title}，会比较已有做法，并记录实际结果。${i === 0 ? '<script>unsafe()</script>' : ''}`,
+        resumeEvidenceIds: [`R${i + 2}`], text: i === 0 ? structuredStory : i === 1 ? legacyStory : `我负责${title}，会比较已有做法，并记录实际结果。`,
         missingDetails: i === 0 ? ['当时为什么选择这套做法？'] : [] })) };
     },
     async generateMockInterviewStep({ context }) {
@@ -372,11 +381,33 @@ async function verifyStoryPreparationFlow() {
     assert.doesNotMatch(page.body, /<script>unsafe\(\)<\/script>/);
     assert.match(page.body, /action="\/api\/interview\/preparation\/save"/);
     assert.match(page.body, /name="storyIds"/);
-    const saved = await post('/api/interview/preparation/save', { preparationId, expectedRevision: 1, storyId: 'S1', storyText: '我先比较两种召回，再确定组合方式。' });
+    const previews = [...page.body.matchAll(/<summary><strong>[^<]+<\/strong><span>([\s\S]*?)<\/span><\/summary>/g)].map(match => match[1]);
+    assert.match(previews[0], /^我负责检索链路的实现。 需要处理两种召回结果。 - 我组合了两种召回方式。/,
+      'the preview keeps body lines while omitting the recognized standalone headings');
+    assert.doesNotMatch(previews[0], /【(?:我负责什么|当时要解决的问题|我做了什么|为什么这样做|结果如何|复盘与启发)】/);
+    assert.match(previews[1], /【用户自己的标题】/, 'unknown legacy headings remain in the preview');
+    const storyBodies = [...page.body.matchAll(/<(p|div) class="interview-story-text">([\s\S]*?)<\/\1>/g)].map(match => match[2]);
+    assert.equal(storyBodies.length, 3, 'each story must render its own readable body');
+    assert.deepEqual([...storyBodies[0].matchAll(/<h4>([^<]+)<\/h4>/g)].map(match => match[1]),
+      ['我负责什么', '当时要解决的问题', '我做了什么', '为什么这样做', '结果如何', '复盘与启发']);
+    assert.equal((storyBodies[0].match(/<section\b/g) || []).length, 6, 'the explicit headings must create semantic sections');
+    assert.match(storyBodies[0], /<ul><li>我组合了两种召回方式。<\/li><li>我核对了 &lt;script&gt;unsafe\(\)&lt;\/script&gt; 样例。<\/li><\/ul>/,
+      'the two concrete actions must be a list and escape embedded HTML');
+    assert.deepEqual([...storyBodies[1].matchAll(/<p>([\s\S]*?)<\/p>/g)].map(match => match[1]),
+      ['我负责评估样例。\n为什么这样做：这行是旧稿原话。', '【用户自己的标题】\n原文和空行后的内容都要保留。'],
+      'legacy paragraphs retain all content without inferring section meaning');
+    assert.doesNotMatch(storyBodies[1], /<h4>/);
+    const editedStory = structuredStory.replace('我负责检索链路的实现。', '我先比较两种召回，再确定组合方式。');
+    const saved = await post('/api/interview/preparation/save', { preparationId, expectedRevision: 1, storyId: 'S1', storyText: editedStory });
     assert.equal(saved.status, 303);
     assert.equal(generations, 1, 'saving an edit must not regenerate the stories');
     const reopened = await request(baseUrl, saved.headers.location);
     assert.match(reopened.body, /我先比较两种召回，再确定组合方式。/);
+    const reopenedEditor = reopened.body.match(/<textarea name="storyText"[^>]*>([\s\S]*?)<\/textarea>/)?.[1];
+    assert.equal(reopenedEditor, editedStory.replace('<script>unsafe()</script>', '&lt;script&gt;unsafe()&lt;/script&gt;'),
+      'formatting must not rewrite the editable text after save and reopen');
+    assert.equal(storage.getMockInterviewPreparation(db, { profileId: owner.profileId, planId: owner.planId, preparationId }).stories[0].text,
+      editedStory, 'the stored story remains exactly the submitted plain text');
     const refined = await post('/api/interview/preparation/refine', { preparationId, expectedRevision: 2, storyId: 'S1', supplement: '比较了失败查询。', operationId: 'http-story-refine' });
     assert.equal(refined.status, 303);
     const operation = await request(baseUrl, `/api/interview/preparation/operation?planId=${owner.planId}&operationId=http-story-refine`);

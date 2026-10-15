@@ -1,5 +1,7 @@
 const { escapeHtml, escapeAttr } = require("../http/response");
 const { renderDashboardFrame } = require("../ui/shell");
+const STORY_SECTION_HEADINGS = new Set(['【我负责什么】', '【当时要解决的问题】', '【我做了什么】',
+  '【为什么这样做】', '【结果如何】', '【复盘与启发】']);
 
 function renderMockInterviewPage({ dashboard = {}, modelReady = true } = {}) {
   const plan = dashboard.plan || {};
@@ -55,13 +57,53 @@ function renderPreparationStory(dashboard, preparation, story, index, modelReady
   const scope = `${preparation.profileId}:${preparation.planId}:${preparation.id}:${preparation.revision}:${story.id}`;
   const missing = story.missingDetails || [];
   const catalog = new Map((preparation.context?.resumeEvidenceCatalog || []).map(item => [item.id, item.text]));
-  return `<details class="card interview-story"${index === 0 ? " open" : ""}><summary><strong>${escapeHtml(story.title)}</strong><span>${escapeHtml(String(story.text || "").replace(/\s+/g, " ").slice(0, 90))}${String(story.text || "").length > 90 ? "…" : ""}</span></summary>
-    <div class="interview-story-content"><p class="interview-story-text">${escapeHtml(story.text)}</p>
+  const preview = String(story.text || '').replace(/\r\n?/g, '\n').split('\n')
+    .filter(line => !STORY_SECTION_HEADINGS.has(line.trim())).join('\n').replace(/\s+/g, ' ').trim();
+  return `<details class="card interview-story"${index === 0 ? " open" : ""}><summary><strong>${escapeHtml(story.title)}</strong><span>${escapeHtml(preview.slice(0, 90))}${preview.length > 90 ? "…" : ""}</span></summary>
+    <div class="interview-story-content">${renderStoryText(story.text)}
       ${missing.length ? `<aside class="interview-story-missing"><h3>讲之前可以补充</h3>${renderTextList(missing.slice(0, 3))}${missing.length > 3 ? `<details><summary>查看其他 ${missing.length - 3} 条提示</summary>${renderTextList(missing.slice(3))}</details>` : ""}<p>可以边练边补充，不必全部写完才开始。</p></aside>` : ""}
       <details class="interview-story-editor"><summary>修改这条故事</summary><form method="post" action="/api/interview/preparation/save" data-interview-submit data-interview-draft="preparation" data-interview-draft-field="storyText" data-interview-draft-scope="${escapeAttr(scope)}" data-interview-success-target="interview-preparation">${hidden}<label>故事正文<textarea name="storyText" rows="9" maxlength="12000" required>${escapeHtml(story.text)}</textarea></label><p class="hint" data-interview-draft-status aria-live="polite">直接按你的经历修改，保存后使用这版内容练习。</p><button class="secondary">保存这条故事</button><div class="alert" data-interview-error role="alert"></div></form></details>
       <details class="interview-story-editor"><summary>补充情况，让系统重新整理这一条</summary><form method="post" action="/api/interview/preparation/refine" data-interview-submit data-interview-draft="preparation" data-interview-draft-field="supplement" data-interview-draft-scope="${escapeAttr(scope)}" data-interview-operation-url="/api/interview/preparation/operation" data-interview-result-param="preparationId" data-interview-success-target="interview-preparation">${hidden}<label>补充你的实际情况<textarea name="supplement" rows="5" maxlength="12000" required placeholder="例如：当时遇到什么问题，比较过哪些做法，为什么这样选，后来结果如何。"></textarea></label><p class="hint" data-interview-draft-status aria-live="polite">会以已保存的故事和这次补充整理，请先保存上方的正文修改。其他故事会保留。</p><button class="secondary"${modelReady ? "" : " disabled"}>补充并重新整理这一条</button><div class="alert" data-interview-error role="alert"></div></form></details>
       <details class="interview-story-source"><summary>查看这条故事的简历依据</summary>${renderTextList((story.resumeEvidenceIds || []).map(id => catalog.get(id) || id))}</details>
     </div></details>`;
+}
+
+function renderStoryText(value) {
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+  let sectionOpen = false;
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push(`<p>${escapeHtml(paragraph.join('\n'))}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list.length) blocks.push(renderTextList(list));
+    list = [];
+  };
+  for (const line of String(value || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const trimmed = line.trim();
+    if (STORY_SECTION_HEADINGS.has(trimmed)) {
+      flushParagraph();
+      flushList();
+      if (sectionOpen) blocks.push('</section>');
+      blocks.push(`<section class="interview-story-section"><h4>${escapeHtml(trimmed.slice(1, -1))}</h4>`);
+      sectionOpen = true;
+    } else if (!trimmed) {
+      flushParagraph();
+      flushList();
+    } else if (trimmed.startsWith('- ')) {
+      flushParagraph();
+      list.push(line.trimStart().slice(2));
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flushParagraph();
+  flushList();
+  if (sectionOpen) blocks.push('</section>');
+  return `<div class="interview-story-text">${blocks.join('')}</div>`;
 }
 
 function renderStartPanel(dashboard, modelReady, preparation = null) {
