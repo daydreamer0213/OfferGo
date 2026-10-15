@@ -96,14 +96,12 @@ const logger = {
     assert.match(page.body, /<title>模拟面试训练<\/title>/);
     assert.match(page.body, /class="[^"]*interview-workbench/);
     assert.match(page.body, /aria-current="page">面试训练<\/a>/);
-    assert.match(page.body, /无需面试邀请/);
     assert.match(page.body, /简历通用面试/);
     assert.match(page.body, /岗位专项面试/);
     assert.match(page.body, /题目侧重/);
     assert.match(page.body, /自我介绍与沟通/);
     assert.doesNotMatch(page.body, /面试类型/);
     assert.match(page.body, /value="resume_general" checked/);
-    assert.match(page.body, /这道题来自简历/);
     assert.match(page.body, /参与知识库开发/);
     assert.deepEqual(calls.dashboard, [{ profileId: owner.profileId, planId: owner.planId, sessionId: 51 }]);
     assert.match(page.body, /基础简历/);

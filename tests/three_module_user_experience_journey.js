@@ -5,6 +5,7 @@ const path = require('node:path');
 const storage = require('../src/core/storage');
 const { MockModelAdapter } = require('../src/adapters/models/mock');
 const { createMockInterviewService } = require('../src/application/mock_interview');
+const { listCandidateEvidence } = require('../src/storage/candidate_evidence_store');
 const { createResumeOptimizationService } = require('../src/application/resume_optimization');
 const { createMessageReplyAnalyzer } = require('../src/core/message_reply_analyzer');
 const { ensureProgressCard } = require('../src/core/candidate_progress');
@@ -63,8 +64,10 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     const reviewInterview = adapter.reviewMockInterview.bind(adapter);
     adapter.reviewMockInterview = async input => {
       const report = await reviewInterview(input);
+      const answer = input.turns[0].answer;
       return { ...report, answerStructures: report.answerStructures.map(item =>
-        ({ ...item, outline: item.outline.join(" → ") })) };
+        ({ ...item, outline: item.outline.join(" → ") })),
+        evidenceCandidates: [{ turnNumber: 1, subject: '工单协作经历', sourceQuote: answer, text: answer }] };
     };
     const optimizeResume = adapter.generateResumeOptimization.bind(adapter);
     adapter.generateResumeOptimization = async input => {
@@ -137,7 +140,22 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
       < parseFloat(getComputedStyle(document.querySelector('#interview-report-title')).fontSize)));
     assert(await page.locator('.interview-report').evaluate(node => parseFloat(getComputedStyle(node).rowGap) >= 16),
       'report sections need visible space instead of a one-pixel divider');
+    const reportColumns = page.locator('.interview-report-grid>section');
+    const desktopColumns = await reportColumns.evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, right: box.right, bottom: box.bottom };
+    }));
+    assert.equal(desktopColumns.length, 2);
+    assert(Math.abs(desktopColumns[0].y - desktopColumns[1].y) < 2 && desktopColumns[1].x - desktopColumns[0].right >= 16,
+      'desktop highlights use two separate columns with room between them');
     result.checks.push('paragraph outline produces a saved interview report without retrying the user action');
+    const disclosures = page.locator('details.interview-report-disclosure');
+    assert.equal(await disclosures.count(), 2);
+    assert.equal(await page.locator('details.interview-report-disclosure[open]').count(), 0);
+    assert(await page.locator('.interview-report-practice [data-interview-retry-link]').first().isVisible());
+    const evidencePanel = page.locator('details#interview-evidence.interview-evidence-panel');
+    assert.equal(await evidencePanel.getAttribute('open'), null);
+    assert(await evidencePanel.evaluate(node => Boolean(document.querySelector('.interview-transcript')
+      .compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)), 'optional evidence belongs after the transcript');
     assert.equal(await page.locator('.interview-turn-detail[open]').count(), 0);
     const structures = page.locator('details.interview-answer-structure');
     assert(await structures.count() > 0);
@@ -145,20 +163,84 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     const firstOutline = structures.first().locator('ul');
     assert(!(await firstOutline.isVisible()));
     const completeOutline = await firstOutline.textContent();
+    const outlineDisclosure = disclosures.filter({ has: page.locator('details.interview-answer-structure') });
+    await outlineDisclosure.locator(':scope>summary').click();
+    assert(!(await firstOutline.isVisible()), 'opening the report section preserves the detailed outline choice');
     await structures.first().locator('summary').click();
     assert(await firstOutline.isVisible());
     assert.equal(await firstOutline.textContent(), completeOutline);
     assert(completeOutline.trim().length > 0);
     await structures.first().locator('summary').click();
+    await outlineDisclosure.locator(':scope>summary').click();
     result.checks.push('detailed report outlines start collapsed and reveal complete text without hiding retry links');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const narrowColumns = await reportColumns.evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, bottom: box.bottom };
+    }));
+    assert(Math.abs(narrowColumns[0].x - narrowColumns[1].x) < 2 && narrowColumns[1].y - narrowColumns[0].bottom >= 16,
+      'narrow highlights stack with visible separation');
+    assert(await page.locator('.interview-report').evaluate(node => node.scrollWidth <= node.clientWidth
+      && node.getBoundingClientRect().right <= innerWidth), 'narrow report must fit its viewport');
     await page.getByRole('link', { name: '重练这题', exact: true }).first().click();
     const retry = page.locator('.interview-turn-detail[open] textarea[name=answerText]');
     await retry.waitFor();
     assert(await retry.evaluate(field => document.activeElement === field));
+    const source = page.locator('.interview-turn-detail[open] details.interview-question-source');
+    assert.equal(await source.getAttribute('open'), null);
+    const sourceText = await source.locator('.interview-question-evidence').textContent();
+    assert(!(await source.locator('.interview-question-evidence').isVisible()));
+    await source.locator(':scope>summary').click();
+    assert(await source.locator('.interview-question-evidence').isVisible());
+    assert.equal(await source.locator('.interview-question-evidence').textContent(), sourceText);
     await retry.fill('我把工单反馈按查询和分配分类，画了流程原型，并按确认后的规则协助验收。方案由产品经理决定。');
     await page.locator('.interview-turn-detail[open]').getByRole('button', { name: '保存重答并比较', exact: true }).click();
     await page.getByText('重答对比', { exact: true }).waitFor();
     result.checks.push('feedback visible after each answer; retry link opens and focuses form; retry saved');
+    await page.goto(page.url().split('#')[0] + '#interview-evidence');
+    await page.reload();
+    await evidencePanel.locator('textarea[name=sourceQuote]').first().waitFor({ state: 'visible' });
+    assert.notEqual(await evidencePanel.getAttribute('open'), null, 'fresh GET evidence anchor opens the root details');
+    const evidenceForm = evidencePanel.locator('form').first();
+    assert(await evidenceForm.evaluate(node => getComputedStyle(node).display === 'grid'
+      && parseFloat(getComputedStyle(node).rowGap) >= 12), 'evidence fields need distinct rows');
+    assert(await evidenceForm.locator('label').first().evaluate(node => parseFloat(getComputedStyle(node).rowGap) >= 6));
+    assert((await evidenceForm.locator('textarea[name=sourceQuote]').inputValue()).includes('我参与工单改版'));
+    result.checks.push('390px report stacks; source details preserve text; evidence GET anchor reveals spaced confirmation fields');
+    await shot('04-interview-report-mobile');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const sourceQuote = await evidenceForm.locator('textarea[name=sourceQuote]').inputValue();
+    const evidenceSave = page.waitForResponse(response => new URL(response.url()).pathname === '/api/interview/evidence'
+      && response.request().method() === 'POST');
+    await evidenceForm.getByRole('button', { name: '确认并保存这段经历', exact: true }).click();
+    assert.equal((await evidenceSave).status(), 303);
+    await evidencePanel.getByText(/已保存 1 条经历/).waitFor();
+    assert.equal(new URL(page.url()).hash, '#interview-evidence');
+    assert.notEqual(await evidencePanel.getAttribute('open'), null, 'saving returns to the expanded evidence panel');
+    assert(await evidenceForm.locator('textarea[name=sourceQuote]').isVisible());
+    const confirmed = listCandidateEvidence(db, { profileId: owner.profileId }).filter(item => item.sourceKind === 'interview_turn');
+    assert.equal(confirmed.length, 1);
+    assert.equal(confirmed[0].sourceQuote, sourceQuote);
+    result.checks.push('saving a synthetic interview fact persists the exact source and returns to the expanded panel');
+    const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme || 'light');
+    result.interviewContrast = {};
+    for (const theme of ['dark', 'light']) {
+      if (await page.evaluate(() => document.documentElement.dataset.theme) !== theme) await page.locator('[data-theme-toggle]').click();
+      await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme);
+      result.interviewContrast[theme] = {};
+      for (const [name, surface, children] of [
+        ['practice', page.locator('.interview-report-practice'), 'h4,p,a'],
+        ['disclosure', page.locator('.interview-report-disclosure').first(), 'summary'],
+        ['evidence', page.locator('.interview-evidence-item').first(), 'h4,label']
+      ]) {
+        const contrasts = await surfaceContrast(surface, children);
+        assert(contrasts.length > 0 && contrasts.every(ratio => ratio >= 4.5), `${theme} interview ${name} must remain readable: ${contrasts}`);
+        result.interviewContrast[theme][name] = contrasts;
+      }
+      await shot(`interview-review-${theme}`);
+    }
+    if (await page.evaluate(() => document.documentElement.dataset.theme) !== originalTheme) await page.locator('[data-theme-toggle]').click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), originalTheme);
+    result.checks.push('interview practice, disclosure, and evidence text remain readable in both themes; original theme restored');
     await shot('04-interview-report');
 
     await page.goto(`${base}/resume-optimization?planId=${owner.planId}`);
@@ -176,18 +258,7 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     for (const theme of ['dark', 'light']) {
       await page.locator('[data-theme-toggle]').click();
       await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, theme);
-      const contrasts = await page.locator('.resume-opt-conclusion').evaluate(node => {
-        const luminance = color => {
-          const channels = color.match(/\d+/g).slice(0, 3).map(Number).map(value => value / 255)
-            .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-          return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-        };
-        const background = luminance(getComputedStyle(node).backgroundColor);
-        return [...node.querySelectorAll('h2,p')].map(child => {
-          const text = luminance(getComputedStyle(child).color);
-          return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
-        });
-      });
+      const contrasts = await surfaceContrast(page.locator('.resume-opt-conclusion'), 'h2,p');
       assert(contrasts.length > 0 && contrasts.every(ratio => ratio >= 4.5),
         `${theme} resume conclusion must remain readable: ${contrasts}`);
       await shot(`resume-conclusion-${theme}`);
@@ -229,3 +300,18 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     if (!evidenceRoot) fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
+
+function surfaceContrast(surface, children) {
+  return surface.evaluate((node, selector) => {
+    const luminance = color => {
+      const channels = color.match(/\d+/g).slice(0, 3).map(Number).map(value => value / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const background = luminance(getComputedStyle(node).backgroundColor);
+    return [...node.querySelectorAll(selector)].map(child => {
+      const text = luminance(getComputedStyle(child).color);
+      return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+    });
+  }, children);
+}

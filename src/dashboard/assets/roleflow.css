@@ -319,6 +319,64 @@ h2{font-size:19px;font-weight:600}
 .interview-current>.interview-latest-feedback{grid-column:1/-1;margin:0;border:0;border-bottom:1px solid var(--rf-rule);border-radius:0;background:var(--rf-mist)}
 .interview-past-answers,.interview-past-sessions{border-top:1px solid var(--rf-rule)}
 .interview-past-answers>.interview-transcript,.interview-past-sessions>.interview-history{margin:0 0 16px}
+
+/* Interview review: conclusion, next practice, and optional detail are separate reading steps. */
+.interview-report{gap:20px;background:transparent;border:0;overflow:visible}
+.interview-report-lead{border-radius:var(--rf-radius)}
+.interview-report-conclusion{max-width:72ch;margin:12px 0 16px;font-size:17px;line-height:1.75}
+.interview-report-grid{gap:18px;background:transparent}
+.interview-report-grid>section{min-width:0;padding:22px;border:1px solid var(--rf-rule);border-radius:var(--rf-radius);background:var(--rf-surface)}
+.interview-report h4{margin-bottom:12px;font-size:17px}
+.interview-report li{line-height:1.7}
+.interview-report li+li{margin-top:10px}
+.interview-report-practice{padding:20px 22px;border:1px solid var(--rf-rule);border-radius:var(--rf-radius);background:var(--rf-mist)}
+.interview-report-practice ul{padding:0;list-style:none}
+.interview-report-practice li{display:grid;gap:6px}
+.interview-report-practice li strong{color:var(--rf-teal);font-size:13px}
+.interview-report-practice li a{justify-self:start;display:inline-flex;align-items:center;color:var(--rf-ink);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.interview-report-details{grid-template-columns:1fr;gap:12px;background:transparent}
+.interview-report-disclosure{min-width:0;border:1px solid var(--rf-rule);border-radius:var(--rf-radius);background:var(--rf-surface)}
+.interview-report-disclosure>summary{min-height:48px;padding:14px 20px;color:var(--rf-ink);font-weight:600;cursor:pointer}
+.interview-report-disclosure[open]>summary{border-bottom:1px solid var(--rf-rule)}
+.interview-report-disclosure>div{padding:18px 22px}
+.interview-report-disclosure>div>p{max-width:72ch;margin:0 0 14px;line-height:1.7}
+.interview-report-details li{gap:6px}
+.interview-answer-structure>summary{padding:8px 0;color:var(--rf-teal);line-height:1.6;cursor:pointer}
+.interview-report-details .interview-answer-structure>ul{padding:12px 0 0 20px;list-style:disc}
+.interview-report-details .interview-answer-structure li{display:list-item}
+.interview-turn-list{gap:18px}
+.interview-turn>header h4{max-width:76ch;line-height:1.55}
+.interview-turn-detail>summary{padding:4px 0 14px;color:var(--rf-teal);font-weight:600;cursor:pointer}
+.interview-answer,.interview-turn-review,.interview-retries,.interview-retry-form{margin-top:16px;padding:18px}
+.interview-answer p,.interview-turn-review p,.interview-retries p{max-width:74ch;line-height:1.75}
+.interview-turn-review{grid-template-columns:1fr;gap:16px}
+.interview-turn-review ul,.interview-retries ul{line-height:1.7}
+.interview-turn-review li+li,.interview-retries li+li{margin-top:8px}
+.interview-question-source{margin-top:16px}
+.interview-question-source>summary{color:var(--rf-ink-soft);font-size:13px;cursor:pointer}
+.interview-evidence-panel{min-width:0;border:1px solid var(--rf-rule);border-radius:var(--rf-radius);background:var(--rf-surface)}
+.interview-evidence-panel>summary{padding:18px 22px;color:var(--rf-ink);font-weight:600;cursor:pointer}
+.interview-evidence-content{display:grid;gap:18px;padding:0 22px 22px}
+.interview-evidence-content>p{max-width:72ch;margin:0;line-height:1.7}
+.interview-evidence-item{min-width:0;padding:18px;border:1px solid var(--rf-rule);border-radius:var(--rf-radius);background:var(--rf-canvas)}
+.interview-evidence-item>p{max-width:74ch;line-height:1.7}
+.interview-evidence-content .form-stack{display:grid;gap:16px}
+.interview-evidence-content .form-stack label{display:grid;gap:8px;line-height:1.6}
+.interview-evidence-content .form-stack p{max-width:72ch;margin:0;color:var(--rf-ink-soft);font-size:13px;line-height:1.6}
+.interview-evidence-content .form-stack button{justify-self:start}
+.interview-evidence-content details>summary{padding:10px 0;line-height:1.6;cursor:pointer}
+.interview-evidence-content details[open]>.form-stack{margin:14px 0}
+@media(max-width:700px){
+  .interview-report{gap:16px}
+  .interview-report-grid{grid-template-columns:1fr}
+  .interview-report-lead,.interview-report-grid>section,.interview-report-practice{padding:18px}
+  .interview-report-conclusion{font-size:16px}
+  .interview-report-disclosure>summary{padding:14px 16px}
+  .interview-report-disclosure>div{padding:16px}
+  .interview-evidence-panel>summary{padding:16px}
+  .interview-evidence-content{padding:0 16px 16px}
+  .interview-evidence-item{padding:16px}
+}
 @media(max-width:920px){
   .resume-workbench-columns{grid-template-columns:1fr}
   .resume-change-ledger{max-height:none;overflow:visible}
