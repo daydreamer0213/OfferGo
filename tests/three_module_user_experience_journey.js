@@ -135,6 +135,8 @@ const { PIPELINE_VERSIONS } = require('../src/core/analysis_revision');
     assert((await conclusion.innerText()).trim().length > 0);
     assert(await conclusion.evaluate(node => parseFloat(getComputedStyle(node).fontSize)
       < parseFloat(getComputedStyle(document.querySelector('#interview-report-title')).fontSize)));
+    assert(await page.locator('.interview-report').evaluate(node => parseFloat(getComputedStyle(node).rowGap) >= 16),
+      'report sections need visible space instead of a one-pixel divider');
     result.checks.push('paragraph outline produces a saved interview report without retrying the user action');
     assert.equal(await page.locator('.interview-turn-detail[open]').count(), 0);
     const structures = page.locator('details.interview-answer-structure');
