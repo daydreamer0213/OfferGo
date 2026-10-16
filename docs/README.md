@@ -13,7 +13,7 @@
 
 按以下顺序读取，不要先加载历史聊天或整个 `superpowers` 目录：
 
-1. [`../AGENTS.md`](../AGENTS.md)：长期安全、质量、浏览器和数据边界。
+1. [`../AGENTS.md`](../AGENTS.md)：长期工作规则。任务涉及用户材料、界面文案或面向用户的生成内容时，按其中要求先完整读取[用户表达与体验规范](frontend-ux-principles.md)，再拟提纲或写作。
 2. [`user-guide-maintenance.md`](user-guide-maintenance.md)：指南核对基准、实现参考和维护要求。
 3. [`superpowers/plans/2026-10-09-four-step-acceptance.md`](superpowers/plans/2026-10-09-four-step-acceptance.md)：活跃验收任务，先看顶部最新记录。`PROJECT_HANDOFF.md` 和 `NEXT_PHASE.md` 下方正文保留较早截面，不替代当前清单。
 4. 当前任务直接涉及的源码、测试和一份对应设计；核实对象后再引用历史证据。
@@ -36,7 +36,7 @@
 - [`agent-operation.md`](agent-operation.md)：Agent 不打开前端、不填写 Key，直接通过 CLI 和 stdio 协议运行项目。
 - [`llm_contracts.md`](llm_contracts.md)：画像、岗位理解、分开匹配、消息学习、简历优化和面试任务的当前模型契约。
 - [`resume_and_feedback_workflow.md`](resume_and_feedback_workflow.md)：简历版本、消息回复学习、确认经历及平台简历动作。
-- [`frontend-ux-principles.md`](frontend-ux-principles.md)：按用户当前任务取舍信息、自然展示与体验验收的依据；不是所有页面都已达标的证明。
+- [`frontend-ux-principles.md`](frontend-ux-principles.md)：用户表达与体验的持续规范，包含写作前、写作中和交付前的执行要求。
 - [`roleflow-decision-matrix.md`](roleflow-decision-matrix.md)：当前默认入口与旧二维评分机制的适用范围；普通用户先看指南第02章。`roleflow-terminology.md` 保留工程字段解释。
 - [`superpowers/reports/2026-10-09-documentation-reconciliation.md`](superpowers/reports/2026-10-09-documentation-reconciliation.md)：本次全仓文档核对范围、修正项及验证记录。
 - [`operations.md`](operations.md)：日志、错误码、恢复和排错方法。

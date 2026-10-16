@@ -18,6 +18,15 @@
 - Ponytail must not simplify away account safety, input validation, data-loss prevention, error handling, accessibility, JD coverage, matching quality, or any explicitly requested requirement.
 - Use subagents only for genuinely independent work with separately verifiable outputs.
 
+## 面向用户的内容：写前读取，交付前复核
+
+- 编写或修改用户指南、README、帮助、版本说明、界面文案，以及模型给用户看的推荐、回复、简历和面试内容时，先完整读取 [用户表达与体验规范](docs/frontend-ux-principles.md)，再拟提纲或生成内容。已有文稿的小修改也适用。
+- 开始时明确读者是谁、当前想完成什么、看完需要理解或做什么。按相关原则选择内容和层次，不按内部字段或开发验收记录组织用户材料。
+- 委派用户内容任务时，把规范路径、读者、使用场景和期望结果一并交给执行者；主代理仍需复读最终成稿。
+- 交付前分别核对事实和表达：事实与实际功能一致；表达具体、自然、连续，解释实际作用，提供必要步骤和结果。删去不帮助判断或操作的责任切割话术，保留会影响选择和操作的具体条件。
+- 按规范复读完整的受影响段落或用户流程，确认实际好懂、好用；发现问题先修改。链接、格式、关键词或测试通过不能代替内容审阅，也不能只以“相关内容有提到”作为通过标准。
+- 记录本次适用原则、发现的具体问题和修正例子；有现成任务记录时就地补充，不另建一套报告。具体执行见规范的“适用范围与执行方式”。
+
 ## Agent-operated usage
 
 - When a user hands OfferGo to an Agent to run, use the headless CLI path. Do not open the Dashboard or ask the user to configure an Agent in the model-settings page.
