@@ -1,5 +1,7 @@
 # 每日筛选与沟通工作流
 
+> **阅读范围更新（2026-10-16）：** 下文保留较早发布基线与日常流程细节，部分按钮、默认匹配方式和候选范围已变化。当前用户操作以[找岗与判断](user-guide/02-job-discovery-and-matching.md)、[沟通与进展](user-guide/03-communication-and-progress.md)为准，不能将本文全部细节视为最新源码状态。
+
 本文描述 OfferGo v1.4.1 的主使用路径。参数权威来源是 `src/core/product_policy.js`，状态规划逻辑位于 `src/core/workflow_run.js`。本版变化和验证范围见[发布说明](releases/v1.4.1.md)。
 
 ## 一轮任务

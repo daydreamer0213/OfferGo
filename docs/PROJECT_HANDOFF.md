@@ -1,5 +1,7 @@
 # OfferGo 当前项目交接
 
+> **2026-10-16 当前入口：** [用户指南与现状](user-guide/08-status-and-documents.md)说明源码 `1d8eab0` 和发布版的区别；活跃任务以[四步验收清单顶部](superpowers/plans/2026-10-09-four-step-acceptance.md)为准。下面保留 2026-10-09 发布/交接截面，其 195 项检查、候选入口和当时下一步均不代表后续版本当前状态。
+
 > 发布核对日期：2026-10-09。OfferGo v1.4.1 已正式公开，发布提交为 `19dd6b18bbb8477f4e6fc5218518d3632076cf82`。修复主题按钮与导航重叠；说明见[本版说明](releases/v1.4.1.md)，公开状态以 [GitHub Release](https://github.com/daydreamer0213/OfferGo/releases/tag/v1.4.1) 为准。自然表达修复见[本轮验收](superpowers/specs/2026-10-08-effect-acceptance/natural-expression-acceptance.md)。历史审查不代替最终发布提交门禁；旧交接见[历史文件](PROJECT_HANDOFF_2026-09-10.md)。
 
 ## 当前正式版与历史版本
