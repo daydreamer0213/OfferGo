@@ -2,19 +2,19 @@
 
 ## 用户从这里开始
 
-**[用户说明与设计指南](user-guide/README.md)** 是当前产品的统一阅读入口，2026-10-16 按源码 `1d8eab0` 核对。它说明项目整体、首次使用、找岗判断、沟通与进展、简历、面试、求职体检，以及设置和恢复；各章展开设计理由、实际处理步骤与具体例子。
+从 **[用户说明与设计指南](user-guide/README.md)** 开始，先了解项目全程，再按需要阅读找岗、沟通、简历、面试和求职体检。每章把使用步骤、设计理由与具体例子放在一起，便于边了解边使用。
 
 - 想先弄懂项目：[指南总览](user-guide/README.md)。
 - 想按顺序使用：[首次使用](user-guide/01-getting-started.md)。
-- 想区分已实现、待验收与安装版：[当前能力和文档地图](user-guide/08-status-and-documents.md)。
+- 页面与指南不同，或想查其他资料：[版本与更多资料](user-guide/08-status-and-documents.md)。
 - 正在用公开安装版：[安装版使用说明](installed-user-guide.md)。
 
-## 新会话必读
+## 开发与续接会话的阅读顺序
 
 按以下顺序读取，不要先加载历史聊天或整个 `superpowers` 目录：
 
 1. [`../AGENTS.md`](../AGENTS.md)：长期安全、质量、浏览器和数据边界。
-2. [`user-guide/08-status-and-documents.md`](user-guide/08-status-and-documents.md)：当前源码、发布版和文档适用范围。
+2. [`user-guide-maintenance.md`](user-guide-maintenance.md)：指南核对基准、实现参考和维护要求。
 3. [`superpowers/plans/2026-10-09-four-step-acceptance.md`](superpowers/plans/2026-10-09-four-step-acceptance.md)：活跃验收任务，先看顶部最新记录。`PROJECT_HANDOFF.md` 和 `NEXT_PHASE.md` 下方正文保留较早截面，不替代当前清单。
 4. 当前任务直接涉及的源码、测试和一份对应设计；核实对象后再引用历史证据。
 
