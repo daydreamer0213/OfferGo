@@ -74,6 +74,25 @@ foreach ($name in @(
   Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\$name") -Destination (Join-Path $StageDocsDir $name) -Force
 }
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\releases") -Destination (Join-Path $StageDocsDir "releases") -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\user-guide") -Destination (Join-Path $StageDocsDir "user-guide") -Recurse -Force
+# The root help template is also linked from the chapter guides under docs/.
+$InstalledGuide = (Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $ProjectRoot "docs\installed-user-guide.md")).Replace("](docs/", "](")
+foreach ($Name in @("LICENSE", "NOTICE", "SECURITY.md")) {
+  $InstalledGuide = $InstalledGuide.Replace("]($Name)", "](../$Name)")
+}
+$InstalledGuide | Set-Content -Encoding utf8 -LiteralPath (Join-Path $StageDocsDir "installed-user-guide.md")
+
+# Pin extended references to the committed guide snapshot; source archives need no Git.
+$DocsRevision = "da6cfbaf4fbeca8453e86d56306edc6abf654465"
+$Package = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $ProjectRoot "package.json") | ConvertFrom-Json
+$RepositoryUrl = [string]$Package.repository.url -replace '^git\+', '' -replace '\.git$', ''
+$OnlineLabel = [regex]::Unescape('\uff08\u5728\u7ebf\u53c2\u8003\u5feb\u7167\uff09')
+$GuidePath = Join-Path $StageDocsDir "user-guide\08-status-and-documents.md"
+$Guide = Get-Content -Raw -Encoding utf8 -LiteralPath $GuidePath
+foreach ($Name in @("superpowers/plans/2026-10-09-four-step-acceptance.md", "mock_interview_design.md", "offergo-project-map.md", "offergo-product-module-flows.md", "user-guide-maintenance.md")) {
+  $Guide = $Guide.Replace("](../$Name)", "$OnlineLabel]($RepositoryUrl/blob/$DocsRevision/docs/$Name)")
+}
+$Guide | Set-Content -Encoding utf8 -LiteralPath $GuidePath
 & $Node (Join-Path $ProjectRoot "tests\helpers\package_document_closure.js") $StageDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

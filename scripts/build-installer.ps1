@@ -153,10 +153,29 @@ foreach ($RelativePath in @(
   "docs\release_boundary.md",
   "docs\workflow_health.md",
   "docs\outcome_analytics.md",
+  "docs\user-guide",
   "docs\releases\v1.4.1.md"
 )) {
   Copy-ProjectItem -RelativePath $RelativePath
 }
+
+# The root help template is also linked from the chapter guides under docs/.
+$InstalledGuide = (Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $ProjectRoot "docs\installed-user-guide.md")).Replace("](docs/", "](")
+foreach ($Name in @("LICENSE", "NOTICE", "SECURITY.md")) {
+  $InstalledGuide = $InstalledGuide.Replace("]($Name)", "](../$Name)")
+}
+$InstalledGuide | Set-Content -Encoding utf8 -LiteralPath (Join-Path $StageDir "docs\installed-user-guide.md")
+
+# Pin extended references to the committed guide snapshot; source archives need no Git.
+$DocsRevision = "da6cfbaf4fbeca8453e86d56306edc6abf654465"
+$RepositoryUrl = [string]$Package.repository.url -replace '^git\+', '' -replace '\.git$', ''
+$OnlineLabel = [regex]::Unescape('\uff08\u5728\u7ebf\u53c2\u8003\u5feb\u7167\uff09')
+$GuidePath = Join-Path $StageDir "docs\user-guide\08-status-and-documents.md"
+$Guide = Get-Content -Raw -Encoding utf8 -LiteralPath $GuidePath
+foreach ($Name in @("superpowers/plans/2026-10-09-four-step-acceptance.md", "mock_interview_design.md", "offergo-project-map.md", "offergo-product-module-flows.md", "user-guide-maintenance.md")) {
+  $Guide = $Guide.Replace("](../$Name)", "$OnlineLabel]($RepositoryUrl/blob/$DocsRevision/docs/$Name)")
+}
+$Guide | Set-Content -Encoding utf8 -LiteralPath $GuidePath
 
 New-Item -ItemType Directory -Force -Path (Join-Path $StageDir "runtime") | Out-Null
 Copy-Item -LiteralPath $NodeRoot -Destination (Join-Path $StageDir "runtime\node") -Recurse -Force

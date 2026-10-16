@@ -3697,6 +3697,52 @@
         "candidateEvidence": [],
         "requestedSubjectKeys": []
       }
+    },
+    {
+      "id": "interview-report-missing-validation-record",
+      "method": "reviewMockInterview",
+      "expected": "回答暂未提供异常处理实例，应中性提示查日志并补充真实案例；不能断言只测过正常链路、没有做过异常处理，也不能直接让用户承认未核实缺陷。未知不等于未做过。",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "resume": {
+            "text": "独立开发任务编排原型，将目标拆解为任务，执行结果回传规划器，再决定下一步。"
+          }
+        },
+        "settings": {
+          "plannedQuestions": 1
+        },
+        "turns": [
+          {
+            "turnNumber": 1,
+            "question": "请讲一个任务结果不符合预期时，规划器如何判断并调整下一步的真实案例。",
+            "answer": "我先用已验证的连续三步说明：检查问题的输出交给实施修改，修改结果再交给验证任务，实际结果回传规划器，目标和任务状态会持久化。至于某一步失败时具体怎样调整，现有材料没有记录，我需要查当时任务日志后再补确切案例。若讨论设计思路，可以把失败结果和未完成项交给规划器再决定如何处理，但不能把它当成已发生的故障。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "interview-report-explicit-normal-only-control",
+      "method": "reviewMockInterview",
+      "expected": "本人明确只验证了正常链路且未测试异常，反馈应认可这个已确认范围并指出缺少真实异常调整案例，可以建议补充异常验证；不能为了避免过度推断把明确未做软化成只是记录不足。",
+      "input": {
+        "context": {
+          "sessionKind": "resume_general",
+          "resume": {
+            "text": "独立开发任务编排原型，将目标拆解为任务，执行结果回传规划器，再决定下一步。"
+          }
+        },
+        "settings": {
+          "plannedQuestions": 1
+        },
+        "turns": [
+          {
+            "turnNumber": 1,
+            "question": "请讲一个任务结果不符合预期时，规划器如何判断并调整下一步的真实案例。",
+            "answer": "当时我只验证了检查、修改、验证连续三步都成功的正常链路，明确没有执行中间任务失败的测试，也没有验证过规划器如何处理失败结果。因此我没有真实异常调整案例。接下来准备构造中间任务返回错误的场景，记录回传信息，再观察下一步计划是否变化。"
+          }
+        ]
+      }
     }
   ]
 }

@@ -15,6 +15,7 @@ const LONG_STRUCTURED_INITIAL_RESPONSE_TOKENS = 8192;
 const DEFAULT_MAX_ADAPTIVE_RESPONSE_TOKENS = 8192;
 const MAX_ADAPTIVE_RESPONSE_TOKENS = 16384;
 const MAX_ADAPTIVE_TIMEOUT_MS = 300000;
+const INTERVIEW_ANSWER_FACT_SCOPE = '区分“本次回答缺少材料”和“本人明确没有做过”：没有记录、暂时记不清、需要查日志，只说明当前尚未提供可核对案例，不能推断只验证过正常链路、没有异常处理或不具备某项能力，也不能让用户先承认这些未经确认的缺陷。“确认没有类似记录”仍不等于“确认当时没有发生”；结论、重练建议和提纲都应保持这个区别，查不到记录时说明暂时无法核实，只有本人或其他真实依据明确确认未发生，才可如此表述。应指出本题尚缺的具体例子或判断依据，用中性问题帮助核对；若本人明确说只验证正常链路、没有执行异常测试，则可以据此指出验证缺口并建议补测，不把明确未做软化成记录不足。历史复盘的改进建议只是练习线索，不是本人未做过或不会的事实，须以原题、真实回答及已确认资料判断。';
 const ALWAYS_LONG_STRUCTURED_TASKS = new Set([
   "analyzeResume",
   "recommendSearchPlan"
@@ -668,6 +669,7 @@ class StructuredModelAdapter {
       "故事准备稿及 missingDetails 是待核实的练习材料，不是用户已经回答，也不是独立的已确认事实；不可据稿件预设用户已实施某项行动、获得某个成果或已经给过答案。反馈、answerReview 和 answerEvidence 仍只能依据 turns 中本次实际回答；职责边界仍以简历、关联已确认资料和实际回答为准，不能靠准备稿升级。",
       "没有故事准备稿的旧会话继续原有方式：context.sessionKind 为 resume_general 时围绕简历时间线、角色与贡献、挑战取舍与结果、技能、空档或转型、简历可支持的行为故事；job_specific 结合 JD 核心职责和任职要求。已有故事时，JD 定制作为与所选工作及真实回答相关的补充。问题像真人面试官，不重复套句式或机械粘贴原话；已确认 candidateEvidence 可以补充简历没展开的真实经历。",
       "这是能力面试训练，不是 HR 信息登记。不要单独询问到岗时间、薪资期望、当前是否在职、住在哪里、能否出差或面试时间；这些交给求职沟通。可以考察离职或转型动机、空档经历，以及工作中怎样处理实际问题，但不要用能力问题包装一组日常确认。",
+      INTERVIEW_ANSWER_FACT_SCOPE,
       "progress.askedQuestions 是已问题目，不重复它们；progress.remainingThemes 提示尚未考察的主题，回答已充分时优先转到相关的新主题。岗位专项重点参考 interviewBrief.jobFocus 的 coreResponsibilities、coreRequirements、requirementMatches、roleGaps 和 roleResumeEvidence，与简历和实际回答结合，不把 questionsToVerify 中的招聘条件确认直接当作面试题。",
       "如果带有 questionRevision，按 reason 作一次修正。MOCK_INTERVIEW_QUESTION_KIND_INVALID 仅表示对话类型字段无效：参照 rejectedQuestion 保留有价值题意，以 allowedQuestionKinds 返回合法结构，不为修类型改成无关问题。前次题目因重复、HR 日常确认占主导或缺少真实职责依据被退回时，根据 avoidQuestions 改成不同的能力问题，职责缺乏依据时中性询问实际承担的部分。保留对刚回答题目的 answerReview，不要求用户重新回答，不减少 plannedQuestions。",
       "questionRevision.reason=MOCK_INTERVIEW_ANSWER_REVIEW_REQUIRED 表示漏掉了最新回答反馈：读取 turns 中该题的真实回答，补全 answerReview 并引用 requiredReviewTurnNumber；参照 rejectedQuestion 保留合适下一题或结束状态，不把缺失反馈伪装成首题，不要求用户重答。",
@@ -690,6 +692,7 @@ class StructuredModelAdapter {
       "返回 JSON：{conclusion,strengths,improvements,followUpRisks,retryRecommendations,answerStructures,evidenceCandidates}。strengths、improvements 是字符串数组，各最多3条，写明实际题号。followUpRisks、retryRecommendations 每项为 {turnNumber,reason}。answerStructures 每项为 {turnNumber,outline}，outline 为字符串数组，最多8项，每项最多500字符。题号须真实存在。不要评分或录用概率。",
       "先逐题核对原题要求、回答已证明什么和真正缺少什么，再写整轮结论。最多挑1—3个确实影响回答的改善方向；达到原题要求时允许 improvements、retryRecommendations、answerStructures 为空，不为凑建议升级题目难度。可能的深入追问可以放 followUpRisks，但不自动成为当前缺点或必做重答。例如原题问测试完整过程，前后已说明场景、执行、缺陷记录及优惠券不能重复使用的验证，就认可这个过程，不能因未给状态码、判定字段或时间窗口再说验证缺失。题目中的‘或’和例子是可选范围，回答一个相关例子即可；泛问接口问题时，慢查询案例也切题，不因题目前的简历介绍没讲参数校验而判偏题。各字段保持一致。",
       "整轮复盘须合看同一经历的前后回答：后续已经补清预期、验证或结果时，说明补充有效，不再把这处内容当成未回答的缺口，也不要求重答前题补同一信息。可以建议下次把已经说清的内容组织到一起，不能误说尚缺事实。假设题评价判断依据和可行步骤，不因为用户没实际实施就要求过去的量化结果；数字与额外职业比较不是每题必补项。",
+      INTERVIEW_ANSWER_FACT_SCOPE,
       "每条优点说明用户如何推进任务或解决问题，例如日志缩小排查范围、执行计划定位、同数据同条件对比、根据反馈修改；坦诚交代缺失数据或他人负责不单列为能力亮点。问题解决题围绕现象、判断、行动、验证结果。已明确测试环境及合理复测即可按本题认可，不另外要求生产指标、业务增长或说明没负责其他工作；直接问线上效果、独立负责或归因时才回答其相关范围。真实定性验证同样有效。",
       "协作题评价如何核对需求、通过用例确认、实际调整与结果。问如何确认一致，不意味着曾发生分歧；发现程序错误也不证明双方理解不同。对未知细节中性询问实际错误表现、预期规则、定位和修正，不预设冲突、前端改动或其他事件。",
       "answerStructures 是解决相应题目真实缺口的重答提纲，帮助用户回忆和组织自己的答案，每题建议3—4项，聚焦主要缺口。每项围绕一个中性问题，可以括注原答已经明确的动作作为素材；未知细节保留问句，不替用户填出过去的叙述。原答已说明的测试条件和结果直接作为素材，不另加步骤重问范围声明。普通接口案例按现象、定位、修复、实际验证结果；协作案例问实际核对与解决过程。分工核对和未做事项属于内部资料，除原题直接要求外不成为提纲步骤或单独加分项。",
@@ -714,6 +717,7 @@ class StructuredModelAdapter {
       "对照原缺口、新答案的实际证据和剩余问题说明是否改善；更长、术语更多但仍离题或未解决原缺口时 improved=false。更清楚地组织已有真实证据也可以改善，不能要求用户捏造数字或把假设经历写成事实。不得编造事实，不得输出评分或录用概率。只输出 JSON，不输出 Markdown。",
       "先独立核对原题要求，不能照抄原反馈中不成立的批评。‘或’和举例不是全部必答项；泛问接口问题时，接口慢查询的定位和验证是相关案例，明确问参数校验时则不能用慢查询代替。对照两版回答已说明的事实判断进步与真实剩余缺口。",
       "不能把用户诚实说明没有记录/记不清细节本身当成逃避或建议禁止这种表达。若关键做法仍没说清，应指出需要回忆的具体点；无法确认的历史事实允许保留未知。可以建议解释通用思路，但必须与当时确实做过的经历区分。",
+      INTERVIEW_ANSWER_FACT_SCOPE,
       "改善看本题关切是否更清楚：个人动作、判断、方法和结果更具体可以改善；单独补‘其他部分由同事负责’不是进步，不要求无关责任声明。只有本题确实问独立负责、协作或成果依据时才评价相应范围。"
     ].join("\n");
     return this.chatJson(prompt, input, { kind: "reviewMockInterviewRetry" });

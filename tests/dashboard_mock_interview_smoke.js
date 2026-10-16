@@ -127,6 +127,24 @@ const logger = {
     assert.match(page.body, /name="turnNumber" value="1"/);
     assert.match(page.body, /data-interview-draft="retry"/);
 
+    const originalReport = structuredClone(selectedSession.report);
+    const correctedSession = { ...selectedSession,
+      report: { ...originalReport, improvements: ['当前回答缺少可核对的异常案例，请先核对记录。'] },
+      reportCorrection: { note: '根据原答校正 <script>invalid</script>，未记录不能推断未做过。', originalReport }
+    };
+    const correctedPage = renderMockInterviewPage({ dashboard: {
+      profile: { id: owner.profileId }, plan: { id: owner.planId, name: '页面测试方案' },
+      resumes: [], jobs: [], sessions: [correctedSession], selectedSession: correctedSession
+    }, modelReady: true });
+    const originalDisclosure = correctedPage.match(/<details[^>]*data-interview-original-report[^>]*>([\s\S]*?)<\/details>/);
+    assert(originalDisclosure, 'a corrected report must keep the original available in a disclosure');
+    assert(!originalDisclosure[0].match(/^<details[^>]*\bopen\b/), 'the original must not replace the corrected main guidance');
+    assert(originalDisclosure[1].includes(originalReport.improvements[0]), 'original guidance must remain available');
+    assert(correctedPage.includes(correctedSession.report.improvements[0]), 'the main report must use the correction');
+    assert(correctedPage.includes('&lt;script&gt;invalid&lt;/script&gt;'), 'correction notes must be escaped');
+    assert(!correctedPage.includes('<script>invalid</script>'));
+    assert.deepEqual(selectedSession.report, originalReport, 'rendering must not rewrite the historical report');
+
     const ongoingSession = {
       ...selectedSession,
       status: "active",

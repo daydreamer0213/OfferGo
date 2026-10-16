@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { nowIso, parseJson, immediateTransaction, storageError } = require("./storage_shared");
+const { validateInterviewReport } = require("../core/mock_interview");
 
 function sha256(text) {
   return crypto.createHash("sha256").update(String(text ?? "")).digest("hex");
@@ -238,6 +239,23 @@ function turnRow(row, retries = []) {
   };
 }
 
+function currentReportCorrection(db, row, turns) {
+  if (!row.report_json) return null;
+  const events = db.prepare(`SELECT payload_json FROM events
+    WHERE event_type = 'mock_interview_report_corrected' AND json_valid(payload_json)
+      AND json_extract(payload_json, '$.profileId') = ? AND json_extract(payload_json, '$.planId') = ?
+      AND json_extract(payload_json, '$.sessionId') = ? AND json_extract(payload_json, '$.originalReportHash') = ?
+    ORDER BY id DESC`).all(Number(row.profile_id), Number(row.plan_id), Number(row.id), sha256(row.report_json));
+  for (const event of events) {
+    const payload = parseJson(event.payload_json, {});
+    try {
+      return { note: requiredText(payload.note, "校正说明", 4_000),
+        report: validateInterviewReport(payload.report, { turns }) };
+    } catch {}
+  }
+  return null;
+}
+
 function sessionRow(db, row) {
   if (!row) return null;
   const rawTurns = db.prepare("SELECT * FROM mock_interview_turns WHERE session_id = ? ORDER BY turn_number, id")
@@ -251,6 +269,9 @@ function sessionRow(db, row) {
     items.push(retryRow(retry));
     retriesByTurnId.set(Number(retry.turn_id), items);
   }
+  const turns = rawTurns.map((turn) => turnRow(turn, retriesByTurnId.get(Number(turn.id)) || []));
+  const originalReport = parseJson(row.report_json, null);
+  const correction = currentReportCorrection(db, row, turns);
   return {
     id: Number(row.id),
     profileId: Number(row.profile_id),
@@ -262,12 +283,13 @@ function sessionRow(db, row) {
     context: parseJson(row.context_json, {}),
     settings: parseJson(row.settings_json, {}),
     status: row.status,
-    report: parseJson(row.report_json, null),
+    report: correction?.report || originalReport,
+    ...(correction ? { reportCorrection: { note: correction.note, originalReport } } : {}),
     modelIdentity: parseJson(row.model_identity_json, {}),
     completedAt: row.completed_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    turns: rawTurns.map((turn) => turnRow(turn, retriesByTurnId.get(Number(turn.id)) || []))
+    turns
   };
 }
 
@@ -477,6 +499,28 @@ function completeMockInterviewSession(db, input = {}) {
   });
 }
 
+function correctMockInterviewReport(db, input = {}) {
+  return immediateTransaction(db, () => {
+    const row = ownedSessionRow(db, input.profileId, input.planId, input.sessionId);
+    if (!row) throw storageError("MOCK_INTERVIEW_NOT_FOUND", "面试会话不存在");
+    if (row.status !== "completed" || !row.report_json) {
+      throw storageError("MOCK_INTERVIEW_REPORT_NOT_COMPLETE", "只能校正已完成且已有报告的面试");
+    }
+    const current = sessionRow(db, row);
+    const report = validateInterviewReport(input.report, { turns: current.turns });
+    const note = requiredText(input.note, "校正说明", 4_000);
+    if (JSON.stringify(report) === JSON.stringify(current.report)) return current;
+    if (input.expectedReportHash !== sha256(JSON.stringify(current.report))) {
+      throw storageError("MOCK_INTERVIEW_REPORT_CORRECTION_CONFLICT", "复盘已更新，请重新读取后再校正");
+    }
+    const payload = { profileId: Number(row.profile_id), planId: Number(row.plan_id), sessionId: Number(row.id),
+      originalReportHash: sha256(row.report_json), report, note };
+    db.prepare("INSERT INTO events(event_type, payload_json, created_at) VALUES ('mock_interview_report_corrected', ?, ?)")
+      .run(JSON.stringify(payload), nowIso());
+    return sessionRow(db, row);
+  });
+}
+
 function recordMockInterviewRetry(db, input = {}) {
   const profileId = positiveId(input.profileId, "profileId");
   const planId = positiveId(input.planId, "planId");
@@ -523,5 +567,6 @@ module.exports = {
   appendMockInterviewQuestion,
   answerMockInterviewTurn,
   completeMockInterviewSession,
+  correctMockInterviewReport,
   recordMockInterviewRetry
 };

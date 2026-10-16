@@ -41,7 +41,7 @@ function renderResumeOptimizationPage({ dashboard = {}, modelReady = true } = {}
       </section>
       ${selected ? `<details class="resume-new-draft"><summary>生成另一个版本</summary>${renderCreatePanel(dashboard, modelReady)}</details>` : renderCreatePanel(dashboard, modelReady)}
       ${selected ? renderSelectedDraft(dashboard, selected) : renderEmptyState()}
-    </main><p class="footer-note">本页只读写 OfferGo 本地数据；不会访问 BOSS、不会投递、不会填写或发送任何外部内容。</p>`
+    </main><p class="footer-note">简历草稿保存在本机；使用云模型生成时，会将本次整理所需的材料发送给你配置的模型服务。</p>`
   });
 }
 

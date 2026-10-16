@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const crypto = require("node:crypto");
 const storage = require("../src/core/storage");
+const { correctMockInterviewReport } = require("../src/storage/mock_interview_store");
 
 function profile(name) {
   return {
@@ -247,6 +248,69 @@ try {
   assert.strictEqual(storage.completeMockInterviewSession(db, {
     profileId: owner.profileId, planId: owner.planId, sessionId: session.id, report
   }).id, session.id);
+  assert.strictEqual(typeof correctMockInterviewReport, "function", "completed reports need an explicit correction path");
+  const originalReportJson = db.prepare("SELECT report_json FROM mock_interview_sessions WHERE id = ?").get(session.id).report_json;
+  const reportHash = value => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const correctedReport = { ...report, improvements: ["核对记录后补充可验证的案例"] };
+  const correctionInput = {
+    profileId: owner.profileId, planId: owner.planId, sessionId: session.id,
+    expectedReportHash: reportHash(report), report: correctedReport,
+    note: "原报告超出了本轮回答能证明的范围，现保留原文并校正该项建议。"
+  };
+  for (const scope of [
+    { profileId: other.profileId, planId: other.planId },
+    { profileId: owner.profileId, planId: secondOwnerPlanId }
+  ]) {
+    assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, ...scope }),
+      error => error.code === "MOCK_INTERVIEW_NOT_FOUND");
+  }
+  assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, note: " " }), /校正说明/);
+  assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, report: { conclusion: "不完整" } }), /格式/);
+  assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, expectedReportHash: "0".repeat(64) }),
+    error => error.code === "MOCK_INTERVIEW_REPORT_CORRECTION_CONFLICT");
+  const correctionCount = () => db.prepare("SELECT count(*) AS n FROM events WHERE event_type = 'mock_interview_report_corrected'").get().n;
+  const countBeforeCorrection = correctionCount();
+  const corrected = correctMockInterviewReport(db, correctionInput);
+  assert.deepStrictEqual(corrected.report, correctedReport);
+  assert.deepStrictEqual(corrected.reportCorrection, { note: correctionInput.note, originalReport: report });
+  assert.strictEqual(correctionCount(), countBeforeCorrection + 1);
+  assert.strictEqual(db.prepare("SELECT report_json FROM mock_interview_sessions WHERE id = ?").get(session.id).report_json,
+    originalReportJson, "correction must never overwrite the original report JSON");
+  assert.deepStrictEqual(storage.listMockInterviewSessions(db, {
+    profileId: owner.profileId, planId: owner.planId
+  }).find(item => item.id === session.id).report, correctedReport);
+  assert.deepStrictEqual(correctMockInterviewReport(db, correctionInput).report, correctedReport);
+  assert.strictEqual(correctionCount(), countBeforeCorrection + 1, "replaying a saved correction must not append an event");
+  const secondReport = { ...correctedReport, improvements: ["补充案例时注明来源和验证范围"] };
+  assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, report: secondReport }),
+    error => error.code === "MOCK_INTERVIEW_REPORT_CORRECTION_CONFLICT");
+  const secondCorrection = correctMockInterviewReport(db, {
+    ...correctionInput, expectedReportHash: reportHash(correctedReport), report: secondReport,
+    note: "补充明确的来源核对步骤，保留第一版校正事件。"
+  });
+  assert.deepStrictEqual(secondCorrection.report, secondReport);
+  assert.deepStrictEqual(secondCorrection.reportCorrection.originalReport, report);
+  const correctionEvent = JSON.parse(db.prepare("SELECT payload_json FROM events WHERE event_type = 'mock_interview_report_corrected' ORDER BY id DESC LIMIT 1").get().payload_json);
+  assert.strictEqual(correctionEvent.originalReportHash,
+    crypto.createHash("sha256").update(originalReportJson).digest("hex"));
+  for (const invalid of [
+    { ...correctionEvent, profileId: other.profileId },
+    { ...correctionEvent, planId: secondOwnerPlanId },
+    { ...correctionEvent, sessionId: session.id + 1000 },
+    { ...correctionEvent, originalReportHash: "0".repeat(64) },
+    { ...correctionEvent, report: { conclusion: "不完整事件" } }
+  ]) {
+    db.prepare("INSERT INTO events(event_type, payload_json, created_at) VALUES ('mock_interview_report_corrected', ?, ?)")
+      .run(JSON.stringify(invalid), now);
+  }
+  const afterInvalidEvents = storage.getMockInterviewSession(db, {
+    profileId: owner.profileId, planId: owner.planId, sessionId: session.id
+  });
+  assert.deepStrictEqual(afterInvalidEvents.report, secondReport, "invalid or unrelated events must not replace the effective report");
+  assert.deepStrictEqual(storage.listMockInterviewSessions(db, {
+    profileId: owner.profileId, planId: owner.planId
+  }).find(item => item.id === session.id), afterInvalidEvents);
+  assert.strictEqual(db.prepare("SELECT report_json FROM mock_interview_sessions WHERE id = ?").get(session.id).report_json, originalReportJson);
   assert.throws(() => storage.appendMockInterviewQuestion(db, {
     profileId: owner.profileId, planId: owner.planId, sessionId: session.id,
     question: { text: "迟到问题", focus: "invalid", resumeEvidenceIds: ["R1"], basedOnTurnNumber: 2, answerEvidence: "接口" }
@@ -293,6 +357,7 @@ try {
   assert.strictEqual(general.sessionKind, "resume_general");
   assert.strictEqual(general.jobId, null);
   assert.deepStrictEqual(general.turns[0].resumeEvidenceIds, ["R1"]);
+  assert.throws(() => correctMockInterviewReport(db, { ...correctionInput, sessionId: general.id }), /完成|结束/);
 
   storage.createMockInterviewSession(db, {
     profileId: owner.profileId,

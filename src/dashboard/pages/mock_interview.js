@@ -197,15 +197,22 @@ function renderCurrentQuestion(dashboard, session) {
 
 function renderReport(session) {
   const report = session.report || {};
+  const correction = session.reportCorrection;
   return `<section class="interview-report" aria-labelledby="interview-report-title">
     <div class="interview-report-lead"><p class="section-label">这次整体怎么样</p><h3 id="interview-report-title">本轮训练复盘</h3><p class="interview-report-conclusion">${escapeHtml(report.conclusion || "本轮复盘已生成")}</p><p>以下建议用于练习，不代表录用结果。</p></div>
+    ${correction ? `<p class="notice" data-interview-report-correction>已根据原回答校正建议：${escapeHtml(correction.note)}</p>` : ''}
     <div class="interview-report-grid"><section><h4>这次答得好的地方</h4>${renderTextList(report.strengths)}</section><section><h4>下次可以改进</h4>${renderTextList(report.improvements)}</section></div>
     <section class="interview-report-practice" aria-labelledby="interview-practice-title"><h4 id="interview-practice-title">建议先练这些题</h4><p>选一道题，按提示再讲一次。原回答会保留，方便比较。</p>${report.retryRecommendations?.length ? renderTurnReasons(report.retryRecommendations, true) : '<p class="muted">这轮没有单独建议重练的题目，可以回看下面的逐题反馈。</p>'}</section>
     <div class="interview-report-details">
       <details class="interview-report-disclosure"><summary>还可能被追问什么</summary><div>${renderTurnReasons(report.followUpRisks)}</div></details>
       <details class="interview-report-disclosure"><summary>项目经历怎样讲清楚</summary><div><p>先说项目解决什么问题，再说你负责什么、怎么做，以及实际结果。技术名词放在具体做法里解释。</p>${renderStructures(report.answerStructures)}</div></details>
+      ${correction ? renderOriginalReport(correction.originalReport) : ''}
     </div>
   </section>`;
+}
+
+function renderOriginalReport(report) {
+  return `<details class="interview-report-disclosure" data-interview-original-report><summary>查看校正前的复盘</summary><div><h4>原整体评价</h4><p>${escapeHtml(report.conclusion || '')}</p><h4>原优点</h4>${renderTextList(report.strengths)}<h4>原改进建议</h4>${renderTextList(report.improvements)}<h4>原重练建议</h4>${renderTurnReasons(report.retryRecommendations)}<h4>原追问方向</h4>${renderTurnReasons(report.followUpRisks)}<h4>原回答提纲</h4>${renderStructures(report.answerStructures)}</div></details>`;
 }
 
 function renderTranscript(dashboard, session) {
